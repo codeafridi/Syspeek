@@ -56,7 +56,7 @@ the HUD does not read window titles.
 | Software (SBOM) | Homebrew Cellar + `/Applications/*\.app` bundles |
 | Runtime (SSI) | procargs2 env + exe path (Datadog languagedetection rules) |
 | File integrity (FIM) | portable watcher (FSEvents/kqueue via Qt); `/etc/*` + brew etc defaults |
-| TCP HEALTH, CGROUP, PSI, NAMESPACES | gated - "not supported on this OS "(kernel facilities absent) |
+| TCP HEALTH, CGROUP, PSI, NAMESPACES | gated. TCP per-protocol stats are kernel-redacted for unprivileged callers on macOS (verified: `netstat -s` as user returns zeroed counters while sudo shows real ones); cgroups/PSI/namespaces are Linux-only kernel facilities |
 | k8s/Docker/TLS/OTLP/DogStatsD/SLO/Traces/Cost/Incidents/Watchdog | same as Linux |
 | Profiles (per-thread CPU) | Linux-only (cross-process mach task ports restricted) |
 

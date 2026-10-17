@@ -227,7 +227,9 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.fim = true;
     caps.sbom = true;
     struct tcpstat probe {};
-    caps.tcpCounters = readTcpSysctl(probe);
+    caps.tcpCounters = readTcpSysctl(probe)
+        && (probe.tcps_rcvtotal != 0 || probe.tcps_sndtotal != 0
+            || probe.tcps_connattempt != 0);
     return caps;
 }
 
@@ -361,59 +363,14 @@ bool MacBackend::readTcpCounters(TcpCounters &out) {
                    static_cast<quint64>(stats.tcps_sc_retransmitted));
     out.ext.insert(QStringLiteral("ListenDrops"),
                    static_cast<quint64>(stats.tcps_listendrop));
-    appendTcpDiagnostics(out);
-    return true;
-}
-
-namespace {
-// Temporary diagnostics (removed after the runner readout). Returns the
-// raw sysctl buffer's size and the first words as u32 for evidence.
-bool diagTcpSysctl(const char *name, QList<unsigned> &words,
-                   size_t &size) {
-    int mib[4] = {CTL_NET, PF_INET, IPPROTO_TCP, TCPCTL_STATS};
-    size = 0;
-    if (name != nullptr) {
-        if (sysctlbyname(name, nullptr, &size, nullptr, 0) != 0) {
-            return false;
-        }
-    } else if (sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0) {
+    if (tcpCountersRedacted(out)) {
+        // Verified on macos-14 CI (kernel 23.6.0): unprivileged callers
+        // get a correctly sized struct of zeros while sudo netstat -s
+        // shows real counters - macOS redacts per-protocol TCP stats.
+        // No data unprivileged; the TCP HEALTH card stays gated.
         return false;
     }
-    std::vector<char> buf(size);
-    if (name != nullptr) {
-        if (sysctlbyname(name, buf.data(), &size, nullptr, 0) != 0) {
-            return false;
-        }
-    } else if (sysctl(mib, 4, buf.data(), &size, nullptr, 0) != 0) {
-        return false;
-    }
-    words.clear();
-    const auto *u32 = reinterpret_cast<const unsigned *>(buf.data());
-    for (size_t i = 0; i < size / sizeof(unsigned) && i < 24; ++i) {
-        words.append(u32[i]);
-    }
     return true;
-}
-} // namespace
-
-void MacBackend::appendTcpDiagnostics(TcpCounters &out) const {
-    const char *names[] = {nullptr, "net.inet.tcp.stats"};
-    for (const char *name : names) {
-        QList<unsigned> words;
-        size_t size = 0;
-        if (!diagTcpSysctl(name, words, size)) {
-            continue;
-        }
-        const QString prefix = name != nullptr
-                                   ? QStringLiteral("DiagName")
-                                   : QStringLiteral("DiagMib");
-        out.tcp.insert(prefix + QStringLiteral("Size"),
-                       static_cast<quint64>(size));
-        for (int i = 0; i < words.size(); ++i) {
-            out.tcp.insert(QStringLiteral("%1W%2").arg(prefix).arg(i),
-                           static_cast<quint64>(words.at(i)));
-        }
-    }
 }
 
 bool MacBackend::hostSecurityPosture(QList<SecurityFinding> &out) {

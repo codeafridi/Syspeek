@@ -413,6 +413,19 @@ int main(int argc, char *argv[]) {
         check(near(health.synRetransPerSec, 2.0), "tcp: syn retrans/s");
         check(near(health.listenDropsPerSec, 1.0), "tcp: listen drops/s");
         check(health.currEstab == 42, "tcp: current established");
+
+        TcpCounters redacted;
+        redacted.tcp.insert(QStringLiteral("InSegs"), 0);
+        redacted.tcp.insert(QStringLiteral("OutSegs"), 0);
+        redacted.ext.insert(QStringLiteral("TCPTimeouts"), 0);
+        check(tcpCountersRedacted(redacted),
+              "tcp: all-zero counters (kernel-redacted read) detected");
+        TcpCounters live = redacted;
+        live.tcp[QStringLiteral("OutSegs")] = 42;
+        check(!tcpCountersRedacted(live),
+              "tcp: nonzero counters count as usable");
+        check(tcpCountersRedacted(TcpCounters{}),
+              "tcp: empty counters treated as unavailable");
         check(tcpHealthSummaryText(health).contains(QStringLiteral("retrans")),
               "tcp: summary mentions retrans");
         check(tcpHealthDetailText(health).contains(QStringLiteral("syn-retr")),

@@ -41,5 +41,4 @@ public:
 
 private:
     bool readTcpSysctl(struct tcpstat &stats) const;
-    void appendTcpDiagnostics(TcpCounters &out) const;
 };

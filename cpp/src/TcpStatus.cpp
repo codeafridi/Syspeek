@@ -53,6 +53,25 @@ TcpCounters parseTcpCounters(const QByteArray &snmp,
     return counters;
 }
 
+bool tcpCountersRedacted(const TcpCounters &counters) {
+    if (counters.tcp.isEmpty() && counters.ext.isEmpty()) {
+        return true;
+    }
+    for (auto it = counters.tcp.constBegin(); it != counters.tcp.constEnd();
+         ++it) {
+        if (it.value() != 0) {
+            return false;
+        }
+    }
+    for (auto it = counters.ext.constBegin(); it != counters.ext.constEnd();
+         ++it) {
+        if (it.value() != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 TcpHealth computeTcpHealth(const TcpCounters &previous,
                            const TcpCounters &current, double intervalMs) {
     TcpHealth health;
