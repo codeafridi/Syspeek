@@ -38,7 +38,7 @@ if [ "${SYSPEEK_SKIP_DEPLOY:-0}" != "1" ]; then
     "$MDQT" "$APP" -always-overwrite
 fi
 
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/syspeek-dmg.XXXXXX")"
+STAGE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/syspeek-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/Syspeek.app"
 ln -s /Applications "$STAGE/Applications"
@@ -47,6 +47,32 @@ OUT_DIR="${OUT_DIR%/}"
 mkdir -p "$OUT_DIR"
 DMG="$OUT_DIR/Syspeek-${VERSION}-macos.dmg"
 rm -f "$DMG" "${DMG}.sha256"
-hdiutil create -volname Syspeek -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+
+# Two-phase create + retry: hdiutil on CI runners can transiently fail
+# with "Resource busy" while Spotlight (mds) scans the staging volume.
+RW_DMG="$(mktemp "${TMPDIR:-/tmp}/syspeek-rw.XXXXXX.dmg")"
+trap 'rm -rf "$STAGE" "$RW_DMG"' EXIT
+attempt=0
+while :; do
+    attempt=$((attempt + 1))
+    if hdiutil create -volname Syspeek -srcfolder "$STAGE" -ov \
+        -format UDRW "$RW_DMG"; then
+        break
+    fi
+    [ "$attempt" -lt 3 ] || { echo "hdiutil create failed" >&2; exit 1; }
+    echo "hdiutil create busy, retry $attempt/3..." >&2
+    sleep 5
+done
+attempt=0
+while :; do
+    attempt=$((attempt + 1))
+    if hdiutil convert "$RW_DMG" -format UDZO -o "$DMG"; then
+        break
+    fi
+    [ "$attempt" -lt 3 ] || { echo "hdiutil convert failed" >&2; exit 1; }
+    echo "hdiutil convert busy, retry $attempt/3..." >&2
+    sleep 5
+done
+rm -f "$RW_DMG"
 shasum -a 256 "$DMG" > "${DMG}.sha256"
 echo "built: $DMG"
