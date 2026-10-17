@@ -23,6 +23,7 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
     , m_cpuSampler(CpuSource::fromBackend(*m_backend))
     , m_hostSampler(HostSource::fromBackend(*m_backend))
     , m_diskSampler(DiskSource::fromBackend(*m_backend))
+    , m_tcpSampler(TcpSource::fromBackend(*m_backend))
     , m_groupCache(5000, *m_backend)
     , m_health(config.health) {
     m_intervalMs = config.sampleIntervalMs;
@@ -344,6 +345,18 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     const TcpHealth tcp = m_tcpSampler.sample();
     snap.tcpHealth = tcp;
     snap.tcpHealthAvailable = tcp.available;
+#if defined(Q_OS_MACOS)
+    if (tcp.available) {
+        int established = 0;
+        for (const linuxproc::SocketInfo &socket : sockets) {
+            if (socket.proto.startsWith(QStringLiteral("tcp"))
+                && socket.state == QStringLiteral("ESTABLISHED")) {
+                ++established;
+            }
+        }
+        snap.tcpHealth.currEstab = established;
+    }
+#endif
 
     return snap;
 }

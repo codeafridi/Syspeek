@@ -24,11 +24,8 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build -j3
           QT_QPA_PLATFORM=offscreen ctest --test-dir cpp/build --output-on-failure
-          ./cpp/build/syspeek.app/Contents/MacOS/syspeek --dump | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-assert d['processCount'] > 0 and d['host']['cores'] > 0
-print('mac dump ok:', d['processCount'], 'procs')"
+          ./cpp/build/syspeek.app/Contents/MacOS/syspeek --dump \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; print("mac dump ok:", d["processCount"], "procs")'
           SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
 
       - name: Upload macos artifacts

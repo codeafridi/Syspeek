@@ -17,6 +17,7 @@ public:
     bool readDiskCounters(QList<DiskCounters> &out) override;
     QList<linuxproc::SocketInfo> readNetSockets() override;
     bool hostSecurityPosture(QList<SecurityFinding> &out) override;
+    bool readTcpCounters(TcpCounters &out) override;
 
     bool exists(int pid) override;
     QString comm(int pid) override;
@@ -37,4 +38,7 @@ public:
     QList<QString> fdTargets(int pid) override;
     QByteArray processEnv(int pid) override;
     QString processCmdline(int pid) override;
+
+private:
+    bool readTcpSysctl(struct tcpstat &stats) const;
 };

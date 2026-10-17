@@ -85,11 +85,20 @@ struct TlsConfig {
 
 struct FimConfig {
     bool enabled = true;
+#if defined(Q_OS_MACOS)
+    QStringList paths = {
+        QStringLiteral("/etc/passwd"), QStringLiteral("/etc/group"),
+        QStringLiteral("/etc/hosts"),  QStringLiteral("/etc/resolv.conf"),
+        QStringLiteral("/etc/cron.d"), QStringLiteral("/etc/pam.d"),
+        QStringLiteral("/etc/ssh"),    QStringLiteral("/Library/LaunchDaemons"),
+        QStringLiteral("/usr/local/etc"), QStringLiteral("/opt/homebrew/etc")};
+#else
     QStringList paths = {
         QStringLiteral("/etc/passwd"), QStringLiteral("/etc/group"),
         QStringLiteral("/etc/hosts"),  QStringLiteral("/etc/hostname"),
         QStringLiteral("/etc/resolv.conf"), QStringLiteral("/etc/cron.d"),
         QStringLiteral("/etc/pam.d"),  QStringLiteral("/etc/ssh")};
+#endif
     int intervalMs = 30000;
     QString algorithm = QStringLiteral("sha256");
     int maxFileSizeKb = 4096;

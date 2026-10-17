@@ -56,6 +56,16 @@ jobs:
           print("dump ok:", d["platform"], h["cores"], "cores",
                 int(h["memTotalKb"] // 1024), "MiB", d["processCount"], "procs",
                 "(ps ≈", ps_count, ")")
+          tcp = d.get("tcp", {})
+          if tcp.get("available"):
+              for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
+                  v = tcp.get(key)
+                  assert isinstance(v, int) and v >= 0, (key, v)
+              print("tcp ok: in %d out %d retrans %d timeouts %d"
+                    % (tcp["inSegs"], tcp["outSegs"], tcp["retransSegs"],
+                       tcp["timeouts"]))
+          else:
+              print("tcp sysctl unavailable (kernel denies) - stays gated")
           PY
         env:
           QT_QPA_PLATFORM: offscreen

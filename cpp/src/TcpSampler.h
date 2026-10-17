@@ -6,11 +6,15 @@
 
 #include <functional>
 
+class SystemBackend;
+
 struct TcpSource {
     std::function<bool(QByteArray &)> snmp;
     std::function<bool(QByteArray &)> netstat;
+    std::function<bool(TcpCounters &)> counters;
 
     static TcpSource system();
+    static TcpSource fromBackend(SystemBackend &backend);
 };
 
 class TcpSampler {

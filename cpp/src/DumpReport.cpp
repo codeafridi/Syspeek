@@ -197,5 +197,25 @@ QString dumpReportJson(int maxProcs) {
     root.insert(QStringLiteral("processCount"), pids.size());
     root.insert(QStringLiteral("processes"), processes);
 
+    QJsonObject tcp;
+    TcpCounters tcpCounters;
+    const bool tcpAvailable = backend.readTcpCounters(tcpCounters);
+    tcp.insert(QStringLiteral("available"), tcpAvailable);
+    if (tcpAvailable) {
+        tcp.insert(QStringLiteral("inSegs"),
+                   static_cast<qint64>(tcpCounters.tcp.value(
+                       QStringLiteral("InSegs"))));
+        tcp.insert(QStringLiteral("outSegs"),
+                   static_cast<qint64>(tcpCounters.tcp.value(
+                       QStringLiteral("OutSegs"))));
+        tcp.insert(QStringLiteral("retransSegs"),
+                   static_cast<qint64>(tcpCounters.tcp.value(
+                       QStringLiteral("RetransSegs"))));
+        tcp.insert(QStringLiteral("timeouts"),
+                   static_cast<qint64>(tcpCounters.ext.value(
+                       QStringLiteral("TCPTimeouts"))));
+    }
+    root.insert(QStringLiteral("tcp"), tcp);
+
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
 }

@@ -24,6 +24,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <netinet/tcp_var.h>
 #include <signal.h>
 #include <sys/mount.h>
 #include <sys/param.h>
@@ -225,6 +226,8 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.journal = true;
     caps.fim = true;
     caps.sbom = true;
+    struct tcpstat probe {};
+    caps.tcpCounters = readTcpSysctl(probe);
     return caps;
 }
 
@@ -292,6 +295,72 @@ bool MacBackend::hostInterfaces(QList<linuxproc::InterfaceStats> &out) {
         return false;
     }
     out.append(ifaces);
+    return true;
+}
+
+bool MacBackend::readTcpSysctl(struct tcpstat &stats) const {
+    // netinet/tcp_var.h (SDK, quoted exactly):
+    //   #define TCPCTL_STATS 4  /* statistics (read-only) */
+    //   struct tcpstat { ... u_int32_t tcps_rcvtotal; /* total packets
+    //     received */ ... u_int32_t tcps_sndtotal; /* total packets sent
+    //     */ ... u_int32_t tcps_sndrexmitpack; /* data packets
+    //     retransmitted */ ... u_int32_t tcps_rexmttimeo; /* retransmit
+    //     timeouts */ ... u_int32_t tcps_listendrop; /* listen queue
+    //     overflows */ ... u_int32_t tcps_sc_retransmitted; /*
+    //     syncache entry was retransmitted */ ... }
+    // MIB: CTL_NET / PF_INET / IPPROTO_TCP / TCPCTL_STATS (the same
+    // read "/proc/net/snmp+netstat" model as netstat -s, Darwin side).
+    int mib[4] = {CTL_NET, PF_INET, IPPROTO_TCP, TCPCTL_STATS};
+    size_t size = 0;
+    if (sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0 || size == 0) {
+        return false;
+    }
+    std::vector<char> buf(size);
+    if (sysctl(mib, 4, buf.data(), &size, nullptr, 0) != 0) {
+        return false;
+    }
+    std::memset(&stats, 0, sizeof(stats));
+    const size_t want = size < sizeof(stats) ? size : sizeof(stats);
+    std::memcpy(&stats, buf.data(), want);
+    return true;
+}
+
+bool MacBackend::readTcpCounters(TcpCounters &out) {
+    // Key mapping reuses the pure computeTcpHealth() vocabulary
+    // (/proc/net/snmp + /proc/net/netstat names):
+    //   InSegs        <- tcps_rcvtotal          /* total packets received */
+    //   OutSegs       <- tcps_sndtotal          /* total packets sent */
+    //   RetransSegs   <- tcps_sndrexmitpack     /* data packets retransmitted */
+    //   InErrs        <- rcvbadsum + rcvbadoff + rcvshort
+    //                    (checksum/offset/truncation errors; no pure
+    //                    RST-sent counter exists, so OutRsts omitted
+    //                    rather than approximated with sndctrl=SYN|FIN|RST)
+    //   CurrEstab     <- counted from the same-tick socket snapshot
+    //                    (SamplerWorker; tcpstat carries no gauge)
+    //   TCPTimeouts   <- tcps_rexmttimeo        /* retransmit timeouts */
+    //   TCPSynRetrans <- tcps_sc_retransmitted  /* syncache entry was retransmitted */
+    //   ListenDrops   <- tcps_listendrop        /* listen queue overflows */
+    struct tcpstat stats {};
+    if (!readTcpSysctl(stats)) {
+        return false;
+    }
+    out = TcpCounters{};
+    out.tcp.insert(QStringLiteral("InSegs"),
+                   static_cast<quint64>(stats.tcps_rcvtotal));
+    out.tcp.insert(QStringLiteral("OutSegs"),
+                   static_cast<quint64>(stats.tcps_sndtotal));
+    out.tcp.insert(QStringLiteral("RetransSegs"),
+                   static_cast<quint64>(stats.tcps_sndrexmitpack));
+    out.tcp.insert(
+        QStringLiteral("InErrs"),
+        static_cast<quint64>(stats.tcps_rcvbadsum + stats.tcps_rcvbadoff
+                             + stats.tcps_rcvshort));
+    out.ext.insert(QStringLiteral("TCPTimeouts"),
+                   static_cast<quint64>(stats.tcps_rexmttimeo));
+    out.ext.insert(QStringLiteral("TCPSynRetrans"),
+                   static_cast<quint64>(stats.tcps_sc_retransmitted));
+    out.ext.insert(QStringLiteral("ListenDrops"),
+                   static_cast<quint64>(stats.tcps_listendrop));
     return true;
 }
 

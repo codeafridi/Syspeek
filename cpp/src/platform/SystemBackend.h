@@ -4,6 +4,7 @@
 #include "LinuxProcess.h"
 #include "ProcessIdentity.h"
 #include "SecurityStatus.h"
+#include "TcpStatus.h"
 
 #include <QByteArray>
 #include <QList>
@@ -175,6 +176,10 @@ public:
         return QList<linuxproc::SocketInfo>();
     }
     virtual bool hostSecurityPosture(QList<SecurityFinding> &out) {
+        Q_UNUSED(out);
+        return false;
+    }
+    virtual bool readTcpCounters(TcpCounters &out) {
         Q_UNUSED(out);
         return false;
     }
