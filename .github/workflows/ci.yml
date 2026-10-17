@@ -64,6 +64,9 @@ jobs:
               print("tcp ok: in %d out %d retrans %d timeouts %d"
                     % (tcp["inSegs"], tcp["outSegs"], tcp["retransSegs"],
                        tcp["timeouts"]))
+              diag = {k: v for k, v in tcp.items() if k.startswith("Diag") or k.startswith("ext.")}
+              if diag:
+                  print("tcp diag:", json.dumps(diag, sort_keys=True))
           else:
               print("tcp sysctl unavailable (kernel denies) - stays gated")
           PY

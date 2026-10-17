@@ -214,6 +214,17 @@ QString dumpReportJson(int maxProcs) {
         tcp.insert(QStringLiteral("timeouts"),
                    static_cast<qint64>(tcpCounters.ext.value(
                        QStringLiteral("TCPTimeouts"))));
+        for (auto it = tcpCounters.tcp.constBegin();
+             it != tcpCounters.tcp.constEnd(); ++it) {
+            if (!tcp.contains(it.key())) {
+                tcp.insert(it.key(), static_cast<qint64>(it.value()));
+            }
+        }
+        for (auto it = tcpCounters.ext.constBegin();
+             it != tcpCounters.ext.constEnd(); ++it) {
+            tcp.insert(QStringLiteral("ext.%1").arg(it.key()),
+                       static_cast<qint64>(it.value()));
+        }
     }
     root.insert(QStringLiteral("tcp"), tcp);
 
