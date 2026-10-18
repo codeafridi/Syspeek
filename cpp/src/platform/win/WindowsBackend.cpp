@@ -1074,29 +1074,15 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
         return false;
     }
 
-    ULONG records = 0;
-    {
-        const BYTE *probe = reinterpret_cast<const BYTE *>(buffer.constData());
-        const BYTE *endProbe = probe + buffer.size();
-        while (probe + sizeof(ULONG) <= endProbe) {
-            auto *record = reinterpret_cast<const NtProcInfo *>(probe);
-            if (record->nextEntryOffset == 0) {
-                break;
-            }
-            ++records;
-            probe += record->nextEntryOffset;
-        }
-    }
-    m_diagCtx = 1000 + static_cast<int>(records); // walk ok
+    m_diagCtx = 1000 + static_cast<int>(map.size()); // walk ok
 
     QHash<int, unsigned long long> map;
     const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
     const BYTE *end = cursor + buffer.size();
-    while (cursor + sizeof(ULONG) <= end) {
+    // The chain terminates with nextEntryOffset == 0 on the FINAL record;
+    // that record must still be processed before breaking.
+    while (cursor + sizeof(NtProcInfo) <= end) {
         auto *record = reinterpret_cast<const NtProcInfo *>(cursor);
-        if (record->nextEntryOffset == 0) {
-            break;
-        }
         const int recordPid =
             static_cast<int>(reinterpret_cast<ULONG_PTR>(
                 record->uniqueProcessId));
@@ -1106,6 +1092,9 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
         }
         if (recordPid != 0) {
             map.insert(recordPid, sum);
+        }
+        if (record->nextEntryOffset == 0) {
+            break;
         }
         cursor += record->nextEntryOffset;
     }
@@ -1169,7 +1158,11 @@ void WindowsBackend::debugDepth(int pid, QJsonObject &out) {
         SIZE_T got = 0;
         out.insert(QStringLiteral(
                         "rpmPeb"),
-                   ::ReadProcessMemory(handle, pbi.pebBaseAddress,
+                   ::ReadProcessMemory(handle,
+                                       static_cast<LPCVOID>(
+                                           reinterpret_cast<ULONG_PTR>(
+                                               pbi.pebBaseAddress)
+                                           + 0x20),
                                        &paramsAddress,
                                        sizeof(paramsAddress), &got)
                        != FALSE);
@@ -1221,11 +1214,16 @@ QByteArray WindowsBackend::processEnv(int pid) {
     };
     static_assert(offsetof(NtPebShell, processParameters) == 0x20,
                   "PEB x64 ProcessParameters offset");
+    constexpr ULONG_PTR kPebParamsOffset =
+        offsetof(NtPebShell, processParameters);
 
     ULONG_PTR paramsAddress = 0;
     SIZE_T got = 0;
-    if (!::ReadProcessMemory(handle, pbi.pebBaseAddress, &paramsAddress,
-                             sizeof(paramsAddress), &got)
+    if (!::ReadProcessMemory(
+            handle, static_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
+                        pbi.pebBaseAddress)
+                        + kPebParamsOffset),
+            &paramsAddress, sizeof(paramsAddress), &got)
         || paramsAddress == 0) {
         ::CloseHandle(handle);
         return QByteArray();
@@ -1324,8 +1322,11 @@ QString WindowsBackend::processCmdline(int pid) {
     };
     ULONG_PTR paramsAddress = 0;
     SIZE_T got = 0;
-    if (!::ReadProcessMemory(handle, pbi.pebBaseAddress, &paramsAddress,
-                             sizeof(paramsAddress), &got)
+    if (!::ReadProcessMemory(
+            handle, static_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
+                        pbi.pebBaseAddress)
+                        + 0x20), // PEB.ProcessParameters (rx_winternl.h order)
+            &paramsAddress, sizeof(paramsAddress), &got)
         || paramsAddress == 0) {
         ::CloseHandle(handle);
         return QString();
