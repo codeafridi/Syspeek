@@ -5,12 +5,20 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStringList>
+#include <QSettings>
 
 #if defined(Q_OS_MACOS)
 #include <net/if_dl.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#endif
+
+#if defined(Q_OS_WIN)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <iphlpapi.h>
 #endif
 
 #if !defined(Q_OS_WIN)
@@ -410,13 +418,190 @@ HostInfo collectHostInfoMac() {
 }
 #endif
 
+#if defined(Q_OS_WIN)
+HostInfo collectHostInfoWin() {
+    // Datadog gohai-style inventory; API/registry grounds (kept PEs):
+    // agent.exe carries the strings HARDWARE\DESCRIPTION\System\
+    // CentralProcessor\0 + ProcessorNameString + GetActiveProcessorCount
+    // + GetLogicalDriveStringsW + GetVolumeInformation + GetAdaptersAddresses;
+    // windows_exporter adds LogicalDisk / "Free Space" / Hypervisor /
+    // RtlGetVersion; SystemInformer quotes RtlGetVersion. All Win32/registry,
+    // nothing WMI/PowerShell.
+    HostInfo info;
+    info.available = true;
+
+    using RtlGetVersionFn = LONG(WINAPI *)(PRTL_OSVERSIONINFOW);
+    RtlGetVersionFn rtlGetVersion = []() -> RtlGetVersionFn {
+        const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+        return ntdll != nullptr
+                   ? reinterpret_cast<RtlGetVersionFn>(
+                         ::GetProcAddress(ntdll, "RtlGetVersion"))
+                   : nullptr;
+    }();
+
+    RTL_OSVERSIONINFOW version = {};
+    version.dwOSVersionInfoSize = sizeof(version);
+    if (rtlGetVersion != nullptr && rtlGetVersion(&version) == 0) {
+        info.platform.kernelName = QStringLiteral("Windows");
+        info.platform.kernelRelease =
+            QStringLiteral("%1.%2 build %3")
+                .arg(version.dwMajorVersion)
+                .arg(version.dwMinorVersion)
+                .arg(version.dwBuildNumber);
+        info.platform.kernelVersion =
+            QString::fromWCharArray(version.szCSDVersion);
+        info.platform.os =
+            QStringLiteral("Windows %1.%2.%3")
+                .arg(version.dwMajorVersion)
+                .arg(version.dwMinorVersion)
+                .arg(version.dwBuildNumber);
+    }
+
+    info.platform.hostname = QSysInfo::machineHostName();
+
+    SYSTEM_INFO sysInfo = {};
+    ::GetNativeSystemInfo(&sysInfo);
+    switch (sysInfo.wProcessorArchitecture) {
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        info.platform.machine = QStringLiteral("x86_64");
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        info.platform.machine = QStringLiteral("arm64");
+        break;
+    default:
+        info.platform.machine = QStringLiteral("unknown");
+        break;
+    }
+
+    {
+        QSettings cpuKey(
+            QStringLiteral("HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION"
+                           "\System\CentralProcessor\0"),
+            QSettings::NativeFormat);
+        info.cpu.modelName = cpuKey.value(QStringLiteral("ProcessorNameString"))
+                                .toString();
+        info.cpu.vendorId =
+            cpuKey.value(QStringLiteral("VendorIdentifier")).toString();
+        info.cpu.mhz = cpuKey.value(QStringLiteral("~MHz")).toDouble();
+        info.cpu.logicalProcessors =
+            static_cast<int>(sysInfo.dwNumberOfProcessors);
+        info.cpu.cores = info.cpu.logicalProcessors;
+    }
+
+    MEMORYSTATUSEX mem = {};
+    mem.dwLength = sizeof(mem);
+    if (::GlobalMemoryStatusEx(&mem)) {
+        info.memTotalKb = mem.ullTotalPhys / 1024;
+        info.swapTotalKb = mem.ullTotalPageFile / 1024;
+    }
+
+    // Fixed drives: GetLogicalDriveStringsW + GetVolumeInformationW +
+    // GetDiskFreeSpaceExW (M49 grounded).
+    wchar_t driveList[512] = {};
+    if (::GetLogicalDriveStringsW(DWORD(std::size(driveList) - 1),
+                                  driveList)
+        > 0) {
+        const wchar_t *cur = driveList;
+        while (*cur != L'\0') {
+            const QString drive = QString::fromWCharArray(cur);
+            const UINT type = ::GetDriveTypeW(cur);
+            cur += drive.size() + 1;
+            if (type != DRIVE_FIXED) {
+                continue;
+            }
+            wchar_t fsName[MAX_PATH + 1] = {};
+            if (::GetVolumeInformationW(reinterpret_cast<const wchar_t *>(
+                                            drive.utf16()),
+                                        nullptr, 0, nullptr, nullptr,
+                                        nullptr, fsName, MAX_PATH)) {
+                ULARGE_INTEGER total = {};
+                ULARGE_INTEGER freeBytes = {};
+                ::GetDiskFreeSpaceExW(reinterpret_cast<const wchar_t *>(
+                                          drive.utf16()),
+                                      nullptr, &total, &freeBytes);
+                HostFsInfo fs;
+                fs.name = drive;
+                fs.mountedOn = QString::fromWCharArray(fsName);
+                fs.kbSize = total.QuadPart / 1024;
+                info.filesystems.append(fs);
+            }
+        }
+    }
+
+    // Interfaces: GetAdaptersAddresses (MAC + prefix-length CIDRs).
+    ULONG adaptersSize = 16 * 1024;
+    QByteArray adapterBuffer;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        adapterBuffer.resize(int(adaptersSize));
+        auto *adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(
+            adapterBuffer.data());
+        const ULONG result = ::GetAdaptersAddresses(
+            AF_UNSPEC, 0, nullptr, adapters,
+            &adaptersSize);
+        if (result == ERROR_SUCCESS) {
+            break;
+        }
+        if (result != ERROR_BUFFER_OVERFLOW) {
+            adapterBuffer.clear();
+            break;
+        }
+    }
+    if (!adapterBuffer.isEmpty()) {
+        auto *adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(
+            adapterBuffer.data());
+        for (auto *a = adapters; a != nullptr; a = a->Next) {
+            if (a->OperStatus != IfOperStatusUp
+                || a->PhysicalAddressLength == 0) {
+                continue;
+            }
+            HostNetworkInfo net;
+            net.name = QString::fromWCharArray(a->FriendlyName);
+            QByteArray macBytes(reinterpret_cast<const char *>(
+                                    a->PhysicalAddress),
+                                int(a->PhysicalAddressLength));
+            net.macAddress = QString::fromLatin1(macBytes.toHex(':'));
+            for (auto *u = a->FirstUnicastAddress; u != nullptr;
+                 u = u->Next) {
+                const sockaddr *sa = u->Address.lpSockaddr;
+                if (sa == nullptr) {
+                    continue;
+                }
+                char ip[64] = {};
+                const int prefixLen = int(u->OnLinkPrefixLength);
+                if (sa->sa_family == AF_INET) {
+                    ::InetNtopA(AF_INET,
+                                &reinterpret_cast<const sockaddr_in *>(sa)
+                                     ->sin_addr,
+                                ip, sizeof(ip));
+                    net.ipv4 = QStringLiteral("%1/%2")
+                                   .arg(QString::fromLatin1(ip))
+                                   .arg(prefixLen);
+                } else if (sa->sa_family == AF_INET6
+                           && net.ipv6.isEmpty()) {
+                    ::InetNtopA(AF_INET6,
+                                reinterpret_cast<const void *>(
+                                    &reinterpret_cast<const sockaddr_in6 *>(
+                                        sa)
+                                         ->sin6_addr),
+                                ip, sizeof(ip));
+                    net.ipv6 = QStringLiteral("%1/%2")
+                                   .arg(QString::fromLatin1(ip),
+                                        QString::number(prefixLen));
+                }
+            }
+            info.interfaces.append(net);
+        }
+    }
+
+    return info;
+}
+#endif
+
 HostInfo collectHostInfo() {
 #if defined(Q_OS_MACOS)
     return collectHostInfoMac();
 #elif defined(Q_OS_WIN)
-    // Windows gohai-style inventory (registry/SMBIOS/Win32_* equivalent)
-    // grounds independently; until then the card reports unavailable.
-    return HostInfo{};
+    return collectHostInfoWin();
 #else
     HostInfo info;
     info.available = true;

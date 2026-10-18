@@ -57,6 +57,10 @@ HostInfo collectHostInfo();
 HostInfo collectHostInfoMac();
 #endif
 
+#if defined(Q_OS_WIN)
+HostInfo collectHostInfoWin();
+#endif
+
 QString hostInfoSummaryText(const HostInfo &info);
 QString hostInfoPlatformText(const HostInfo &info);
 QString hostInfoCpuText(const HostInfo &info);
