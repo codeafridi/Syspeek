@@ -12,6 +12,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Native tool (windeployqt/wix/dotnet) nonzero exits abort the script.
+$PSNativeCommandUseErrorActionPreference = $true
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $cppBuild = Join-Path $repoRoot "cpp/build"
@@ -98,11 +100,15 @@ $payloadPath = Join-Path $PSScriptRoot "payload.wxs"
 $payload.ToString() | Out-File -Encoding ascii $payloadPath
 Write-Host "payload.wxs: $($files.Count) files, $($subDirs.Count) subdirs"
 
-# ---- WiX build (the .NET tool; installs once per machine).
+# ---- WiX build. Pinned to WiX v5: v7 gates every run behind the OSMF
+# EULA acceptance (error WIX7015 in CI); v5 CLI needs the .NET SDK 6+
+# preinstalled on GH runners.
 $wixCommand = Get-Command wix -ErrorAction SilentlyContinue
 if ($null -eq $wixCommand) {
-    dotnet tool install --global wix | Out-Null
+    dotnet tool install --global wix --version 5.0.2 | Out-Null
     $env:PATH = "$env:PATH;$env:USERPROFILE\.dotnet\tools"
+} else {
+    dotnet tool update --global wix --version 5.0.2 | Out-Null
 }
 wix --version
 
