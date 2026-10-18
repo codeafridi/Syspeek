@@ -111,7 +111,7 @@ jobs:
           assert d["platform"] == "windows", d["platform"]
           print("dump ok: windows", h["cores"], "cores",
                 int(h["memTotalKb"] // 1024 // 1024), "MiB",
-                d["processCount"], "procs (Get-Process ≈",
+                d["processCount"], "procs (Get-Process ~",
                 sys.argv[2], ")")
           tcp = d.get("tcp", {})
           if tcp.get("available"):
