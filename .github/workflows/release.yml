@@ -99,7 +99,7 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build --config Release
           ctest --test-dir cpp/build -C Release --output-on-failure
-          $json = & ./cpp/build/Release/syspeek.exe --dump | ConvertFrom-Json
+          $json = & ./cpp/build/Release/syspeek.exe --dump | ConvertFrom-Json -AsHashtable
           if ($json.processCount -le 0) { throw "dump: no processes" }
           if ($json.host.cores -le 0) { throw "dump: no cores" }
           Write-Host ("windows dump ok: {0} procs" -f $json.processCount)
