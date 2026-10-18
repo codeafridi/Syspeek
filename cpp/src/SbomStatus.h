@@ -35,6 +35,12 @@ QList<DpkgPackage> parseDpkgStatus(const QByteArray &text);
 // purl for a Debian package: pkg:deb/ubuntu/<name>@<version>?arch=<arch>
 QString makePurl(const DpkgPackage &pkg);
 
+#if defined(Q_OS_WIN)
+// Installed programs from the registry Uninstall keys (osquery
+// programs-table model: DisplayName / DisplayVersion / InstallLocation).
+QList<SbomEntry> enumerateWindowsSoftware();
+#endif
+
 // Resolve filesystem paths to owning packages and build the SBOM.
 SbomReport buildSbom(const QStringList &paths,
                      const QHash<QString, DpkgPackage> &packages,

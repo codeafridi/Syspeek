@@ -1,6 +1,7 @@
 #include "DumpReport.h"
 
 #include "DiskStatus.h"
+#include "SbomStatus.h"
 #include "platform/PlatformFactory.h"
 
 #include <QHash>
@@ -278,6 +279,11 @@ QString dumpReportJson(int maxProcs) {
                          ? 0
                          : envData.count('\n') + 1);
         root.insert(QStringLiteral("selfDepth"), depth);
+        QJsonObject software;
+        software.insert(QStringLiteral("programs"),
+                        static_cast<qlonglong>(
+                            enumerateWindowsSoftware().size()));
+        root.insert(QStringLiteral("software"), software);
     }
 #endif
 

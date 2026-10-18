@@ -80,6 +80,35 @@ void logLine(const QString &message) {
     }
 }
 
+#if defined(Q_OS_WIN)
+// HKCU Run key autostart (SystemInformer quotes
+// Software\\Microsoft\\Windows\\CurrentVersion\\Run).
+void autostartCommand(const QString &mode) {
+    QSettings run(
+        QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft"
+                       "\\Windows\\CurrentVersion\\Run"),
+        QSettings::NativeFormat);
+    const QString name = QStringLiteral("Syspeek");
+    if (mode == QStringLiteral("on")) {
+        run.setValue(name, QStringLiteral("\"%1\"")
+                              .arg(QCoreApplication::applicationFilePath()));
+        run.sync();
+        std::fprintf(stdout, "autostart: enabled (HKCU Run)
+");
+    } else if (mode == QStringLiteral("off")) {
+        run.remove(name);
+        run.sync();
+        std::fprintf(stdout, "autostart: disabled
+");
+    } else {
+        const QString value = run.value(name).toString();
+        std::fprintf(stdout, "autostart: %s
+",
+                     value.isEmpty() ? "disabled" : "enabled");
+    }
+}
+#endif
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -97,6 +126,16 @@ int main(int argc, char *argv[]) {
         std::fwrite(report.constData(), 1, report.size(), stdout);
         return 0;
     }
+
+#if defined(Q_OS_WIN)
+    for (const QString &arg : app.arguments()) {
+        if (!arg.startsWith(QStringLiteral("--autostart="))) {
+            continue;
+        }
+        autostartCommand(arg.mid(QStringLiteral("--autostart=").size()));
+        return 0;
+    }
+#endif
 
     QString configError;
     const Config config = loadConfig(defaultConfigPath(), &configError);

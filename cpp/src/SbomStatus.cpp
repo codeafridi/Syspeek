@@ -1,4 +1,6 @@
 #include "SbomStatus.h"
+#include <QSettings>
+#include <QSet>
 
 #include <algorithm>
 
@@ -169,6 +171,58 @@ QString sbomSummaryText(const SbomReport &report) {
         .arg(report.resolvedCount)
         .arg(report.libraryCount);
 }
+
+#if defined(Q_OS_WIN)
+QList<SbomEntry> enumerateWindowsSoftware() {
+    // osquery programs table model: the Uninstall registry keys with
+    // DisplayName / DisplayVersion / InstallLocation (kept strings:
+    // "programsTablePlugin", "UninstallString", DisplayName x33 in
+    // agent.exe; "Uninstall" in windows_exporter + SystemInformer).
+    QList<SbomEntry> entries;
+    const QString branches[] = {
+        QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft"
+                       "\\Windows\\CurrentVersion\\Uninstall"),
+        QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node"
+                       "\\Microsoft\\Windows\\CurrentVersion"
+                       "\\Uninstall"),
+        QStringLiteral("HKEY_CURRENT_USER\\SOFTWARE\\Microsoft"
+                       "\\Windows\\CurrentVersion\\Uninstall"),
+    };
+    QSet<QPair<QString, QString>> seen;
+    for (const QString &branch : branches) {
+        QSettings root(branch, QSettings::NativeFormat);
+        const QStringList products = root.childGroups();
+        for (const QString &product : products) {
+            root.beginGroup(product);
+            const QString name =
+                root.value(QStringLiteral("DisplayName")).toString().trimmed();
+            const QString version =
+                root.value(QStringLiteral("DisplayVersion")).toString().trimmed();
+            root.endGroup();
+            if (name.isEmpty()) {
+                continue;
+            }
+            const QPair<QString, QString> key(name, version);
+            if (seen.contains(key)) {
+                continue;
+            }
+            seen.insert(key);
+            SbomEntry entry;
+            entry.package = name;
+            entry.version = version;
+            entry.arch = branch.contains(QStringLiteral("Wow6432Node"))
+                             ? QStringLiteral("x86")
+                             : QStringLiteral("x64");
+            entry.purl = version.isEmpty()
+                             ? QStringLiteral("pkg:generic/%1").arg(name)
+                             : QStringLiteral("pkg:generic/%1@%2")
+                                   .arg(name, version);
+            entries.append(entry);
+        }
+    }
+    return entries;
+}
+#endif
 
 QString sbomDetailText(const SbomReport &report) {
     if (!report.available) {

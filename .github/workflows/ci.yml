@@ -128,9 +128,12 @@ jobs:
           print("posture ok:", security.get("findings"), "findings,",
                 security.get("exposed"), "exposed,",
                 security.get("grade"))
+          software = d.get("software", {})
+          assert software.get("programs", 0) > 0, software
+          print("software ok:", software.get("programs"),
+                "installed programs")
           depth = d.get("selfDepth", {})
-          assert depth.get("ctxSwitches", 0) > 0, (
-              depth, d.get("selfDiag", {}))
+          assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth
           assert depth.get("envPairs", 0) > 0, depth
           print("self depth ok: ctx", depth.get("ctxSwitches"), ",",
