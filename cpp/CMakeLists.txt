@@ -209,7 +209,7 @@ elseif(WIN32)
         target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
     endif()
     target_link_libraries(syspeek_core PUBLIC
-        iphlpapi ws2_32 psapi user32)
+        iphlpapi ws2_32 psapi user32 advapi32)
     target_compile_definitions(syspeek_core PUBLIC
         WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_WARNINGS)

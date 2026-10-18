@@ -29,8 +29,19 @@ struct ServicesSnapshot {
     qint64 sampledAtMs = 0;
 };
 
+// One SystemControlManager record (dwCurrentState/dwWin32ExitCode from
+// SERVICE_STATUS_PROCESS; the dwCurrentState values mirror winsvc.h).
+struct ServiceRecord {
+    QString name;
+    QString displayName;
+    int state = 0;
+    unsigned long exitCode = 0;
+    int processId = 0;
+};
+
 bool parseSystemctlUnits(const QByteArray &text, QList<UnitRow> &out);
 bool parseLaunchctlList(const QByteArray &text, QList<UnitRow> &out);
+bool serviceRecordsToUnits(const QList<ServiceRecord> &records, QList<UnitRow> &out);
 int servicesFailedCount(const QList<UnitRow> &units);
 int servicesRunningCount(const QList<UnitRow> &units);
 

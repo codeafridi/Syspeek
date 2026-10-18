@@ -143,6 +143,58 @@ int main(int argc, char *argv[]) {
               && servicesFailedCount(launchUnits) == 1,
           "launchctl counts: running + failed");
 
+    QList<ServiceRecord> scmRecords;
+    ServiceRecord scmRun;
+    scmRun.name = QStringLiteral("W32Time");
+    scmRun.displayName = QStringLiteral("Windows Time");
+    scmRun.state = 4;
+    scmRun.processId = 1234;
+    scmRecords.append(scmRun);
+    ServiceRecord scmStopped;
+    scmStopped.name = QStringLiteral("Browser");
+    scmStopped.state = 1;
+    scmRecords.append(scmStopped);
+    ServiceRecord scmFailed;
+    scmFailed.name = QStringLiteral("brokenvc");
+    scmFailed.state = 1;
+    scmFailed.exitCode = 1077;
+    scmRecords.append(scmFailed);
+    ServiceRecord scmPending;
+    scmPending.name = QStringLiteral("a-pending");
+    scmPending.state = 2;
+    scmRecords.append(scmPending);
+    ServiceRecord scmPaused;
+    scmPaused.name = QStringLiteral("a-paused");
+    scmPaused.state = 7;
+    scmRecords.append(scmPaused);
+    ServiceRecord scmEmpty;
+    scmEmpty.name.clear();
+    scmRecords.append(scmEmpty);
+
+    QList<UnitRow> scmUnits;
+    check(serviceRecordsToUnits(scmRecords, scmUnits) && scmUnits.size() == 5,
+          "serviceRecordsToUnits: records mapped, empty name skipped");
+    check(scmUnits.at(0).name == QStringLiteral("Browser")
+              && scmUnits.at(0).active == QStringLiteral("inactive")
+              && scmUnits.at(0).sub == QStringLiteral("dead"),
+          "serviceRecordsToUnits: sorted by name, STOPPED + exit 0 -> dead");
+    check(scmUnits.at(1).name == QStringLiteral("W32Time")
+              && scmUnits.at(1).active == QStringLiteral("active")
+              && scmUnits.at(1).sub == QStringLiteral("running"),
+          "serviceRecordsToUnits: RUNNING -> active/running");
+    check(scmUnits.at(2).name == QStringLiteral("a-paused")
+              && scmUnits.at(2).active == QStringLiteral("active")
+              && scmUnits.at(2).sub == QStringLiteral("paused"),
+          "serviceRecordsToUnits: PAUSED mapping");
+    check(scmUnits.at(3).active == QStringLiteral("activating"),
+          "serviceRecordsToUnits: START_PENDING -> activating");
+    check(scmUnits.at(4).name == QStringLiteral("brokenvc")
+              && scmUnits.at(4).sub == QStringLiteral("failed"),
+          "serviceRecordsToUnits: STOPPED + exit != 0 -> failed");
+    check(servicesRunningCount(scmUnits) == 1
+              && servicesFailedCount(scmUnits) == 1,
+          "scm counts align with launchctl semantics");
+
     ServicesSnapshot services;
     services.available = true;
     services.runningCount = 3;

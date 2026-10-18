@@ -204,6 +204,7 @@ QString WindowsBackend::platformName() const {
 PlatformCapabilities WindowsBackend::capabilities() const {
     PlatformCapabilities caps;
     caps.fim = true;
+    caps.systemServices = true;
     caps.tcpCounters = m_tcpCountersOk;
     return caps;
 }
@@ -572,3 +573,52 @@ bool WindowsBackend::readTcpCounters(TcpCounters &out) {
     return any;
 }
 #endif
+
+QList<ServiceRecord> WindowsBackend::readServices() {
+    QList<ServiceRecord> out;
+
+    const SC_HANDLE mgr = ::OpenSCManagerW(nullptr, nullptr,
+                                           SC_MANAGER_ENUMERATE_SERVICE);
+    if (mgr == nullptr) {
+        return out;
+    }
+
+    DWORD bytes = 0;
+    DWORD count = 0;
+    DWORD resume = 0;
+    BOOL success = FALSE;
+    QByteArray buffer;
+
+    for (int attempt = 0; attempt < 4 && !success; ++attempt) {
+        const DWORD need = (attempt > 0) ? bytes : 0;
+        buffer.resize(need > 0 ? int(need) : 65536);
+        count = 0;
+        resume = 0;
+        success = ::EnumServicesStatusExW(mgr, SC_ENUM_PROCESS_INFO,
+                                          SERVICE_WIN32, SERVICE_STATE_ALL,
+                                          buffer.data(),
+                                          DWORD(buffer.size()), &bytes, &count,
+                                          &resume, nullptr);
+    }
+
+    if (success) {
+        auto *rows = reinterpret_cast<ENUM_SERVICE_STATUS_PROCESSW *>(
+            buffer.data());
+        for (DWORD i = 0; i < count; ++i) {
+            ServiceRecord rec;
+            rec.name = QString::fromWCharArray(
+                rows[i].lpServiceName != nullptr ? rows[i].lpServiceName
+                                                 : L"");
+            rec.displayName = QString::fromWCharArray(
+                rows[i].lpDisplayName != nullptr ? rows[i].lpDisplayName
+                                                 : L"");
+            rec.state = int(rows[i].ServiceStatus.dwCurrentState);
+            rec.exitCode = rows[i].ServiceStatus.dwWin32ExitCode;
+            rec.processId = int(rows[i].ServiceStatus.dwProcessId);
+            out.append(rec);
+        }
+    }
+
+    ::CloseServiceHandle(mgr);
+    return out;
+}

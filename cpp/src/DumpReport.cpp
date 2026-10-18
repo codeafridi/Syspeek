@@ -206,6 +206,17 @@ QString dumpReportJson(int maxProcs) {
     root.insert(QStringLiteral("processCount"), pids.size());
     root.insert(QStringLiteral("processes"), processes);
 
+    QJsonObject services;
+    const QList<ServiceRecord> serviceRecords = backend.readServices();
+    QList<UnitRow> serviceRows;
+    serviceRecordsToUnits(serviceRecords, serviceRows);
+    services.insert(QStringLiteral("count"), serviceRecords.size());
+    services.insert(QStringLiteral("running"),
+                    servicesRunningCount(serviceRows));
+    services.insert(QStringLiteral("failed"),
+                    servicesFailedCount(serviceRows));
+    root.insert(QStringLiteral("services"), services);
+
     QJsonObject tcp;
     TcpCounters tcpCounters;
     const bool tcpAvailable = backend.readTcpCounters(tcpCounters);

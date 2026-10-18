@@ -95,6 +95,66 @@ bool parseLaunchctlList(const QByteArray &text, QList<UnitRow> &out) {
     return any;
 }
 
+bool serviceRecordsToUnits(const QList<ServiceRecord> &records, QList<UnitRow> &out) {
+    bool any = false;
+
+    QList<ServiceRecord> sorted = records;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const ServiceRecord &a, const ServiceRecord &b) {
+                  return a.name < b.name;
+              });
+
+    for (const ServiceRecord &rec : sorted) {
+        if (rec.name.isEmpty()) {
+            continue;
+        }
+
+        UnitRow row;
+        row.name = rec.name;
+        row.description = rec.displayName;
+        row.load = QStringLiteral("loaded");
+
+        // dwCurrentState values are the winsvc.h SERVICE_* constants.
+        switch (rec.state) {
+        case 4: // SERVICE_RUNNING
+            row.active = QStringLiteral("active");
+            row.sub = QStringLiteral("running");
+            break;
+        case 1: // SERVICE_STOPPED
+            if (rec.exitCode != 0) {
+                row.active = QStringLiteral("failed");
+                row.sub = QStringLiteral("failed");
+            } else {
+                row.active = QStringLiteral("inactive");
+                row.sub = QStringLiteral("dead");
+            }
+            break;
+        case 2: // SERVICE_START_PENDING
+        case 5: // SERVICE_CONTINUE_PENDING
+        case 6: // SERVICE_PAUSE_PENDING
+            row.active = QStringLiteral("activating");
+            row.sub = QStringLiteral("start-pending");
+            break;
+        case 3: // SERVICE_STOP_PENDING
+            row.active = QStringLiteral("deactivating");
+            row.sub = QStringLiteral("stop-pending");
+            break;
+        case 7: // SERVICE_PAUSED
+            row.active = QStringLiteral("active");
+            row.sub = QStringLiteral("paused");
+            break;
+        default:
+            row.active = QStringLiteral("unknown");
+            row.sub = QStringLiteral("unknown");
+            break;
+        }
+
+        out.append(row);
+        any = true;
+    }
+    return any;
+}
+
 int servicesFailedCount(const QList<UnitRow> &units) {
     int count = 0;
     for (const UnitRow &row : units) {

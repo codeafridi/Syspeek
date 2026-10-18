@@ -1,5 +1,7 @@
 #include "ServicesSource.h"
 
+#include "platform/PlatformFactory.h"
+
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QTimer>
@@ -67,6 +69,18 @@ void ServicesSource::beginQuery() {
     m_process->start(QStringLiteral("/bin/launchctl"),
                      QStringList{QStringLiteral("list")});
     return;
+#elif defined(Q_OS_WIN)
+    const QList<ServiceRecord> records =
+        systemBackend().readServices();
+    QList<UnitRow> units;
+    if (records.isEmpty() || !serviceRecordsToUnits(records, units)) {
+        emitFailure(QStringLiteral("service control manager failed"));
+        return;
+    }
+    onUnits(units);
+    if (m_timer != nullptr) {
+        m_timer->start(m_intervalMs);
+    }
 #else
     const QString path = QStandardPaths::findExecutable(QStringLiteral("systemctl"));
     if (path.isEmpty()) {
@@ -93,8 +107,6 @@ void ServicesSource::onFinished(int exitCode, QProcess::ExitStatus status) {
     m_running = false;
     m_stdout += m_process->readAllStandardOutput();
 
-    ServicesSnapshot snapshot;
-    snapshot.sampledAtMs = QDateTime::currentMSecsSinceEpoch();
     if (status == QProcess::NormalExit && exitCode == 0) {
         QList<UnitRow> units;
         if (queryKind() == QueryKind::Launchctl) {
@@ -102,34 +114,40 @@ void ServicesSource::onFinished(int exitCode, QProcess::ExitStatus status) {
         } else {
             parseSystemctlUnits(m_stdout, units);
         }
-        snapshot.available = true;
-        snapshot.units = units;
-        snapshot.runningCount = servicesRunningCount(units);
-        snapshot.failedCount = servicesFailedCount(units);
-
-        if (m_havePrev) {
-            const QList<ServiceChange> changes =
-                diffServices(m_prevUnits, units, snapshot.sampledAtMs);
-            for (const ServiceChange &change : changes) {
-                m_timeline.prepend(change);
-            }
-            while (m_timeline.size() > 200) {
-                m_timeline.removeLast();
-            }
+        onUnits(units);
+        if (m_timer != nullptr) {
+            m_timer->start(m_intervalMs);
         }
-        snapshot.changes = m_timeline;
-        m_prevUnits = units;
-        m_havePrev = true;
     } else {
-        snapshot.errorMessage = queryKind() == QueryKind::Launchctl
-                                    ? QStringLiteral("launchctl failed")
-                                    : QStringLiteral("systemctl failed");
+        emitFailure(queryKind() == QueryKind::Launchctl
+                        ? QStringLiteral("launchctl failed")
+                        : QStringLiteral("systemctl failed"));
     }
+}
+
+void ServicesSource::onUnits(QList<UnitRow> units) {
+    ServicesSnapshot snapshot;
+    snapshot.sampledAtMs = QDateTime::currentMSecsSinceEpoch();
+    snapshot.available = true;
+    snapshot.units = units;
+    snapshot.runningCount = servicesRunningCount(units);
+    snapshot.failedCount = servicesFailedCount(units);
+
+    if (m_havePrev) {
+        const QList<ServiceChange> changes =
+            diffServices(m_prevUnits, units, snapshot.sampledAtMs);
+        for (const ServiceChange &change : changes) {
+            m_timeline.prepend(change);
+        }
+        while (m_timeline.size() > 200) {
+            m_timeline.removeLast();
+        }
+    }
+    snapshot.changes = m_timeline;
+    m_prevUnits = units;
+    m_havePrev = true;
 
     emit servicesReady(snapshot);
-    if (m_timer != nullptr) {
-        m_timer->start(m_intervalMs);
-    }
 }
 
 void ServicesSource::onErrorOccurred(QProcess::ProcessError error) {

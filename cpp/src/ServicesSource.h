@@ -28,6 +28,7 @@ private slots:
 private:
     void beginQuery();
     void emitFailure(const QString &message);
+    void onUnits(QList<UnitRow> units);
 
     QProcess *m_process = nullptr;
     QTimer *m_timer = nullptr;

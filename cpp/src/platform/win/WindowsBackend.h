@@ -43,6 +43,7 @@ public:
 
     QList<linuxproc::SocketInfo> readNetSockets() override;
     bool readTcpCounters(TcpCounters &out) override;
+    QList<ServiceRecord> readServices() override;
 
 private:
     struct Snapshot {

@@ -113,6 +113,11 @@ jobs:
                 int(h["memTotalKb"] // 1024 // 1024), "MiB",
                 d["processCount"], "procs (Get-Process ~",
                 sys.argv[2], ")")
+          services = d.get("services", {})
+          assert services.get("count", 0) > 0, services
+          print("scm services ok:", services.get("count"),
+                "running", services.get("running"),
+                "failed", services.get("failed"))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs"):

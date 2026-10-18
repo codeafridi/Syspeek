@@ -4,6 +4,7 @@
 #include "LinuxProcess.h"
 #include "ProcessIdentity.h"
 #include "SecurityStatus.h"
+#include "ServicesStatus.h"
 #include "TcpStatus.h"
 
 #include <QByteArray>
@@ -182,5 +183,12 @@ public:
     virtual bool readTcpCounters(TcpCounters &out) {
         Q_UNUSED(out);
         return false;
+    }
+
+    // ---- services ----
+    // Native records (SCM on Windows). Linux/macOS run tools through their
+    // own source strategies and do not fill this.
+    virtual QList<ServiceRecord> readServices() {
+        return QList<ServiceRecord>();
     }
 };
