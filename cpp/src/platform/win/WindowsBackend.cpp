@@ -1123,11 +1123,60 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
 
 void WindowsBackend::debugDepth(int pid, QJsonObject &out) {
     out.insert(QStringLiteral("diagCtx"), m_diagCtx);
+    {
+        QMutexLocker locker(&m_mutex);
+        m_ctxMapAt = 0; // force a fresh walk below
+    }
+    unsigned long long ctx = 0;
+    const bool fresh = systemContextSwitches(pid, ctx);
     QMutexLocker locker(&m_mutex);
     out.insert(QStringLiteral("ctxMapSize"),
                static_cast<qlonglong>(m_ctxMap.size()));
     out.insert(QStringLiteral("ctxSelf"),
                static_cast<qlonglong>(m_ctxMap.value(pid)));
+    out.insert(QStringLiteral("ctxSelfFresh"),
+               static_cast<qlonglong>(ctx));
+    out.insert(QStringLiteral("ctxSelfFound"), fresh);
+    int neighbors = 0;
+    for (int key : m_ctxMap.keys()) {
+        if (qAbs<qint64>(key - pid) <= 8) {
+            ++neighbors;
+        }
+    }
+    out.insert(QStringLiteral("ctxNeighbors"), neighbors);
+
+    // cmdline walk, step by step
+    const NtQueryInformationProcessFn query = ntQueryInformationProcess();
+    out.insert(QStringLiteral("ntqip"), query != nullptr);
+    const HANDLE handle = ::OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE,
+        static_cast<DWORD>(pid));
+    out.insert(QStringLiteral("open"), handle != nullptr);
+    if (handle != nullptr) {
+        struct NtBasicInfo {
+            PVOID reserved1;
+            PVOID pebBaseAddress;
+            PVOID reserved2[2];
+            ULONG_PTR uniqueProcessId;
+            PVOID reserved3;
+        };
+        NtBasicInfo pbi = {};
+        const LONG st =
+            query(handle, 0, &pbi, sizeof(pbi), nullptr);
+        out.insert(QStringLiteral("qipStatus"), static_cast<qlonglong>(st));
+        out.insert(QStringLiteral("peb"), pbi.pebBaseAddress != nullptr);
+        ULONG_PTR paramsAddress = 0;
+        SIZE_T got = 0;
+        out.insert(QStringLiteral(
+                        "rpmPeb"),
+                   ::ReadProcessMemory(handle, pbi.pebBaseAddress,
+                                       &paramsAddress,
+                                       sizeof(paramsAddress), &got)
+                       != FALSE);
+        out.insert(QStringLiteral("params"),
+                   static_cast<qlonglong>(paramsAddress));
+        ::CloseHandle(handle);
+    }
 }
 
 QByteArray WindowsBackend::processEnv(int pid) {
