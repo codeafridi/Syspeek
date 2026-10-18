@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
         if: runner.os == 'Windows'
 
-      - uses: jurplel/install-qt-action@v4
+      - uses: jurplel/install-qt-action@v4.2.1
         with:
           version: "6.8.*"
           cache: true
