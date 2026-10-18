@@ -1018,11 +1018,11 @@ QString endpointExposure(const QString &addr) {
     return portcatalog::endpointExposure(addr);
 }
 
-bool parseInstrumentation(const QByteArray &environ, const QByteArray &maps,
+bool parseInstrumentation(const QByteArray &envData, const QByteArray &maps,
                           QList<QString> &agents) {
     QSet<QString> found;
 
-    const QList<QByteArray> entries = environ.split('\0');
+    const QList<QByteArray> entries = envData.split('\0');
     for (const QByteArray &entry : entries) {
         const int equals = entry.indexOf('=');
         if (equals <= 0) {
@@ -1074,9 +1074,9 @@ bool parseInstrumentation(const QByteArray &environ, const QByteArray &maps,
 
 bool processInstrumentation(int pid, QList<QString> &agents) {
     agents.clear();
-    const QByteArray environ = readFileBytes(procPath(pid, "environ"));
+    const QByteArray envData = readFileBytes(procPath(pid, "environ"));
     const QByteArray maps = readFileBytes(procPath(pid, "maps"));
-    return parseInstrumentation(environ, maps, agents);
+    return parseInstrumentation(envData, maps, agents);
 }
 
 bool parseStatmShared(const QByteArray &statmContent, unsigned long long pageSize,

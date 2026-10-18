@@ -121,7 +121,7 @@ bool cgroupSample(int pid, CgroupInfo &out);
 QString serviceForPort(quint16 port);
 bool portIsDatabase(quint16 port);
 QString endpointExposure(const QString &addr);
-bool parseInstrumentation(const QByteArray &environ, const QByteArray &maps,
+bool parseInstrumentation(const QByteArray &envData, const QByteArray &maps,
                           QList<QString> &agents);
 bool processInstrumentation(int pid, QList<QString> &agents);
 bool parseHostCpu(const QByteArray &statContent, HostCpuTimes &out);
