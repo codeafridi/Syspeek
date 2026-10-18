@@ -1,6 +1,5 @@
 #include "SwaymsgFocusProvider.h"
 
-#include "LinuxProcess.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -54,8 +53,9 @@ int parseSwayFocusedPid(const QByteArray &output) {
     return findFocusedPid(doc.object());
 }
 
-SwaymsgFocusProvider::SwaymsgFocusProvider(QString command)
-    : m_command(std::move(command)) {
+SwaymsgFocusProvider::SwaymsgFocusProvider(QString command, SystemBackend &backend)
+    : m_backend(backend)
+    , m_command(std::move(command)) {
 }
 
 QString SwaymsgFocusProvider::name() const {
@@ -88,5 +88,5 @@ int SwaymsgFocusProvider::focusedPid() const {
         return -1;
     }
 
-    return linuxproc::exists(pid) ? pid : -1;
+    return m_backend.exists(pid) ? pid : -1;
 }

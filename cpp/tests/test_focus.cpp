@@ -9,10 +9,27 @@
 #include <QTemporaryFile>
 
 #include <signal.h>
+#if !defined(Q_OS_WIN)
 #include <sys/wait.h>
+#endif
+#if !defined(Q_OS_WIN)
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+int main() {
+    std::printf("skip: POSIX-only test\n");
+    return 0;
+}
+#else
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
+
+#ifdef Q_OS_LINUX
 
 namespace {
 
@@ -51,7 +68,7 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    const int self = static_cast<int>(::getpid());
+    const int self = GETPID();
     const int deadPid = 1 << 30;
 
     check(linuxproc::exists(self), "exists(self) is true");
@@ -125,3 +142,16 @@ int main(int argc, char *argv[]) {
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
+
+#else
+
+int main(int argc, char *argv[]) {
+    Q_UNUSED(argc);
+    Q_UNUSED(argv);
+    std::printf("focus tests skipped (linux-only)\n");
+    return 0;
+}
+
+#endif
+
+#endif

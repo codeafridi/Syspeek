@@ -1,5 +1,7 @@
 #include "Notifier.h"
 
+#ifdef Q_OS_LINUX
+
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
@@ -25,3 +27,12 @@ bool DesktopNotifier::send(const Alert &alert) {
                    alert.detail, QStringList(), hints, 8000);
     return reply.type() != QDBusMessage::ErrorMessage;
 }
+
+#else
+
+bool DesktopNotifier::send(const Alert &alert) {
+    Q_UNUSED(alert);
+    return false;
+}
+
+#endif

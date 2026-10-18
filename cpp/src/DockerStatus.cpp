@@ -41,13 +41,13 @@ int parseDockerExitCode(const QString &status) {
     return ok ? code : -1;
 }
 
-QList<DockerContainer> parseDockerPs(const QByteArray &stdout, bool *ok) {
+QList<DockerContainer> parseDockerPs(const QByteArray &payload, bool *ok) {
     if (ok != nullptr) {
         *ok = true;
     }
 
     QList<DockerContainer> containers;
-    const QList<QByteArray> lines = stdout.split('\n');
+    const QList<QByteArray> lines = payload.split('\n');
 
     for (const QByteArray &raw : lines) {
         const QByteArray line = raw.trimmed();
@@ -110,8 +110,8 @@ int dockerIssueCount(const QList<DockerContainer> &containers) {
     return issues;
 }
 
-DockerState classifyDockerFailure(const QByteArray &stderr) {
-    const QByteArray lower = stderr.toLower();
+DockerState classifyDockerFailure(const QByteArray &payload) {
+    const QByteArray lower = payload.toLower();
 
     if (lower.contains("permission denied") || lower.contains("access denied")) {
         return DockerState::PermissionDenied;

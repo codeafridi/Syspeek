@@ -1,6 +1,5 @@
 #include "XdotoolFocusProvider.h"
 
-#include "LinuxProcess.h"
 
 #include <QProcess>
 
@@ -9,8 +8,9 @@ constexpr int kStartTimeoutMs = 200;
 constexpr int kFinishTimeoutMs = 500;
 } // namespace
 
-XdotoolFocusProvider::XdotoolFocusProvider(QString command)
-    : m_command(std::move(command)) {
+XdotoolFocusProvider::XdotoolFocusProvider(QString command, SystemBackend &backend)
+    : m_backend(backend)
+    , m_command(std::move(command)) {
 }
 
 QString XdotoolFocusProvider::name() const {
@@ -44,5 +44,5 @@ int XdotoolFocusProvider::focusedPid() const {
         return -1;
     }
 
-    return linuxproc::exists(pid) ? pid : -1;
+    return m_backend.exists(pid) ? pid : -1;
 }

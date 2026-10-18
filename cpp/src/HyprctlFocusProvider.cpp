@@ -1,6 +1,5 @@
 #include "HyprctlFocusProvider.h"
 
-#include "LinuxProcess.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,8 +26,9 @@ int parseHyprctlPid(const QByteArray &output) {
     return pid > 0 ? pid : -1;
 }
 
-HyprctlFocusProvider::HyprctlFocusProvider(QString command)
-    : m_command(std::move(command)) {
+HyprctlFocusProvider::HyprctlFocusProvider(QString command, SystemBackend &backend)
+    : m_backend(backend)
+    , m_command(std::move(command)) {
 }
 
 QString HyprctlFocusProvider::name() const {
@@ -60,5 +60,5 @@ int HyprctlFocusProvider::focusedPid() const {
         return -1;
     }
 
-    return linuxproc::exists(pid) ? pid : -1;
+    return m_backend.exists(pid) ? pid : -1;
 }

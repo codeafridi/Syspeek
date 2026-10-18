@@ -8,9 +8,18 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 namespace {
 
@@ -42,7 +51,7 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    const int me = static_cast<int>(::getpid());
+    const int me = static_cast<int>(GETPID());
     const QString pid = QString::number(me);
 
     QTemporaryDir dir;
@@ -56,8 +65,10 @@ int main(int argc, char *argv[]) {
     XdotoolFocusProvider xdotoolProvider(xdotool);
     check(xdotoolProvider.name() == QStringLiteral("xdotool"),
           "xdotool adapter name");
+#ifndef Q_OS_WIN
     check(xdotoolProvider.focusedPid() == me,
           "xdotool adapter returns pid from command (args validated)");
+#endif
 
     const QString hyprctl = writeScript(
         dir, QStringLiteral("hyprctl"),
@@ -65,8 +76,10 @@ int main(int argc, char *argv[]) {
                        "|| exit 2\necho '{\"pid\":%1}'\n")
             .arg(pid));
     HyprctlFocusProvider hyprctlProvider(hyprctl);
+#ifndef Q_OS_WIN
     check(hyprctlProvider.focusedPid() == me,
           "hyprctl adapter returns pid from JSON");
+#endif
 
     const QString swaymsg = writeScript(
         dir, QStringLiteral("swaymsg"),
@@ -75,8 +88,10 @@ int main(int argc, char *argv[]) {
                        "\"pid\":%1}'\n")
             .arg(pid));
     SwaymsgFocusProvider swayProvider(swaymsg);
+#ifndef Q_OS_WIN
     check(swayProvider.focusedPid() == me,
           "swaymsg adapter returns pid from tree JSON");
+#endif
 
     const QString niri = writeScript(
         dir, QStringLiteral("niri"),
@@ -86,8 +101,10 @@ int main(int argc, char *argv[]) {
             .arg(pid));
     NiriFocusProvider niriProvider(niri);
     check(niriProvider.name() == QStringLiteral("niri"), "niri adapter name");
+#ifndef Q_OS_WIN
     check(niriProvider.focusedPid() == me,
           "niri adapter returns pid from focused-window JSON");
+#endif
 
     XdotoolFocusProvider nonzero(
         writeScript(dir, QStringLiteral("badexit"), QStringLiteral("exit 3\n")));

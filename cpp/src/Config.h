@@ -83,6 +83,39 @@ struct TlsConfig {
     int intervalMs = 300000;
 };
 
+struct FimConfig {
+    bool enabled = true;
+#if defined(Q_OS_MACOS)
+    QStringList paths = {
+        QStringLiteral("/etc/passwd"), QStringLiteral("/etc/group"),
+        QStringLiteral("/etc/hosts"),  QStringLiteral("/etc/resolv.conf"),
+        QStringLiteral("/etc/cron.d"), QStringLiteral("/etc/pam.d"),
+        QStringLiteral("/etc/ssh"),    QStringLiteral("/Library/LaunchDaemons"),
+        QStringLiteral("/usr/local/etc"), QStringLiteral("/opt/homebrew/etc")};
+#elif defined(Q_OS_WIN)
+    QStringList paths = {
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\drivers\\etc\\hosts"),
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\drivers\\etc\\services"),
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\Tasks"),
+        qEnvironmentVariable("APPDATA")
+            + QStringLiteral(
+                "\\Microsoft\\Windows\\Start Menu\\Programs\\Startup")};
+#else
+    QStringList paths = {
+        QStringLiteral("/etc/passwd"), QStringLiteral("/etc/group"),
+        QStringLiteral("/etc/hosts"),  QStringLiteral("/etc/hostname"),
+        QStringLiteral("/etc/resolv.conf"), QStringLiteral("/etc/cron.d"),
+        QStringLiteral("/etc/pam.d"),  QStringLiteral("/etc/ssh")};
+#endif
+    int intervalMs = 30000;
+    QString algorithm = QStringLiteral("sha256");
+    int maxFileSizeKb = 4096;
+    bool watch = true;
+};
+
 struct Config {
     HealthConfig health;
     DockerConfig docker;
@@ -95,6 +128,7 @@ struct Config {
     SloConfig slo;
     DbmConfig database;
     TlsConfig tls;
+    FimConfig fim;
     int focusCacheTtlMs = 1500;
     int sampleIntervalMs = 1000;
 };

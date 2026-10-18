@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(syspeek
-    VERSION 0.6.0
+    VERSION 0.8.0
     DESCRIPTION "Syspeek HUD (Qt 6 Widgets)"
     LANGUAGES CXX)
 
@@ -17,7 +17,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets DBus Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+if(UNIX AND NOT APPLE)
+    find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
 
 add_library(syspeek_core STATIC
     src/HudWindow.cpp
@@ -153,18 +156,102 @@ add_library(syspeek_core STATIC
     src/IncidentStatus.h
     src/ProfileStatus.cpp
     src/ProfileStatus.h
+    src/HostInfoStatus.cpp
+    src/HostInfoStatus.h
+    src/FimStatus.cpp
+    src/FimStatus.h
+    src/FimSource.cpp
+    src/FimSource.h
+    src/DumpReport.cpp
+    src/DumpReport.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
-    src/KubeSource.h)
+    src/KubeSource.h
+    src/platform/SystemBackend.h
+    src/platform/PlatformFactory.cpp
+    src/platform/PlatformFactory.h
+    src/platform/PortCatalog.cpp
+    src/platform/PortCatalog.h
+    src/platform/NotifierFactory.cpp
+    src/platform/NotifierFactory.h
+    src/platform/NullNotifier.h
+    src/platform/null/NullBackend.cpp
+    src/platform/null/NullBackend.h)
+
+if(UNIX AND NOT APPLE)
+    target_sources(syspeek_core PRIVATE
+        src/platform/linux/LinuxBackend.cpp
+        src/platform/linux/LinuxBackend.h)
+elseif(APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    target_sources(syspeek_core PRIVATE
+        src/platform/mac/MacBackend.cpp
+        src/platform/mac/MacBackend.h
+        src/platform/mac/MacFocusProvider.mm
+        src/platform/mac/MacFocusProvider.h
+        src/platform/mac/MacNotifier.mm
+        src/platform/mac/MacNotifier.h
+        src/platform/mac/MacLogSource.mm
+        src/platform/mac/MacLogSource.h
+        src/platform/mac/MacOverlay.mm
+        src/platform/mac/MacOverlay.h)
+elseif(WIN32)
+    find_package(Qt6 QUIET COMPONENTS DBus)
+    target_sources(syspeek_core PRIVATE
+        src/platform/win/WindowsBackend.cpp
+        src/platform/win/WindowsBackend.h
+        src/platform/win/WinFocusProvider.cpp
+        src/platform/win/WinFocusProvider.h
+        src/platform/win/WinLogSource.cpp
+        src/platform/win/WinLogSource.h
+        src/platform/win/WindowsNotifier.cpp
+        src/platform/win/WindowsNotifier.h)
+    if(TARGET Qt6::DBus)
+        target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+    endif()
+    target_link_libraries(syspeek_core PUBLIC
+        iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi)
+    target_compile_definitions(syspeek_core PUBLIC
+        WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_WARNINGS)
+endif()
 
 target_include_directories(syspeek_core PUBLIC src)
-target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::DBus Qt6::Network)
+target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::Network)
+if(APPLE)
+    target_link_libraries(syspeek_core PUBLIC
+        "-framework Cocoa" "-framework CoreFoundation" "-framework IOKit"
+        "-framework OSLog")
+    target_compile_options(syspeek_core PUBLIC $<$<COMPILE_LANGUAGE:OBJCXX>:-Wno-deprecated-declarations>)
+elseif(UNIX)
+    target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+endif()
 target_compile_options(syspeek_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>)
 
 add_executable(syspeek src/main.cpp)
 target_link_libraries(syspeek PRIVATE syspeek_core)
+if(WIN32)
+    target_sources(syspeek PRIVATE
+        packaging/windows/syspeek.rc)
+endif()
+
+if(APPLE)
+    set_target_properties(syspeek PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Syspeek"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.syspeek.hud"
+        MACOSX_BUNDLE_EXECUTABLE_NAME "syspeek"
+        MACOSX_BUNDLE_INFO_STRING "Syspeek ${PROJECT_VERSION} - local system HUD"
+        MACOSX_BUNDLE_LONG_VERSION_STRING "syspeek ${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_INFO_PLIST
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Info.plist.in")
+endif()
 
 enable_testing()
 
@@ -210,6 +297,9 @@ target_link_libraries(syspeek_metrics_tests PRIVATE syspeek_core)
 add_executable(syspeek_screenshot EXCLUDE_FROM_ALL tools/screenshot.cpp)
 target_link_libraries(syspeek_screenshot PRIVATE syspeek_core)
 
+add_executable(syspeek_backend_tests tests/test_backend.cpp)
+target_link_libraries(syspeek_backend_tests PRIVATE syspeek_core)
+
 add_test(NAME hud_buttons COMMAND syspeek_tests)
 add_test(NAME focus COMMAND syspeek_focus_tests)
 add_test(NAME cpu COMMAND syspeek_cpu_tests)
@@ -223,6 +313,7 @@ add_test(NAME config COMMAND syspeek_config_tests)
 add_test(NAME kube COMMAND syspeek_kube_tests)
 add_test(NAME adapters COMMAND syspeek_adapter_tests)
 add_test(NAME metrics COMMAND syspeek_metrics_tests)
+add_test(NAME backend COMMAND syspeek_backend_tests)
 
-set_tests_properties(hud_buttons focus cpu memory group sampler health providers docker config kube adapters metrics PROPERTIES
+set_tests_properties(hud_buttons focus cpu memory group sampler health providers docker config kube adapters metrics backend PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

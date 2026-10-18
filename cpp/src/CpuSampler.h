@@ -14,6 +14,8 @@ struct CpuSample {
     QHash<int, double> perPidPercent;
 };
 
+class SystemBackend;
+
 // Indirection over the raw CPU reads so tests can drive every edge case
 // deterministically. The default source reads real /proc.
 struct CpuSource {
@@ -21,6 +23,7 @@ struct CpuSource {
     std::function<bool(unsigned long long &)> totalCpu;
     std::function<int()> coreCount;
 
+    static CpuSource fromBackend(SystemBackend &backend);
     static CpuSource system();
 };
 

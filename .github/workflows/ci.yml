@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat_macos, feat_m39, feat_m50]
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+        if: runner.os == 'Windows'
+
+      - uses: jurplel/install-qt-action@v4.2.1
+        with:
+          version: "6.8.*"
+          cache: true
+          arch: ${{ runner.os == 'Windows' && 'win64_msvc2022_64' || '' }}
+          setup-python: ${{ runner.os != 'Windows' }}
+
+      - name: Configure (unix)
+        if: runner.os != 'Windows'
+        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (windows)
+        if: runner.os == 'Windows'
+        run: cmake -S cpp -B cpp/build
+
+      - name: Build (unix)
+        if: runner.os != 'Windows'
+        run: cmake --build cpp/build -j 3
+
+      - name: Build (windows)
+        if: runner.os == 'Windows'
+        run: cmake --build cpp/build --config Release -j 3
+
+      - name: Test
+        run: ctest --test-dir cpp/build -C Release --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Dump smoke
+        if: runner.os != 'Windows'
+        run: |
+          SYSPEEK_BIN=./cpp/build/syspeek
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
+            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          fi
+          echo "syspeek binary: $SYSPEEK_BIN"
+          "$SYSPEEK_BIN" --dump > "${RUNNER_TEMP}/syspeek-dump.json"
+          ps ax | wc -l > "${RUNNER_TEMP}/ps-count.txt"
+          python3 - "${RUNNER_TEMP}/syspeek-dump.json" \
+            "${RUNNER_TEMP}/ps-count.txt" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          h = d["host"]
+          assert d["processCount"] > 0, d
+          assert len(d["processes"]) > 0, d
+          assert h["cores"] > 0, h
+          assert h["memTotalKb"] > 0, h
+          ps_count = int(open(sys.argv[2]).read().split()[0])
+          # ps counts itself + header; allow generous tolerance
+          assert abs(d["processCount"] - ps_count) < max(30, ps_count // 2), (
+              d["processCount"], ps_count)
+          print("dump ok:", d["platform"], h["cores"], "cores",
+                int(h["memTotalKb"] // 1024), "MiB", d["processCount"], "procs",
+                "(ps ≈", ps_count, ")")
+          tcp = d.get("tcp", {})
+          if tcp.get("available"):
+              for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
+                  v = tcp.get(key)
+                  assert isinstance(v, int) and v >= 0, (key, v)
+              print("tcp ok: in %d out %d retrans %d timeouts %d"
+                    % (tcp["inSegs"], tcp["outSegs"], tcp["retransSegs"],
+                       tcp["timeouts"]))
+              extra = {k: v for k, v in tcp.items() if k.startswith("ext.")}
+              if extra:
+                  print("tcp extras:", json.dumps(extra, sort_keys=True))
+          else:
+              print("tcp sysctl unavailable (kernel denies) - stays gated")
+          PY
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Dump smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          SYSPEEK_BIN=./cpp/build/Release/syspeek.exe
+          echo "syspeek binary: $SYSPEEK_BIN"
+          "$SYSPEEK_BIN" --dump > "${RUNNER_TEMP}/syspeek-dump.json"
+          ps_count=$(powershell.exe -NoProfile -Command "(Get-Process).Count" | tr -d '\r')
+          echo "Get-Process count: $ps_count"
+          python - "${RUNNER_TEMP}/syspeek-dump.json" "$ps_count" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          h = d["host"]
+          assert d["processCount"] > 0, d
+          assert len(d["processes"]) > 0, d
+          assert h["cores"] > 0, h
+          assert h["memTotalKb"] > 0, h
+          assert d["platform"] == "windows", d["platform"]
+          print("dump ok: windows", h["cores"], "cores",
+                int(h["memTotalKb"] // 1024 // 1024), "MiB",
+                d["processCount"], "procs (Get-Process ~",
+                sys.argv[2], ")")
+          services = d.get("services", {})
+          assert services.get("count", 0) > 0, services
+          print("scm services ok:", services.get("count"),
+                "running", services.get("running"),
+                "failed", services.get("failed"))
+          disks = d.get("disks", {})
+          assert disks.get("instances", 0) > 0, disks
+          print("disks ok:", disks.get("instances"), "instances,",
+                disks.get("ioPerSec"), "io/s peak,",
+                disks.get("utilPercent"), "% util peak")
+          security = d.get("security", {})
+          assert security.get("findings", 0) > 0, security
+          print("posture ok:", security.get("findings"), "findings,",
+                security.get("exposed"), "exposed,",
+                security.get("grade"))
+          software = d.get("software", {})
+          assert software.get("programs", 0) > 0, software
+          print("software ok:", software.get("programs"),
+                "installed programs")
+          depth = d.get("selfDepth", {})
+          assert depth.get("ctxSwitches", 0) > 0, depth
+          assert depth.get("cmdlineLength", 0) > 0, depth
+          assert depth.get("envPairs", 0) > 0, depth
+          print("self depth ok: ctx", depth.get("ctxSwitches"), ",",
+                depth.get("cmdlineLength"), "chars cmdline,",
+                depth.get("envPairs"), "env pairs")
+          tcp = d.get("tcp", {})
+          if tcp.get("available"):
+              for key in ("inSegs", "outSegs", "retransSegs"):
+                  v = tcp.get(key)
+                  assert isinstance(v, int) and v >= 0, (key, v)
+              print("tcp ok: in %d out %d retrans %d"
+                    % (tcp["inSegs"], tcp["outSegs"], tcp["retransSegs"]))
+          else:
+              print("tcp gated:", tcp)
+          PY
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Package DMG (mac)
+        if: runner.os == 'macOS'
+        run: |
+          SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
+          ls -la cpp/build/packaging/
+
+
+      - name: Package MSI (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
+          Get-ChildItem cpp/build/packaging
+
+      - name: Upload msi artifact (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: syspeek-windows-msi
+          path: |
+            cpp/build/packaging/Syspeek-*-windows.msi
+            cpp/build/packaging/Syspeek-*-windows.msi.sha256
+            cpp/build/packaging/Syspeek-*-windows-portable.zip
+            cpp/build/packaging/Syspeek-*-windows-portable.zip.sha256
+          if-no-files-found: error
+      - name: Upload dmg artifact (mac)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: syspeek-macos-dmg
+          path: |
+            cpp/build/packaging/Syspeek-*-macos.dmg
+            cpp/build/packaging/Syspeek-*-macos.dmg.sha256
+          if-no-files-found: error

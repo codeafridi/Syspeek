@@ -1,10 +1,12 @@
 #include "ProcessGrouper.h"
 
-#include "LinuxProcess.h"
-
 #include <QSet>
 
 #include <algorithm>
+
+ProcessGrouper::ProcessGrouper(SystemBackend &backend)
+    : m_backend(backend) {
+}
 
 QList<int> ProcessGrouper::descendants(int rootPid,
                                        const QHash<int, int> &parentOf) {
@@ -75,25 +77,25 @@ QList<ProcNode> ProcessGrouper::orderedTree(int rootPid,
 ProcessGroup ProcessGrouper::discover(int focusPid) const {
     ProcessGroup group;
 
-    if (focusPid <= 0 || !linuxproc::exists(focusPid)) {
+    if (focusPid <= 0 || !m_backend.exists(focusPid)) {
         return group;
     }
 
-    const QString focusedExe = linuxproc::exePath(focusPid);
-    const QString focusedName = linuxproc::comm(focusPid);
+    const QString focusedExe = m_backend.exePath(focusPid);
+    const QString focusedName = m_backend.comm(focusPid);
 
     int root = focusPid;
     int current = focusPid;
     while (true) {
-        const int parent = linuxproc::parentPid(current);
+        const int parent = m_backend.parentPid(current);
         if (parent <= 1) {
             break;
         }
 
-        const QString parentExe = linuxproc::exePath(parent);
+        const QString parentExe = m_backend.exePath(parent);
         const bool sameExe =
             !focusedExe.isEmpty() && parentExe == focusedExe;
-        const bool sameName = linuxproc::comm(parent) == focusedName;
+        const bool sameName = m_backend.comm(parent) == focusedName;
 
         if (!sameExe && !sameName) {
             break;
@@ -104,9 +106,9 @@ ProcessGroup ProcessGrouper::discover(int focusPid) const {
     }
 
     QHash<int, int> parentOf;
-    const QList<int> pids = linuxproc::allPids();
+    const QList<int> pids = m_backend.allPids();
     for (int pid : pids) {
-        const int parent = linuxproc::parentPid(pid);
+        const int parent = m_backend.parentPid(pid);
         if (parent > 0) {
             parentOf.insert(pid, parent);
         }

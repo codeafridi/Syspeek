@@ -7,12 +7,27 @@
 #include <QHash>
 #include <QList>
 
+#if !defined(Q_OS_WIN)
 #include <unistd.h>
+#endif
 
+#if !defined(Q_OS_WIN)
 #include <sys/socket.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
+#if defined(Q_OS_WIN)
+int main() {
+    std::printf("skip: POSIX-only test\n");
+    return 0;
+}
+#else
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
@@ -365,7 +380,8 @@ int main(int argc, char *argv[]) {
     }
 
     // ---- real /proc ----
-    const int self = static_cast<int>(::getpid());
+#ifdef Q_OS_LINUX
+    const int self = GETPID();
     unsigned long long rss = 0;
     check(linuxproc::rssKb(self, rss), "rssKb(self) read succeeds");
     check(rss > 0, "rssKb(self) is positive");
@@ -452,6 +468,7 @@ int main(int argc, char *argv[]) {
                   && h2.cpuPercent <= 100.0,
               "host sampler real: second measured 0-100%");
     }
+#endif
 
     // ---- group sum (deterministic seam) ----
     {
@@ -484,6 +501,7 @@ int main(int argc, char *argv[]) {
     }
 
     // ---- group sum (real /proc) ----
+#ifdef Q_OS_LINUX
     {
         unsigned long long total = 0;
         check(linuxproc::sumRssKb(QList<int>{self}, total) && total > 0,
@@ -494,7 +512,10 @@ int main(int argc, char *argv[]) {
 
     std::printf("sample rss(self)=%llu kB -> %s\n", rss,
                 qUtf8Printable(formatMemoryKb(rss)));
+#endif
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
+
+#endif

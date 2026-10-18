@@ -29,5 +29,6 @@ struct TcpHealth {
 TcpCounters parseTcpCounters(const QByteArray &snmp, const QByteArray &netstat);
 TcpHealth computeTcpHealth(const TcpCounters &previous,
                            const TcpCounters &current, double intervalMs);
+bool tcpCountersRedacted(const TcpCounters &counters);
 QString tcpHealthSummaryText(const TcpHealth &health);
 QString tcpHealthDetailText(const TcpHealth &health);

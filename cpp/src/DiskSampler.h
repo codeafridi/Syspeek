@@ -2,6 +2,8 @@
 
 #include "DiskStatus.h"
 
+#include "platform/SystemBackend.h"
+
 #include <QElapsedTimer>
 
 #include <functional>
@@ -9,8 +11,10 @@
 struct DiskSource {
     std::function<bool(QByteArray &)> diskstats;
     std::function<bool(QByteArray &)> pressure;
+    std::function<bool(QList<DiskCounters> &)> counters;
 
     static DiskSource system();
+    static DiskSource fromBackend(SystemBackend &backend);
 };
 
 class DiskSampler {

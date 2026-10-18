@@ -1,9 +1,9 @@
 #include "SamplerWorker.h"
 
 #include "FocusedWindowProvider.h"
-#include "LinuxProcess.h"
 #include "MemoryFormat.h"
 #include "ProcessGrouper.h"
+#include "platform/PortCatalog.h"
 
 #include <QDateTime>
 #include <QFile>
@@ -14,10 +14,17 @@
 
 SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
                              const Config &config,
+                             std::unique_ptr<SystemBackend> backend,
                              QObject *parent)
     : QObject(parent)
     , m_provider(provider)
-    , m_sampler(provider)
+    , m_backend(backend ? std::move(backend) : createSystemBackend())
+    , m_sampler(provider, *m_backend)
+    , m_cpuSampler(CpuSource::fromBackend(*m_backend))
+    , m_hostSampler(HostSource::fromBackend(*m_backend))
+    , m_diskSampler(DiskSource::fromBackend(*m_backend))
+    , m_tcpSampler(TcpSource::fromBackend(*m_backend))
+    , m_groupCache(5000, *m_backend)
     , m_health(config.health) {
     m_intervalMs = config.sampleIntervalMs;
     m_sloSpec.name = config.slo.name;
@@ -27,6 +34,10 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
 }
 
 void SamplerWorker::start() {
+    if (!m_hostInfoReady) {
+        m_hostInfo = collectHostInfo();
+        m_hostInfoReady = true;
+    }
     if (m_timer == nullptr) {
         m_timer = new QTimer(this);
         m_timer->setInterval(m_intervalMs);
@@ -85,12 +96,12 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     }
 
     unsigned long long rss = 0;
-    const bool rssValid = linuxproc::sumRssKb(group.pids, rss);
+    const bool rssValid = m_backend->sumRssKb(group.pids, rss);
     m_memText = rssValid ? formatMemoryKb(rss) : QStringLiteral("--");
 
     QHash<int, int> parentOf;
     for (int pid : group.pids) {
-        const int ppid = linuxproc::parentPid(pid);
+        const int ppid = m_backend->parentPid(pid);
         if (ppid > 0) {
             parentOf.insert(pid, ppid);
         }
@@ -109,7 +120,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     for (const ProcNode &node : tree) {
         linuxproc::MemInfo info;
         linuxproc::ProcDetail detail;
-        if (!linuxproc::procSample(node.pid, info, detail)) {
+        if (!m_backend->procSample(node.pid, info, detail)) {
             continue;
         }
         rssTotal += info.rssKb;
@@ -128,7 +139,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         row.threads = detail.threads;
         row.fds = detail.fdCount;
         row.cpuPercent = cpu.perPidPercent.value(node.pid, 0.0);
-        row.name = linuxproc::comm(node.pid);
+        row.name = m_backend->comm(node.pid);
         if (row.name.isEmpty()) {
             row.name = QString::number(node.pid);
         }
@@ -145,12 +156,11 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         snap.focusInvolCtx = rootDetail.involuntaryCtx;
         snap.focusIoReadPerSec = rate.readPerSec;
         snap.focusIoWritePerSec = rate.writePerSec;
-        snap.focusOpenFiles = linuxproc::fdTargets(rootPid);
-        linuxproc::sharedLibraries(rootPid, snap.dependencies);
+        snap.focusOpenFiles = m_backend->fdTargets(rootPid);
+        m_backend->sharedLibraries(rootPid, snap.dependencies);
 
         QStringList sbomPaths = snap.dependencies;
-        const QString exe =
-            QFile::symLinkTarget(QStringLiteral("/proc/%1/exe").arg(rootPid));
+        const QString exe = m_backend->exePath(rootPid);
         if (!exe.isEmpty()) {
             sbomPaths.append(exe);
         }
@@ -165,7 +175,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
 
     QSet<unsigned long long> inodeSet;
     for (const ProcNode &node : tree) {
-        const QList<unsigned long long> inodes = linuxproc::socketInodes(node.pid);
+        const QList<unsigned long long> inodes =
+            m_backend->socketInodes(node.pid);
         for (unsigned long long inode : inodes) {
             inodeSet.insert(inode);
         }
@@ -177,7 +188,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     QList<QString> dbConnections;
     QHash<QString, int> stateCounts;
     QSet<QString> listenSeen;
-    const QList<linuxproc::SocketInfo> sockets = linuxproc::readNetSockets();
+    const QList<linuxproc::SocketInfo> sockets = m_backend->readNetSockets();
     for (const linuxproc::SocketInfo &socket : sockets) {
         stateCounts[socket.state] += 1;
 
@@ -197,9 +208,9 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                 entry.proto = socket.proto;
                 entry.addr = socket.localAddr;
                 entry.port = socket.localPort;
-                entry.exposure = linuxproc::endpointExposure(socket.localAddr);
-                entry.service = linuxproc::serviceForPort(socket.localPort);
-                entry.database = linuxproc::portIsDatabase(socket.localPort);
+                entry.exposure = portcatalog::endpointExposure(socket.localAddr);
+                entry.service = portcatalog::serviceForPort(socket.localPort);
+                entry.database = portcatalog::portIsDatabase(socket.localPort);
                 endpoints.append(entry);
             }
         }
@@ -221,14 +232,14 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         row.state = socket.state;
         connections.append(row);
 
-        if (linuxproc::portIsDatabase(socket.remotePort)) {
+        if (portcatalog::portIsDatabase(socket.remotePort)) {
             dbConnections.append(
                 QStringLiteral("%1:%2 -> %3:%4 (%5)")
                     .arg(socket.localAddr)
                     .arg(socket.localPort)
                     .arg(socket.remoteAddr)
                     .arg(socket.remotePort)
-                    .arg(linuxproc::serviceForPort(socket.remotePort)));
+                    .arg(portcatalog::serviceForPort(socket.remotePort)));
         }
     }
     snap.connections = connections;
@@ -236,14 +247,17 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     snap.endpoints = endpoints;
     snap.dbConnections = dbConnections;
 
-    linuxproc::processInstrumentation(focus.identity.pid, snap.instrumentation);
+    m_backend->processInstrumentation(focus.identity.pid, snap.instrumentation);
 
     SecurityInput securityInput;
     if (readSecurityInput(focus.identity.pid, securityInput)) {
         snap.security = evaluateSecurity(securityInput);
+    } else if (QList<SecurityFinding> hostFindings;
+               m_backend->hostSecurityPosture(hostFindings)) {
+        snap.security = postureFromFindings(hostFindings);
     }
 
-    snap.runtime = detectRuntime(focus.identity.pid);
+    snap.runtime = detectRuntime(focus.identity.pid, *m_backend);
 
     snap.profile = m_profileSampler.sample(focus.identity.pid);
 
@@ -258,7 +272,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     snap.socketStateCounts = counts;
 
     QList<linuxproc::InterfaceStats> interfaceStats;
-    if (linuxproc::hostInterfaces(interfaceStats)) {
+    if (m_backend->hostInterfaces(interfaceStats)) {
         QList<InterfaceRow> interfaceRows;
         for (const linuxproc::InterfaceStats &stats : interfaceStats) {
             InterfaceRow row;
@@ -275,7 +289,9 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     }
 
     linuxproc::CgroupInfo cgroup;
-    if (linuxproc::cgroupSample(focus.identity.pid, cgroup) && cgroup.available) {
+    if (m_backend->capabilities().cgroups
+        && m_backend->cgroupSample(focus.identity.pid, cgroup)
+        && cgroup.available) {
         snap.cgroupAvailable = true;
         snap.cgroupVersion = cgroup.version;
         snap.cgroupPath = cgroup.path;
@@ -316,6 +332,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         snap.hostLoad1 = host.load1;
     }
 
+    snap.hostInfo = m_hostInfo;
+
     const DiskSnapshot disk = m_diskSampler.sample();
     snap.disksAvailable = disk.available;
     snap.disksWarming = disk.warming;
@@ -327,6 +345,18 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     const TcpHealth tcp = m_tcpSampler.sample();
     snap.tcpHealth = tcp;
     snap.tcpHealthAvailable = tcp.available;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    if (tcp.available) {
+        int established = 0;
+        for (const linuxproc::SocketInfo &socket : sockets) {
+            if (socket.proto.startsWith(QStringLiteral("tcp"))
+                && socket.state == QStringLiteral("ESTABLISHED")) {
+                ++established;
+            }
+        }
+        snap.tcpHealth.currEstab = established;
+    }
+#endif
 
     return snap;
 }

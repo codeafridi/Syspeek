@@ -158,6 +158,21 @@ the distro's own Qt; "Portable" = the bundled one-liner install, with no Qt pres
 x86-64 architecture. Untested but expected to work: Gentoo, Void, NixOS,
 SteamOS/Bazzite (glibc ≥ 2.34).
 
+### macOS (beta, 0.7+)
+
+Same HUD with native collectors (libproc / mach / IOKit / OSLogStore /
+launchd / Homebrew). See [docs/macos.md](docs/macos.md) for the DMG
+install, Gatekeeper first-run steps, `install_macos.sh` service
+management and the supported-feature matrix.
+
+### Windows (beta, 0.8+)
+
+Same HUD with native collectors (GetSystemTimes / Toolhelp32 /
+NtQuerySystemInformation / PDH / SCM / EventLog / registry). See
+[docs/windows.md](docs/windows.md) for the MSI install, the portable
+zip, SmartScreen first-run steps, autostart and the supported-feature
+matrix.
+
 ## Use
 
 - **Drag** the panel anywhere (grab it, including the buttons).

@@ -73,6 +73,22 @@ void DbmSource::onTick() {
         parseActiveQueries(active, snapshot);
     }
 
+    // Top statements by total execution time (pg_stat_statements), adapting
+    // column names across PostgreSQL versions (total_time vs total_exec_time).
+    QList<QStringList> statements;
+    const QString statementQuery = QStringLiteral(
+        "SELECT s.queryid, s.calls, "
+        "COALESCE((to_jsonb(s)->>'total_exec_time')::float8,"
+        "(to_jsonb(s)->>'total_time')::float8,0), "
+        "COALESCE((to_jsonb(s)->>'mean_exec_time')::float8,"
+        "(to_jsonb(s)->>'mean_time')::float8,0), "
+        "s.rows, left(s.query,160) "
+        "FROM pg_stat_statements s WHERE s.queryid IS NOT NULL "
+        "ORDER BY 3 DESC LIMIT 10");
+    if (m_pg.query(statementQuery, statements) && !statements.isEmpty()) {
+        parseStatements(statements, snapshot);
+    }
+
     if (snapshot.available) {
         if (m_haveBaseline && m_rateTimer.isValid()) {
             const double seconds =

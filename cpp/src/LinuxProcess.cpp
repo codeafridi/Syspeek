@@ -1,15 +1,21 @@
 #include "LinuxProcess.h"
 
+#include "platform/PortCatalog.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSet>
 
 #include <algorithm>
-
+#if defined(Q_OS_WIN)
+#include <io.h>
+#include <process.h>
+#else
 #include <unistd.h>
 
 #include <sys/statvfs.h>
+#endif
 
 namespace linuxproc {
 
@@ -474,6 +480,10 @@ QByteArray readFileBytes(const QString &path) {
 
 QList<unsigned long long> socketInodes(int pid) {
     QList<unsigned long long> inodes;
+#if defined(Q_OS_WIN)
+    Q_UNUSED(pid);
+    return inodes;
+#else
     const QString dir = procPath(pid, "fd");
     const QStringList entries =
         QDir(dir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
@@ -500,10 +510,15 @@ QList<unsigned long long> socketInodes(int pid) {
         }
     }
     return inodes;
+#endif
 }
 
 QList<QString> fdTargets(int pid) {
     QList<QString> targets;
+#if defined(Q_OS_WIN)
+    Q_UNUSED(pid);
+    return targets;
+#else
     const QString dir = procPath(pid, "fd");
     const QStringList entries =
         QDir(dir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
@@ -521,6 +536,7 @@ QList<QString> fdTargets(int pid) {
         }
     }
     return targets;
+#endif
 }
 
 bool parseNetTable(const QByteArray &content, const QString &proto,
@@ -897,6 +913,14 @@ bool hostLoad(double &l1, double &l5, double &l15) {
 
 bool diskUsage(const QString &path, unsigned long long &totalBytes,
                unsigned long long &freeBytes) {
+#if defined(Q_OS_WIN)
+    Q_UNUSED(path);
+    Q_UNUSED(totalBytes);
+    Q_UNUSED(freeBytes);
+    // Never used on Windows (the WindowsBackend owns diskUsage there);
+    // statvfs has no MinGW/MSVC equivalent in the POSIX form.
+    return false;
+#else
     struct statvfs stats;
     if (::statvfs(path.toLocal8Bit().constData(), &stats) != 0) {
         return false;
@@ -906,6 +930,7 @@ bool diskUsage(const QString &path, unsigned long long &totalBytes,
     totalBytes = static_cast<unsigned long long>(stats.f_blocks) * fragment;
     freeBytes = static_cast<unsigned long long>(stats.f_bavail) * fragment;
     return true;
+#endif
 }
 
 bool parseNetDevInterfaces(const QByteArray &content, QList<InterfaceStats> &out) {
@@ -982,105 +1007,22 @@ double netRatePerSec(unsigned long long prev, unsigned long long cur,
 }
 
 QString serviceForPort(quint16 port) {
-    switch (port) {
-    case 5432:
-    case 5433:
-        return QStringLiteral("postgres");
-    case 3306:
-        return QStringLiteral("mysql");
-    case 33060:
-        return QStringLiteral("mysqlx");
-    case 6379:
-        return QStringLiteral("redis");
-    case 27017:
-    case 27018:
-    case 27019:
-        return QStringLiteral("mongodb");
-    case 1521:
-        return QStringLiteral("oracle");
-    case 1433:
-        return QStringLiteral("mssql");
-    case 9042:
-        return QStringLiteral("cassandra");
-    case 9200:
-    case 9300:
-        return QStringLiteral("elasticsearch");
-    case 5672:
-    case 15672:
-        return QStringLiteral("rabbitmq");
-    case 9092:
-        return QStringLiteral("kafka");
-    case 11211:
-        return QStringLiteral("memcached");
-    case 26257:
-        return QStringLiteral("cockroachdb");
-    case 5984:
-        return QStringLiteral("couchdb");
-    case 8086:
-        return QStringLiteral("influxdb");
-    case 80:
-        return QStringLiteral("http");
-    case 443:
-        return QStringLiteral("https");
-    case 22:
-        return QStringLiteral("ssh");
-    case 25:
-        return QStringLiteral("smtp");
-    case 53:
-        return QStringLiteral("dns");
-    case 631:
-        return QStringLiteral("ipp");
-    case 5353:
-        return QStringLiteral("mdns");
-    case 8080:
-        return QStringLiteral("http-alt");
-    default:
-        return QString();
-    }
+    return portcatalog::serviceForPort(port);
 }
 
 bool portIsDatabase(quint16 port) {
-    switch (port) {
-    case 5432:
-    case 5433:
-    case 3306:
-    case 33060:
-    case 6379:
-    case 27017:
-    case 27018:
-    case 27019:
-    case 1521:
-    case 1433:
-    case 9042:
-    case 9200:
-    case 9300:
-    case 5672:
-    case 11211:
-    case 26257:
-    case 5984:
-    case 8086:
-        return true;
-    default:
-        return false;
-    }
+    return portcatalog::portIsDatabase(port);
 }
 
 QString endpointExposure(const QString &addr) {
-    if (addr == QStringLiteral("::") || addr == QStringLiteral("0.0.0.0")) {
-        return QStringLiteral("public");
-    }
-    if (addr.startsWith(QStringLiteral("127.")) || addr == QStringLiteral("::1")
-        || addr == QStringLiteral("localhost")) {
-        return QStringLiteral("local");
-    }
-    return QStringLiteral("public");
+    return portcatalog::endpointExposure(addr);
 }
 
-bool parseInstrumentation(const QByteArray &environ, const QByteArray &maps,
+bool parseInstrumentation(const QByteArray &envData, const QByteArray &maps,
                           QList<QString> &agents) {
     QSet<QString> found;
 
-    const QList<QByteArray> entries = environ.split('\0');
+    const QList<QByteArray> entries = envData.split('\0');
     for (const QByteArray &entry : entries) {
         const int equals = entry.indexOf('=');
         if (equals <= 0) {
@@ -1132,9 +1074,9 @@ bool parseInstrumentation(const QByteArray &environ, const QByteArray &maps,
 
 bool processInstrumentation(int pid, QList<QString> &agents) {
     agents.clear();
-    const QByteArray environ = readFileBytes(procPath(pid, "environ"));
+    const QByteArray envData = readFileBytes(procPath(pid, "environ"));
     const QByteArray maps = readFileBytes(procPath(pid, "maps"));
-    return parseInstrumentation(environ, maps, agents);
+    return parseInstrumentation(envData, maps, agents);
 }
 
 bool parseStatmShared(const QByteArray &statmContent, unsigned long long pageSize,
@@ -1165,7 +1107,11 @@ bool procMem(int pid, MemInfo &out) {
 
     QFile statm(procPath(pid, "statm"));
     if (statm.open(QIODevice::ReadOnly)) {
+#if defined(Q_OS_WIN)
+        const long page = 4096;
+#else
         const long page = ::sysconf(_SC_PAGESIZE);
+#endif
         const unsigned long long pageSize =
             page > 0 ? static_cast<unsigned long long>(page) : 4096ULL;
         unsigned long long shared = 0;
@@ -1196,7 +1142,11 @@ bool procSample(int pid, MemInfo &mem, ProcDetail &detail) {
 
     QFile statm(procPath(pid, "statm"));
     if (statm.open(QIODevice::ReadOnly)) {
+#if defined(Q_OS_WIN)
+        const long page = 4096;
+#else
         const long page = ::sysconf(_SC_PAGESIZE);
+#endif
         const unsigned long long pageSize =
             page > 0 ? static_cast<unsigned long long>(page) : 4096ULL;
         unsigned long long shared = 0;

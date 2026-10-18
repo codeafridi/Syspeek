@@ -1,5 +1,7 @@
 #include "DashboardPanel.h"
 
+#include "platform/PlatformFactory.h"
+
 #include "LogParser.h"
 #include "MemoryFormat.h"
 #include "SensitiveStatus.h"
@@ -96,9 +98,23 @@ QFrame *makeStatCard(const QString &caption, QWidget *content, QWidget *parent) 
 
 } // namespace
 
+QString DashboardPanel::unsupportedOsText() const {
+    return QStringLiteral("not supported on this OS (%1)").arg(m_osName);
+}
+
 DashboardPanel::DashboardPanel(QWidget *parent)
     : QWidget(parent) {
     setObjectName(QStringLiteral("ddRoot"));
+
+    const PlatformCapabilities osCaps = systemBackend().capabilities();
+    m_osTcpCounters = osCaps.tcpCounters;
+    m_osCgroups = osCaps.cgroups;
+    m_osPsi = osCaps.psi;
+    m_osJournal = osCaps.journal;
+    m_osDpkgSbom = osCaps.sbom;
+    m_osFim = osCaps.fim;
+    m_osSecurity = osCaps.namespaces;
+    m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -155,6 +171,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Alerts"), QStringLiteral("Incidents"), QStringLiteral("SLO"),
                       QStringLiteral("Processes"), QStringLiteral("Memory"),
                       QStringLiteral("Disks"),
+                      QStringLiteral("Host"),
                       QStringLiteral("Network"),
                       QStringLiteral("Network Path"),
                       QStringLiteral("Containers"), QStringLiteral("Kubernetes"),
@@ -179,6 +196,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildProcessesView());
     m_views->addWidget(buildMemoryView());
     m_views->addWidget(buildDisksView());
+    m_views->addWidget(buildHostView());
     m_views->addWidget(buildNetworkView());
     m_views->addWidget(buildNetworkPathView());
     m_views->addWidget(buildContainersView());
@@ -237,6 +255,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddSecuritySummary { color: #c4cad1; }"
         "#ddSecurity { color: #9aa2ac; }"
         "#ddThreats { color: #9aa2ac; }"
+        "#ddFimSummary { color: #c4cad1; }"
+        "#ddFim { color: #9aa2ac; }"
         "#ddSoftwareSummary { color: #c4cad1; }"
         "#ddSoftware { color: #9aa2ac; }"
         "#ddPathSummary { color: #c4cad1; }"
@@ -245,6 +265,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddStatsd { color: #9aa2ac; }"
         "#ddDbmSummary { color: #c4cad1; }"
         "#ddDbm { color: #9aa2ac; }"
+        "#ddDbmStatements { color: #9aa2ac; }"
         "#ddWatchdog { color: #9aa2ac; }"
         "#ddRuntime { color: #9aa2ac; }"
         "#ddForecast { color: #9aa2ac; }"
@@ -260,6 +281,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddSloSummary { color: #c4cad1; }"
         "#ddSlo { color: #9aa2ac; }"
         "#ddDeprecations { color: #9aa2ac; }"
+        "#ddHostInfoSummary { color: #c4cad1; }"
+        "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: #9aa2ac; }"
         "#ddServices, #ddServicesSummary, #ddDeps { color: #c4cad1; }"
         "#ddServicesChanges { color: #c4cad1; }"
         "#ddLogs, #ddLogsSummary, #ddErrors { color: #c4cad1; }"
@@ -874,6 +897,13 @@ QWidget *DashboardPanel::buildDatabasesView() {
     m_dbm->setWordWrap(false);
     layout->addWidget(makeCard(QStringLiteral("DBM"), m_dbm, view), 1);
 
+    m_dbmStatements = new QLabel(QStringLiteral("--"), view);
+    m_dbmStatements->setObjectName(QStringLiteral("ddDbmStatements"));
+    m_dbmStatements->setFont(monoFont(10));
+    m_dbmStatements->setWordWrap(false);
+    layout->addWidget(
+        makeCard(QStringLiteral("TOP QUERIES (pg_stat_statements)"), m_dbmStatements, view), 1);
+
     m_databases = new QLabel(QStringLiteral("--"), view);
     m_databases->setObjectName(QStringLiteral("ddDatabases"));
     m_databases->setFont(monoFont(10));
@@ -1039,6 +1069,49 @@ QWidget *DashboardPanel::buildDisksView() {
     return view;
 }
 
+QWidget *DashboardPanel::buildHostView() {
+    auto *view = new QWidget(this);
+    auto *layout = new QVBoxLayout(view);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(10);
+
+    m_hostInfoSummary = new QLabel(QStringLiteral("--"), view);
+    m_hostInfoSummary->setObjectName(QStringLiteral("ddHostInfoSummary"));
+    m_hostInfoSummary->setFont(monoFont(13, true));
+    layout->addWidget(
+        makeCard(QStringLiteral("HOST INVENTORY"), m_hostInfoSummary, view));
+
+    auto *row1 = new QHBoxLayout;
+    row1->setSpacing(10);
+    m_hostPlatform = new QLabel(QStringLiteral("--"), view);
+    m_hostPlatform->setObjectName(QStringLiteral("ddHostPlatform"));
+    m_hostPlatform->setFont(monoFont(10));
+    m_hostPlatform->setWordWrap(false);
+    row1->addWidget(makeCard(QStringLiteral("PLATFORM"), m_hostPlatform, view), 1);
+    m_hostCpuInfo = new QLabel(QStringLiteral("--"), view);
+    m_hostCpuInfo->setObjectName(QStringLiteral("ddHostCpuInfo"));
+    m_hostCpuInfo->setFont(monoFont(10));
+    m_hostCpuInfo->setWordWrap(false);
+    row1->addWidget(makeCard(QStringLiteral("CPU"), m_hostCpuInfo, view), 1);
+    layout->addLayout(row1, 1);
+
+    auto *row2 = new QHBoxLayout;
+    row2->setSpacing(10);
+    m_hostFilesystems = new QLabel(QStringLiteral("--"), view);
+    m_hostFilesystems->setObjectName(QStringLiteral("ddHostFilesystems"));
+    m_hostFilesystems->setFont(monoFont(10));
+    m_hostFilesystems->setWordWrap(false);
+    row2->addWidget(
+        makeCard(QStringLiteral("FILESYSTEMS"), m_hostFilesystems, view), 1);
+    m_hostNetwork = new QLabel(QStringLiteral("--"), view);
+    m_hostNetwork->setObjectName(QStringLiteral("ddHostNetInfo"));
+    m_hostNetwork->setFont(monoFont(10));
+    m_hostNetwork->setWordWrap(false);
+    row2->addWidget(makeCard(QStringLiteral("NETWORK"), m_hostNetwork, view), 1);
+    layout->addLayout(row2, 1);
+    return view;
+}
+
 QWidget *DashboardPanel::buildSecurityView() {
     auto *view = new QWidget(this);
     auto *layout = new QVBoxLayout(view);
@@ -1064,6 +1137,19 @@ QWidget *DashboardPanel::buildSecurityView() {
     m_threats->setWordWrap(false);
     layout->addWidget(
         makeCard(QStringLiteral("THREATS (log-based SIEM)"), m_threats, view), 1);
+
+    m_fimSummary = new QLabel(QStringLiteral("--"), view);
+    m_fimSummary->setObjectName(QStringLiteral("ddFimSummary"));
+    m_fimSummary->setFont(monoFont(13, true));
+    layout->addWidget(
+        makeCard(QStringLiteral("FILE INTEGRITY (FIM)"), m_fimSummary, view));
+
+    m_fim = new QLabel(QStringLiteral("--"), view);
+    m_fim->setObjectName(QStringLiteral("ddFim"));
+    m_fim->setFont(monoFont(10));
+    m_fim->setWordWrap(false);
+    layout->addWidget(
+        makeCard(QStringLiteral("FILE CHANGES"), m_fim, view), 1);
 
     return view;
 }
@@ -1242,6 +1328,9 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     if (snapshot.tcpHealthAvailable) {
         m_tcpSummary->setText(tcpHealthSummaryText(snapshot.tcpHealth));
         m_tcp->setText(tcpHealthDetailText(snapshot.tcpHealth));
+    } else if (!m_osTcpCounters) {
+        m_tcpSummary->setText(unsupportedOsText());
+        m_tcp->setText(unsupportedOsText());
     } else {
         m_tcpSummary->setText(QStringLiteral("warming up"));
         m_tcp->setText(QStringLiteral("--"));
@@ -1266,6 +1355,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                     .arg(snapshot.cgroupThrottled)
                     .arg(snapshot.cgroupPeriods);
         m_cgroup->setText(text);
+    } else if (!m_osCgroups) {
+        m_cgroup->setText(unsupportedOsText());
     } else {
         m_cgroup->setText(QStringLiteral("no cgroup stats"));
     }
@@ -1340,6 +1431,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 .arg(snapshot.ioPressure.fullAvg10, 0, 'f', 2)
                 .arg(snapshot.ioPressure.fullAvg60, 0, 'f', 2)
                 .arg(snapshot.ioPressure.fullAvg300, 0, 'f', 2));
+    } else if (!m_osPsi) {
+        m_diskPressure->setText(unsupportedOsText());
     } else {
         m_diskPressure->setText(QStringLiteral("not available"));
     }
@@ -1365,17 +1458,28 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_disks->addTopLevelItem(item);
     }
 
+    m_hostInfoSummary->setText(hostInfoSummaryText(snapshot.hostInfo));
+    m_hostPlatform->setText(hostInfoPlatformText(snapshot.hostInfo));
+    m_hostCpuInfo->setText(hostInfoCpuText(snapshot.hostInfo));
+    m_hostFilesystems->setText(hostInfoFilesystemsText(snapshot.hostInfo));
+    m_hostNetwork->setText(hostInfoNetworkText(snapshot.hostInfo));
+
     if (snapshot.security.available) {
         m_securitySummary->setText(securitySummaryText(snapshot.security));
         m_security->setText(securityDetailText(snapshot.security));
+    } else if (!m_osSecurity) {
+        m_securitySummary->setText(unsupportedOsText());
+        m_security->setText(unsupportedOsText());
     } else {
         m_securitySummary->setText(QStringLiteral("--"));
         m_security->setText(QStringLiteral("--"));
     }
 
     m_softwareSummary->setText(sbomSummaryText(snapshot.sbom));
-    m_software->setText(snapshot.sbom.available ? sbomDetailText(snapshot.sbom)
-                                                : QStringLiteral("--"));
+    m_software->setText(snapshot.sbom.available
+                            ? sbomDetailText(snapshot.sbom)
+                            : (m_osDpkgSbom ? QStringLiteral("--")
+                                            : unsupportedOsText()));
 
     m_sloSummary->setText(sloSummaryText(snapshot.slo));
     m_slo->setText(sloDetailText(snapshot.slo));
@@ -1589,11 +1693,14 @@ void DashboardPanel::setServicesSnapshot(const ServicesSnapshot &snapshot) {
 
 void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
     m_logsSummary->setText(journalSummaryText(snapshot));
-    m_logs->setText(snapshot.available ? journalLogsText(snapshot, 40)
-                                       : QStringLiteral("--"));
+    m_logs->setText(snapshot.available
+                        ? journalLogsText(snapshot, 40)
+                        : (m_osJournal ? QStringLiteral("--")
+                                       : unsupportedOsText()));
     m_errors->setText(snapshot.available
                           ? journalErrorGroupsText(snapshot.errorGroups)
-                          : QStringLiteral("--"));
+                          : (m_osJournal ? QStringLiteral("--")
+                                         : unsupportedOsText()));
 
     QStringList messages;
     for (const JournalEntry &entry : snapshot.entries) {
@@ -1688,9 +1795,16 @@ void DashboardPanel::setStatsdSnapshot(const StatsdSnapshot &snapshot) {
 void DashboardPanel::setDbmSnapshot(const DbmSnapshot &snapshot) {
     m_dbmSummary->setText(dbmSummaryText(snapshot));
     m_dbm->setText(dbmDetailText(snapshot));
+    m_dbmStatements->setText(dbmStatementsText(snapshot));
 }
 
 void DashboardPanel::setTlsSnapshot(const TlsSnapshot &snapshot) {
     m_tlsSummary->setText(tlsSummaryText(snapshot));
     m_tls->setText(tlsDetailText(snapshot));
+}
+
+void DashboardPanel::setFimSnapshot(const FimSnapshot &snapshot) {
+    m_fimSummary->setText(m_osFim ? fimSummaryText(snapshot)
+                                  : unsupportedOsText());
+    m_fim->setText(m_osFim ? fimDetailText(snapshot) : unsupportedOsText());
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/PlatformFactory.h"
+
 #include <QHash>
 #include <QList>
 
@@ -16,6 +18,8 @@ struct ProcNode {
 
 class ProcessGrouper {
 public:
+    explicit ProcessGrouper(SystemBackend &backend = systemBackend());
+
     static QList<int> descendants(int rootPid,
                                   const QHash<int, int> &parentOf);
 
@@ -23,4 +27,7 @@ public:
                                        const QHash<int, int> &parentOf);
 
     ProcessGroup discover(int focusPid) const;
+
+private:
+    SystemBackend &m_backend;
 };

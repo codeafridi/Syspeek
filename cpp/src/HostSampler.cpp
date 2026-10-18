@@ -1,19 +1,29 @@
 #include "HostSampler.h"
 
-HostSource HostSource::system() {
+#include "platform/PlatformFactory.h"
+
+HostSource HostSource::fromBackend(SystemBackend &backend) {
     HostSource source;
-    source.cpu = [](linuxproc::HostCpuTimes &out) {
-        return linuxproc::hostCpuTimes(out);
+    source.cpu = [&backend](linuxproc::HostCpuTimes &out) {
+        return backend.hostCpuTimes(out);
     };
-    source.mem = [](linuxproc::HostMem &out) { return linuxproc::hostMem(out); };
-    source.net = [](linuxproc::NetTotals &out) { return linuxproc::hostNet(out); };
-    source.load = [](double &l1, double &l5, double &l15) {
-        return linuxproc::hostLoad(l1, l5, l15);
+    source.mem = [&backend](linuxproc::HostMem &out) {
+        return backend.hostMem(out);
     };
-    source.disk = [](unsigned long long &total, unsigned long long &free) {
-        return linuxproc::diskUsage(QStringLiteral("/"), total, free);
+    source.net = [&backend](linuxproc::NetTotals &out) {
+        return backend.hostNet(out);
+    };
+    source.load = [&backend](double &l1, double &l5, double &l15) {
+        return backend.hostLoad(l1, l5, l15);
+    };
+    source.disk = [&backend](unsigned long long &total, unsigned long long &free) {
+        return backend.diskUsage(QStringLiteral("/"), total, free);
     };
     return source;
+}
+
+HostSource HostSource::system() {
+    return fromBackend(systemBackend());
 }
 
 HostSampler::HostSampler(HostSource source)

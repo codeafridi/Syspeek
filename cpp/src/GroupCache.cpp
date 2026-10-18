@@ -2,8 +2,9 @@
 
 #include <QDateTime>
 
-GroupCache::GroupCache(int intervalMs)
-    : m_intervalMs(intervalMs > 0 ? intervalMs : 5000) {
+GroupCache::GroupCache(int intervalMs, SystemBackend &backend)
+    : m_grouper(backend)
+    , m_intervalMs(intervalMs > 0 ? intervalMs : 5000) {
 }
 
 const ProcessGroup &GroupCache::pidsFor(const ProcessIdentity &focus, bool force) {

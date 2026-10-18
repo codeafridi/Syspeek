@@ -1,5 +1,7 @@
 #include "RuntimeStatus.h"
 
+#include "platform/SystemBackend.h"
+
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -128,8 +130,7 @@ RuntimeInfo detectRuntime(int pid) {
 
     info.runtime = languageFromCommand(exeName, cmdline);
 
-    if (info.runtime == Runtime::Unknown) {
-        QFile maps(base + QStringLiteral("/maps"));
+    if (info.runtime == Runtime::Unknown) {        QFile maps(base + QStringLiteral("/maps"));
         if (maps.open(QIODevice::ReadOnly)
             && mapsHasDotnet(maps.readAll())) {
             info.runtime = Runtime::Dotnet;
@@ -148,9 +149,9 @@ RuntimeInfo detectRuntime(int pid) {
     info.name = runtimeName(info.runtime);
 
     // SSI / APM instrumentation hints (LD_PRELOAD, lang agent options).
-    QFile environ(base + QStringLiteral("/environ"));
-    if (environ.open(QIODevice::ReadOnly)) {
-        const QString env = QString::fromUtf8(environ.readAll());
+    QFile envFile(base + QStringLiteral("/environ"));
+    if (envFile.open(QIODevice::ReadOnly)) {
+        const QString env = QString::fromUtf8(envFile.readAll());
         if (env.contains(QStringLiteral("dd-trace"))
             || env.contains(QStringLiteral("datadog"))
             || env.contains(QStringLiteral("dd-java-agent"))) {
@@ -170,6 +171,40 @@ RuntimeInfo detectRuntime(int pid) {
                 info.instrumentation = QStringLiteral("opentelemetry");
             }
         }
+    }
+    return info;
+}
+
+RuntimeInfo detectRuntime(int pid, SystemBackend &backend) {
+    RuntimeInfo info;
+    info.exe = backend.exePath(pid);
+
+    QStringList cmdline;
+    const QString joined = backend.processCmdline(pid);
+    const QString exeName = !joined.isEmpty()
+                                ? QFileInfo(
+                                      joined.section(QLatin1Char(' '), 0, 0))
+                                      .fileName()
+                                : QFileInfo(info.exe).fileName();
+    if (!joined.isEmpty()) {
+        for (const QString &part : joined.split(QLatin1Char(' '))) {
+            if (!part.isEmpty()) {
+                cmdline.append(part);
+            }
+        }
+    }
+
+    info.runtime = languageFromCommand(exeName, cmdline);
+    info.name = runtimeName(info.runtime);
+
+    const QString env = QString::fromUtf8(backend.processEnv(pid));
+    if (env.contains(QStringLiteral("dd-trace"))
+        || env.contains(QStringLiteral("datadog"))
+        || env.contains(QStringLiteral("dd-java-agent"))) {
+        info.instrumentation = QStringLiteral("datadog");
+    } else if (env.contains(QStringLiteral("opentelemetry"))
+               || env.contains(QStringLiteral("otel"))) {
+        info.instrumentation = QStringLiteral("opentelemetry");
     }
     return info;
 }

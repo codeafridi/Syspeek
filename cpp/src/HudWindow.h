@@ -15,6 +15,7 @@
 #include "StatsdStatus.h"
 #include "DbmStatus.h"
 #include "TlsStatus.h"
+#include "FimStatus.h"
 
 #include <QPoint>
 #include <QRect>
@@ -59,9 +60,12 @@ public:
 
     void setTlsSnapshot(const TlsSnapshot &snapshot);
 
+    void setFimSnapshot(const FimSnapshot &snapshot);
+
     bool isExpanded() const { return m_detailsExpanded; }
 
 protected:
+    void showEvent(QShowEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;

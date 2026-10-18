@@ -39,6 +39,10 @@ QStringList decodeCapabilities(quint64 capEff);
 // Pure scoring (testable), modelled on systemd-analyze security exposure.
 SecurityPosture evaluateSecurity(const SecurityInput &input);
 
+// Pure host-posture scoring for OS-tool-derived facts (macOS: SIP,
+// FileVault, Gatekeeper, application firewall).
+SecurityPosture postureFromFindings(const QList<SecurityFinding> &findings);
+
 // Read /proc/<pid> hardening facts (capabilities, seccomp, namespaces, ...).
 bool readSecurityInput(int pid, SecurityInput &out);
 

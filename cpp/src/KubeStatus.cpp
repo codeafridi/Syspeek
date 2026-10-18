@@ -393,8 +393,8 @@ int kubeIssueCount(const QList<KubePod> &pods,
     return issues;
 }
 
-KubeState classifyKubeFailure(const QByteArray &stderr) {
-    const QByteArray lower = stderr.toLower();
+KubeState classifyKubeFailure(const QByteArray &payload) {
+    const QByteArray lower = payload.toLower();
 
     if (lower.contains("no configuration")
         || lower.contains("connection refused")

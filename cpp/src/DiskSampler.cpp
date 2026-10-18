@@ -24,6 +24,14 @@ DiskSource DiskSource::system() {
     return source;
 }
 
+DiskSource DiskSource::fromBackend(SystemBackend &backend) {
+    DiskSource source = system();
+    source.counters = [&backend](QList<DiskCounters> &out) {
+        return backend.readDiskCounters(out);
+    };
+    return source;
+}
+
 DiskSampler::DiskSampler(DiskSource source)
     : m_source(std::move(source)) {
 }
@@ -37,11 +45,18 @@ void DiskSampler::reset() {
 DiskSnapshot DiskSampler::sample() {
     DiskSnapshot out;
 
-    QByteArray raw;
-    if (!m_source.diskstats || !m_source.diskstats(raw)) {
-        return out;
+    QList<DiskCounters> counters;
+    if (m_source.counters) {
+        if (!m_source.counters(counters)) {
+            return out;
+        }
+    } else {
+        QByteArray raw;
+        if (!m_source.diskstats || !m_source.diskstats(raw)) {
+            return out;
+        }
+        counters = parseDiskstats(raw);
     }
-    const QList<DiskCounters> counters = parseDiskstats(raw);
 
     QByteArray pressureRaw;
     if (m_source.pressure && m_source.pressure(pressureRaw)) {

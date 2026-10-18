@@ -6,10 +6,19 @@
 #include <QHash>
 #include <QList>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 namespace {
 
@@ -331,13 +340,14 @@ int main(int argc, char *argv[]) {
     }
 
     // ---- real /proc integration ----
+#ifdef Q_OS_LINUX
     {
         unsigned long long total = 0;
         check(linuxproc::totalCpuTicks(total) && total > 0,
               "real: totalCpuTicks positive");
         check(linuxproc::onlineCpuCount() > 0, "real: onlineCpuCount positive");
 
-        const int self = static_cast<int>(::getpid());
+        const int self = static_cast<int>(GETPID());
         unsigned long long ticks = 0;
         unsigned long long start = 0;
         check(linuxproc::procCpu(self, ticks, start) && start != 0,
@@ -363,6 +373,7 @@ int main(int argc, char *argv[]) {
         check(second.percent >= 0.0 && second.percent <= 999.0 * 64,
               "real: percent within bounds");
     }
+#endif
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

@@ -4,9 +4,12 @@
 #include <QFile>
 #include <QRegularExpression>
 
-#include <unistd.h>
-
 #include <algorithm>
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 ThreadSample parseTaskStat(const QByteArray &stat, const QString &wchan,
                            int tid) {
@@ -93,6 +96,9 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
         return snapshot;
     }
 
+#if defined(Q_OS_WIN)
+    return snapshot;
+#else
     const long hz = sysconf(_SC_CLK_TCK);
     const QStringList tids =
         taskDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
@@ -201,6 +207,7 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
 
     m_lastTicks = current;
     return snapshot;
+#endif
 }
 
 QString profileSummaryText(const ProfileSnapshot &snapshot) {

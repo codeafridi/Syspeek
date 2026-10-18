@@ -7,7 +7,8 @@
 
 class GroupCache {
 public:
-    explicit GroupCache(int intervalMs = 5000);
+    explicit GroupCache(int intervalMs = 5000,
+                        SystemBackend &backend = systemBackend());
 
     const ProcessGroup &pidsFor(const ProcessIdentity &focus, bool force = false);
 

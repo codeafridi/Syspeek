@@ -6,7 +6,6 @@
 #include "KubeSource.h"
 #include "GnomePidFileProvider.h"
 #include "KdeFocusService.h"
-#include "LinuxProcess.h"
 #include "SamplerWorker.h"
 #include "ServicesSource.h"
 #include "JournalSource.h"
@@ -15,9 +14,14 @@
 #include "PathSource.h"
 #include "StatsdSource.h"
 #include "DbmSource.h"
+#include "DumpReport.h"
 #include "TlsSource.h"
+#include "FimSource.h"
+#include "platform/PlatformFactory.h"
 
 #include <QApplication>
+#include <QSettings>
+#include <QCoreApplication>
 #include <QByteArray>
 #include <QDateTime>
 #include <QEventLoop>
@@ -34,8 +38,10 @@
 #include <csignal>
 #include <cstdio>
 #include <memory>
+#if !defined(Q_OS_WIN)
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 namespace {
 
@@ -51,11 +57,13 @@ void latencyLog(const char *name, qint64 value) {
                  static_cast<long long>(value));
 }
 
+#if !defined(Q_OS_WIN)
 void writeSignalByte(int) {
     const char byte = 0;
     const ssize_t written = ::write(g_signalFd[0], &byte, sizeof(byte));
     static_cast<void>(written);
 }
+#endif
 
 void logLine(const QString &message) {
     const QString path =
@@ -74,6 +82,32 @@ void logLine(const QString &message) {
     }
 }
 
+#if defined(Q_OS_WIN)
+// HKCU Run key autostart (SystemInformer quotes
+// Software\\Microsoft\\Windows\\CurrentVersion\\Run).
+void autostartCommand(const QString &mode) {
+    QSettings run(
+        QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft"
+                       "\\Windows\\CurrentVersion\\Run"),
+        QSettings::NativeFormat);
+    const QString name = QStringLiteral("Syspeek");
+    if (mode == QStringLiteral("on")) {
+        run.setValue(name, QStringLiteral("\"%1\"")
+                              .arg(QCoreApplication::applicationFilePath()));
+        run.sync();
+        std::fprintf(stdout, "autostart: enabled (HKCU Run)\n");
+    } else if (mode == QStringLiteral("off")) {
+        run.remove(name);
+        run.sync();
+        std::fprintf(stdout, "autostart: disabled\n");
+    } else {
+        const QString value = run.value(name).toString();
+        std::fprintf(stdout, "autostart: %s\n",
+                     value.isEmpty() ? "disabled" : "enabled");
+    }
+}
+#endif
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -85,6 +119,22 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Syspeek"));
+
+    if (app.arguments().contains(QStringLiteral("--dump"))) {
+        const QByteArray report = dumpReportJson().toUtf8();
+        std::fwrite(report.constData(), 1, report.size(), stdout);
+        return 0;
+    }
+
+#if defined(Q_OS_WIN)
+    for (const QString &arg : app.arguments()) {
+        if (!arg.startsWith(QStringLiteral("--autostart="))) {
+            continue;
+        }
+        autostartCommand(arg.mid(QStringLiteral("--autostart=").size()));
+        return 0;
+    }
+#endif
 
     QString configError;
     const Config config = loadConfig(defaultConfigPath(), &configError);
@@ -106,9 +156,11 @@ int main(int argc, char *argv[]) {
     qRegisterMetaType<StatsdSnapshot>("StatsdSnapshot");
     qRegisterMetaType<DbmSnapshot>("DbmSnapshot");
     qRegisterMetaType<TlsSnapshot>("TlsSnapshot");
+    qRegisterMetaType<FimSnapshot>("FimSnapshot");
 
     g_latencyProbe = qEnvironmentVariableIsSet("SYSPEEK_LATENCY");
 
+#if !defined(Q_OS_WIN)
     struct sigaction ignoreAction;
     ignoreAction.sa_handler = SIG_IGN;
     sigemptyset(&ignoreAction.sa_mask);
@@ -139,6 +191,9 @@ int main(int argc, char *argv[]) {
         ::sigaction(SIGTERM, &action, nullptr);
         ::sigaction(SIGHUP, &action, nullptr);
     }
+#else
+    Q_UNUSED(app);
+#endif
 
     HudWindow hud;
     hud.setSnapshot(DisplaySnapshot{});
@@ -165,7 +220,7 @@ int main(int argc, char *argv[]) {
         if (pid > 0) {
             std::printf("focused_pid=%d\n", pid);
             std::printf("focused_comm=%s\n",
-                        qUtf8Printable(linuxproc::comm(pid)));
+                        qUtf8Printable(systemBackend().comm(pid)));
         } else {
             std::printf("focused_pid=none\n");
         }
@@ -324,6 +379,18 @@ int main(int argc, char *argv[]) {
                          hud.setTlsSnapshot(snapshot);
                      });
     tlsThread->start();
+
+    auto *fimThread = new QThread;
+    auto *fim = new FimSource(config.fim);
+    fim->moveToThread(fimThread);
+    QObject::connect(fimThread, &QThread::started, fim, &FimSource::start);
+    QObject::connect(fimThread, &QThread::finished, fim,
+                     &QObject::deleteLater);
+    QObject::connect(fim, &FimSource::fimReady, &hud,
+                     [&hud](const FimSnapshot &snapshot) {
+                         hud.setFimSnapshot(snapshot);
+                     });
+    fimThread->start();
 
     const QString pidFilePath = GnomePidFileProvider::defaultPath();
     QString lastRaw;

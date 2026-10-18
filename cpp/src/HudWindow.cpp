@@ -1,6 +1,11 @@
 #include "HudWindow.h"
 
 #include "DashboardPanel.h"
+#include "platform/NotifierFactory.h"
+
+#ifdef Q_OS_MACOS
+#include "platform/mac/MacOverlay.h"
+#endif
 
 #include <QApplication>
 #include <QDateTime>
@@ -60,10 +65,12 @@ HudWindow::HudWindow(QWidget *parent)
                    | Qt::WindowDoesNotAcceptFocus);
     setAttribute(Qt::WA_StyledBackground, true);
     setAttribute(Qt::WA_ShowWithoutActivating, true);
+#ifdef Q_OS_LINUX
     setAttribute(Qt::WA_X11DoNotAcceptFocus, true);
+#endif
     setObjectName(QStringLiteral("hudRoot"));
 
-    m_notifier = std::make_unique<DesktopNotifier>();
+    m_notifier = createNotifier();
 
     m_pages = new QWidget(this);
     auto *pagesLayout = new QVBoxLayout(m_pages);
@@ -483,6 +490,12 @@ void HudWindow::setTlsSnapshot(const TlsSnapshot &snapshot) {
     }
 }
 
+void HudWindow::setFimSnapshot(const FimSnapshot &snapshot) {
+    if (m_panel != nullptr) {
+        m_panel->setFimSnapshot(snapshot);
+    }
+}
+
 void HudWindow::evaluateAlerts() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const QList<Alert> fired = m_alerts.update(m_alertInput, now);
@@ -591,6 +604,13 @@ void HudWindow::toggleCompact() {
     }
 
     adjustSize();
+}
+
+void HudWindow::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+#ifdef Q_OS_MACOS
+    applyMacOverlay(this);
+#endif
 }
 
 void HudWindow::keyPressEvent(QKeyEvent *event) {

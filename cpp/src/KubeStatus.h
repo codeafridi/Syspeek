@@ -136,7 +136,7 @@ int kubeIssueCount(const QList<KubePod> &pods,
                    const QList<KubeDeployment> &deployments);
 int kubeWarningCount(const QList<KubeEvent> &events);
 
-KubeState classifyKubeFailure(const QByteArray &stderr);
+KubeState classifyKubeFailure(const QByteArray &payload);
 
 QString kubeSummaryText(const KubeSnapshot &snapshot);
 QString kubeDetailText(const KubeSnapshot &snapshot);

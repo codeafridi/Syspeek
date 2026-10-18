@@ -15,6 +15,8 @@ enum class FocusProviderKind {
     Sway,
     Niri,
     X11,
+    Mac,
+    Windows,
     Null,
 };
 

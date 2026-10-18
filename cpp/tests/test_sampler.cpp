@@ -8,10 +8,20 @@
 #include <QThread>
 
 #include <signal.h>
+#if !defined(Q_OS_WIN)
 #include <sys/wait.h>
+#endif
+#if !defined(Q_OS_WIN)
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+int main() {
+    std::printf("skip: POSIX-only test\n");
+    return 0;
+}
+#else
 
 namespace {
 
@@ -87,9 +97,11 @@ int main(int argc, char *argv[]) {
     check(waitFor(received, 2, 3000), "worker emits on demand");
     check(maxSeq >= 2, "sequence increases across snapshots");
 
+#ifdef Q_OS_LINUX
     check(latest.appName == linuxproc::comm(live), "snapshot has focused name");
     check(latest.pid == QString::number(live), "snapshot has focused pid");
     check(!latest.memory.isEmpty(), "snapshot has memory text");
+#endif
     check(latest.cpu == QStringLiteral("Warming up")
               || latest.cpu == QStringLiteral("--")
               || latest.cpu.endsWith(QLatin1Char('%')),
@@ -107,3 +119,5 @@ int main(int argc, char *argv[]) {
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
+
+#endif

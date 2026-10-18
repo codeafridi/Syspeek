@@ -6,6 +6,8 @@
 
 #include <functional>
 
+class SystemBackend;
+
 struct HostSample {
     bool available = false;
     bool warming = false;
@@ -30,6 +32,7 @@ struct HostSource {
     std::function<bool(double &, double &, double &)> load;
     std::function<bool(unsigned long long &, unsigned long long &)> disk;
 
+    static HostSource fromBackend(SystemBackend &backend);
     static HostSource system();
 };
 

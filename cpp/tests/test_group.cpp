@@ -7,9 +7,18 @@
 #include <QCoreApplication>
 #include <QHash>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
@@ -63,7 +72,8 @@ int main(int argc, char *argv[]) {
     check(ProcessGrouper::orderedTree(99, parentOf).size() == 1,
           "orderedTree(unknown) is just the root");
 
-    const int self = static_cast<int>(::getpid());
+#ifdef Q_OS_LINUX
+    const int self = static_cast<int>(GETPID());
     const ProcessGroup group = ProcessGrouper().discover(self);
     check(group.rootPid > 0, "discover(self) has a root");
     check(group.pids.contains(self), "discover(self) contains self");
@@ -104,6 +114,7 @@ int main(int argc, char *argv[]) {
     check(cache.pidsFor(key).pids.contains(self), "cached group contains self");
 
     std::printf("group size=%lld\n", static_cast<long long>(group.pids.size()));
+#endif
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

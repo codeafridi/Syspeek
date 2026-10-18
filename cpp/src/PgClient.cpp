@@ -140,7 +140,17 @@ bool PgClient::query(const QString &sql, QList<QStringList> &rows) {
             rows.append(row);
         } else if (type == 'E') {
             m_error = QStringLiteral("query error");
-            return false;
+            // Drain until ReadyForQuery so the session stays usable.
+            while (true) {
+                char drainType = 0;
+                QByteArray drainData;
+                if (!readMessage(drainType, drainData, 5000)) {
+                    return false;
+                }
+                if (drainType == 'Z') {
+                    return false;
+                }
+            }
         } else if (type == 'Z') {
             return true;
         }

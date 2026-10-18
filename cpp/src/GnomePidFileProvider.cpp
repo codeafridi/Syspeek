@@ -1,12 +1,12 @@
 #include "GnomePidFileProvider.h"
 
-#include "LinuxProcess.h"
 
 #include <QFile>
 #include <QProcessEnvironment>
 
-GnomePidFileProvider::GnomePidFileProvider(QString path)
-    : m_path(std::move(path)) {
+GnomePidFileProvider::GnomePidFileProvider(QString path, SystemBackend &backend)
+    : m_backend(backend)
+    , m_path(std::move(path)) {
 }
 
 QString GnomePidFileProvider::name() const {
@@ -29,7 +29,7 @@ int GnomePidFileProvider::focusedPid() const {
         return -1;
     }
 
-    if (!linuxproc::exists(pid)) {
+    if (!m_backend.exists(pid)) {
         return -1;
     }
 

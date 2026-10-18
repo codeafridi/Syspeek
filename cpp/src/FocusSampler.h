@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProcessIdentity.h"
+#include "platform/PlatformFactory.h"
 
 #include <QString>
 
@@ -15,12 +16,14 @@ struct FocusSample {
 
 class FocusSampler {
 public:
-    explicit FocusSampler(const FocusedWindowProvider *provider);
+    explicit FocusSampler(const FocusedWindowProvider *provider,
+                          SystemBackend &backend = systemBackend());
 
     FocusSample sample() const;
 
 private:
     const FocusedWindowProvider *m_provider;
+    SystemBackend &m_backend;
     mutable ProcessIdentity m_lastIdentity;
     mutable QString m_lastName;
 };

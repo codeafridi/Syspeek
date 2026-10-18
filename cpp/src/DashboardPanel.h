@@ -16,6 +16,7 @@
 #include "WatchdogStatus.h"
 #include "TlsStatus.h"
 #include "IncidentStatus.h"
+#include "FimStatus.h"
 
 #include <QSet>
 #include <QWidget>
@@ -47,6 +48,7 @@ public:
     void setStatsdSnapshot(const StatsdSnapshot &snapshot);
     void setDbmSnapshot(const DbmSnapshot &snapshot);
     void setTlsSnapshot(const TlsSnapshot &snapshot);
+    void setFimSnapshot(const FimSnapshot &snapshot);
 
 signals:
     void collapseRequested();
@@ -72,12 +74,24 @@ private:
     QWidget *buildPlaceholderView(const QString &text);
     QWidget *buildCostView();
     QWidget *buildDisksView();
+    QWidget *buildHostView();
     QWidget *buildSecurityView();
     QWidget *buildTracesView();
     QWidget *buildSoftwareView();
     QWidget *buildNetworkPathView();
     QWidget *buildMetricsView();
     QWidget *buildSloView();
+
+    QString unsupportedOsText() const;
+
+    bool m_osTcpCounters = true;
+    bool m_osCgroups = true;
+    bool m_osPsi = true;
+    bool m_osJournal = true;
+    bool m_osDpkgSbom = true;
+    bool m_osFim = true;
+    bool m_osSecurity = true;
+    QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
     QLabel *m_pidValue = nullptr;
@@ -129,11 +143,19 @@ private:
     QLabel *m_diskSummary = nullptr;
     QLabel *m_diskPressure = nullptr;
     QTreeWidget *m_disks = nullptr;
+    QLabel *m_hostInfoSummary = nullptr;
+    QLabel *m_hostPlatform = nullptr;
+    QLabel *m_hostCpuInfo = nullptr;
+    QLabel *m_hostFilesystems = nullptr;
+    QLabel *m_hostNetwork = nullptr;
     QLabel *m_securitySummary = nullptr;
     QLabel *m_security = nullptr;
     QLabel *m_threats = nullptr;
+    QLabel *m_fimSummary = nullptr;
+    QLabel *m_fim = nullptr;
     QLabel *m_dbmSummary = nullptr;
     QLabel *m_dbm = nullptr;
+    QLabel *m_dbmStatements = nullptr;
     QLabel *m_tlsSummary = nullptr;
     QLabel *m_tls = nullptr;
     QLabel *m_traceSummary = nullptr;

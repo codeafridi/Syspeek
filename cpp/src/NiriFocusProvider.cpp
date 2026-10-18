@@ -1,6 +1,5 @@
 #include "NiriFocusProvider.h"
 
-#include "LinuxProcess.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,8 +26,9 @@ int parseNiriPid(const QByteArray &output) {
     return pid > 0 ? pid : -1;
 }
 
-NiriFocusProvider::NiriFocusProvider(QString command)
-    : m_command(std::move(command)) {
+NiriFocusProvider::NiriFocusProvider(QString command, SystemBackend &backend)
+    : m_backend(backend)
+    , m_command(std::move(command)) {
 }
 
 QString NiriFocusProvider::name() const {
@@ -61,5 +61,5 @@ int NiriFocusProvider::focusedPid() const {
         return -1;
     }
 
-    return linuxproc::exists(pid) ? pid : -1;
+    return m_backend.exists(pid) ? pid : -1;
 }

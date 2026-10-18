@@ -13,9 +13,12 @@
 #include "ProcessIdentity.h"
 #include "SbomSource.h"
 #include "TcpSampler.h"
+#include "platform/PlatformFactory.h"
 
 #include <QObject>
 #include <QString>
+
+#include <memory>
 
 class FocusedWindowProvider;
 class QTimer;
@@ -26,6 +29,7 @@ class SamplerWorker : public QObject {
 public:
     explicit SamplerWorker(FocusedWindowProvider *provider,
                            const Config &config = Config{},
+                           std::unique_ptr<SystemBackend> backend = nullptr,
                            QObject *parent = nullptr);
 
 public slots:
@@ -40,6 +44,7 @@ private:
     DisplaySnapshot buildSnapshot(const FocusSample &focus);
 
     FocusedWindowProvider *m_provider;
+    std::unique_ptr<SystemBackend> m_backend;
     FocusSampler m_sampler;
     CpuSampler m_cpuSampler;
     HostSampler m_hostSampler;
@@ -47,6 +52,8 @@ private:
     TcpSampler m_tcpSampler;
     SbomSource m_sbomSource;
     ProfileSampler m_profileSampler;
+    HostInfo m_hostInfo;
+    bool m_hostInfoReady = false;
     SloTracker m_slo;
     SloSpec m_sloSpec;
     IoRateTracker m_ioTracker;

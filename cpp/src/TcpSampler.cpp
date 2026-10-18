@@ -1,5 +1,7 @@
 #include "TcpSampler.h"
 
+#include "platform/SystemBackend.h"
+
 #include <QFile>
 
 TcpSource TcpSource::system() {
@@ -23,6 +25,14 @@ TcpSource TcpSource::system() {
     return source;
 }
 
+TcpSource TcpSource::fromBackend(SystemBackend &backend) {
+    TcpSource source;
+    source.counters = [&backend](TcpCounters &out) {
+        return backend.readTcpCounters(out);
+    };
+    return source;
+}
+
 TcpSampler::TcpSampler(TcpSource source)
     : m_source(std::move(source)) {
 }
@@ -35,14 +45,20 @@ void TcpSampler::reset() {
 
 TcpHealth TcpSampler::sample() {
     TcpHealth out;
-    QByteArray snmp;
-    QByteArray netstat;
-    if (!m_source.snmp || !m_source.netstat || !m_source.snmp(snmp)
-        || !m_source.netstat(netstat)) {
-        return out;
+    TcpCounters counters;
+    if (m_source.counters) {
+        if (!m_source.counters(counters)) {
+            return out;
+        }
+    } else {
+        QByteArray snmp;
+        QByteArray netstat;
+        if (!m_source.snmp || !m_source.netstat || !m_source.snmp(snmp)
+            || !m_source.netstat(netstat)) {
+            return out;
+        }
+        counters = parseTcpCounters(snmp, netstat);
     }
-
-    const TcpCounters counters = parseTcpCounters(snmp, netstat);
 
     if (!m_hasBaseline) {
         m_last = counters;

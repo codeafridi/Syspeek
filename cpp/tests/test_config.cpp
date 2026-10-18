@@ -38,6 +38,10 @@ int main(int argc, char *argv[]) {
     check(defaults.health.sustainedSamples == 3, "default sustain 3");
     check(defaults.docker.healthyMs == 20000, "default docker healthy 20s");
     check(defaults.sampleIntervalMs == 1000, "default sample interval 1s");
+    check(defaults.fim.enabled && !defaults.fim.paths.isEmpty(),
+          "default fim enabled with paths");
+    check(defaults.fim.algorithm == QStringLiteral("sha256"),
+          "default fim algorithm sha256");
 
     {
         QString error = QStringLiteral("x");
@@ -101,10 +105,38 @@ int main(int argc, char *argv[]) {
               "non-numeric value -> default kept");
     }
 
+    {
+        QTemporaryDir dir4;
+        const QString path = writeConfig(dir4, QByteArrayLiteral(
+            "[fim]\n"
+            "enabled=true\n"
+            "paths=/etc/passwd, /etc/shadow /etc/cron.d\n"
+            "interval_ms=15000\n"
+            "algorithm=sha512\n"
+            "max_file_size_kb=2048\n"
+            "watch=false\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(error.isEmpty(), "fim config -> no error");
+        check(c.fim.enabled, "fim enabled loaded");
+        check(c.fim.paths.size() == 3
+                  && c.fim.paths.contains(QStringLiteral("/etc/shadow")),
+              "fim paths parsed");
+        check(c.fim.intervalMs == 15000, "fim interval loaded");
+        check(c.fim.algorithm == QStringLiteral("sha512"), "fim algorithm loaded");
+        check(c.fim.maxFileSizeKb == 2048, "fim max file size loaded");
+        check(!c.fim.watch, "fim watch loaded");
+    }
+
+#ifdef Q_OS_LINUX
     check(defaultConfigPath().endsWith(QStringLiteral("syspeek/config.ini"))
               || qEnvironmentVariableIsSet("SYSPEEK_CONFIG"),
           "default config path shape");
-
+#else
+    check(defaultConfigPath().endsWith(QStringLiteral("config.ini"))
+              || qEnvironmentVariableIsSet("SYSPEEK_CONFIG"),
+          "default config path shape");
+#endif
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

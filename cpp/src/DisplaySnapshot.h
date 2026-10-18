@@ -6,7 +6,9 @@
 #include "SloStatus.h"
 #include "RuntimeStatus.h"
 #include "ProfileStatus.h"
+#include "HostInfoStatus.h"
 #include "TcpStatus.h"
+#include "FimStatus.h"
 
 #include <QList>
 #include <QPair>
@@ -101,6 +103,8 @@ struct DisplaySnapshot {
     SloReport slo;
     RuntimeInfo runtime;
     ProfileSnapshot profile;
+    HostInfo hostInfo;
+    FimSnapshot fim;
     int focusThreads = 0;
     int focusFds = -1;
     unsigned long long focusVolCtx = 0;

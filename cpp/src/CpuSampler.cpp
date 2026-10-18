@@ -1,19 +1,24 @@
 #include "CpuSampler.h"
 
-#include "LinuxProcess.h"
+#include "platform/PlatformFactory.h"
 
 #include <algorithm>
 
-CpuSource CpuSource::system() {
+CpuSource CpuSource::fromBackend(SystemBackend &backend) {
     CpuSource source;
-    source.procCpu = [](int pid, unsigned long long &ticks, unsigned long long &start) {
-        return linuxproc::procCpu(pid, ticks, start);
+    source.procCpu = [&backend](int pid, unsigned long long &ticks,
+                                unsigned long long &start) {
+        return backend.procCpu(pid, ticks, start);
     };
-    source.totalCpu = [](unsigned long long &out) {
-        return linuxproc::totalCpuTicks(out);
+    source.totalCpu = [&backend](unsigned long long &out) {
+        return backend.totalCpuTicks(out);
     };
-    source.coreCount = []() { return linuxproc::onlineCpuCount(); };
+    source.coreCount = [&backend]() { return backend.onlineCpuCount(); };
     return source;
+}
+
+CpuSource CpuSource::system() {
+    return fromBackend(systemBackend());
 }
 
 CpuSampler::CpuSampler(CpuSource source)

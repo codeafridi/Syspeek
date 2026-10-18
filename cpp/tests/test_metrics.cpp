@@ -23,6 +23,8 @@
 #include "RuntimeStatus.h"
 #include "IncidentStatus.h"
 #include "ProfileStatus.h"
+#include "HostInfoStatus.h"
+#include "FimStatus.h"
 
 #include <QApplication>
 #include <QPixmap>
@@ -122,6 +124,85 @@ int main(int argc, char *argv[]) {
               && bulletUnits.at(0).name == QStringLiteral("boom.service")
               && bulletUnits.at(0).active == QStringLiteral("failed"),
           "parseSystemctlUnits: bullet-prefixed failed unit");
+
+    QList<UnitRow> launchUnits;
+    check(parseLaunchctlList(
+              "PID\tStatus\tLabel\n"
+              "-\t0\tcom.apple.Finder\n"
+              "215\t0\tcom.apple.WindowServer\n"
+              "-\t78\tcom.example.broken\n",
+              launchUnits)
+              && launchUnits.size() == 3
+              && launchUnits.at(0).name == QStringLiteral("com.apple.Finder")
+              && launchUnits.at(0).active == QStringLiteral("inactive")
+              && launchUnits.at(1).active == QStringLiteral("active")
+              && launchUnits.at(1).sub == QStringLiteral("running")
+              && launchUnits.at(2).active == QStringLiteral("failed"),
+          "parseLaunchctlList: pid/status/label rows, header skipped");
+    check(servicesRunningCount(launchUnits) == 1
+              && servicesFailedCount(launchUnits) == 1,
+          "launchctl counts: running + failed");
+
+    QList<ServiceRecord> scmRecords;
+    ServiceRecord scmRun;
+    scmRun.name = QStringLiteral("W32Time");
+    scmRun.displayName = QStringLiteral("Windows Time");
+    scmRun.state = 4;
+    scmRun.processId = 1234;
+    scmRecords.append(scmRun);
+    ServiceRecord scmStopped;
+    scmStopped.name = QStringLiteral("Browser");
+    scmStopped.state = 1;
+    scmRecords.append(scmStopped);
+    ServiceRecord scmNeverStarted;
+    scmNeverStarted.name = QStringLiteral("neverstart");
+    scmNeverStarted.state = 1;
+    scmNeverStarted.exitCode = 1077;
+    scmRecords.append(scmNeverStarted);
+    ServiceRecord scmFailed;
+    scmFailed.name = QStringLiteral("brokenvc");
+    scmFailed.state = 1;
+    scmFailed.exitCode = 3221226505; // 0xC0000149 real crash exit
+    scmRecords.append(scmFailed);
+    ServiceRecord scmPending;
+    scmPending.name = QStringLiteral("a-pending");
+    scmPending.state = 2;
+    scmRecords.append(scmPending);
+    ServiceRecord scmPaused;
+    scmPaused.name = QStringLiteral("a-paused");
+    scmPaused.state = 7;
+    scmRecords.append(scmPaused);
+    ServiceRecord scmEmpty;
+    scmEmpty.name.clear();
+    scmRecords.append(scmEmpty);
+
+    QList<UnitRow> scmUnits;
+    check(serviceRecordsToUnits(scmRecords, scmUnits) && scmUnits.size() == 6,
+          "serviceRecordsToUnits: records mapped, empty name skipped");
+    check(scmUnits.at(0).name == QStringLiteral("Browser")
+              && scmUnits.at(0).active == QStringLiteral("inactive")
+              && scmUnits.at(0).sub == QStringLiteral("dead"),
+          "serviceRecordsToUnits: sorted by name, STOPPED + exit 0 -> dead");
+    check(scmUnits.at(1).name == QStringLiteral("W32Time")
+              && scmUnits.at(1).active == QStringLiteral("active")
+              && scmUnits.at(1).sub == QStringLiteral("running"),
+          "serviceRecordsToUnits: RUNNING -> active/running");
+    check(scmUnits.at(2).name == QStringLiteral("a-paused")
+              && scmUnits.at(2).active == QStringLiteral("active")
+              && scmUnits.at(2).sub == QStringLiteral("paused"),
+          "serviceRecordsToUnits: PAUSED mapping");
+    check(scmUnits.at(3).active == QStringLiteral("activating"),
+          "serviceRecordsToUnits: START_PENDING -> activating");
+    check(scmUnits.at(4).name == QStringLiteral("brokenvc")
+              && scmUnits.at(4).sub == QStringLiteral("failed"),
+          "serviceRecordsToUnits: STOPPED + crash exit -> failed");
+    check(scmUnits.at(5).name == QStringLiteral("neverstart")
+              && scmUnits.at(5).active == QStringLiteral("inactive")
+              && scmUnits.at(5).sub == QStringLiteral("dead"),
+          "serviceRecordsToUnits: 1077 never-started -> inactive, not failed");
+    check(servicesRunningCount(scmUnits) == 1
+              && servicesFailedCount(scmUnits) == 1,
+          "scm counts align with launchctl semantics");
 
     ServicesSnapshot services;
     services.available = true;
@@ -393,6 +474,19 @@ int main(int argc, char *argv[]) {
         check(near(health.synRetransPerSec, 2.0), "tcp: syn retrans/s");
         check(near(health.listenDropsPerSec, 1.0), "tcp: listen drops/s");
         check(health.currEstab == 42, "tcp: current established");
+
+        TcpCounters redacted;
+        redacted.tcp.insert(QStringLiteral("InSegs"), 0);
+        redacted.tcp.insert(QStringLiteral("OutSegs"), 0);
+        redacted.ext.insert(QStringLiteral("TCPTimeouts"), 0);
+        check(tcpCountersRedacted(redacted),
+              "tcp: all-zero counters (kernel-redacted read) detected");
+        TcpCounters live = redacted;
+        live.tcp[QStringLiteral("OutSegs")] = 42;
+        check(!tcpCountersRedacted(live),
+              "tcp: nonzero counters count as usable");
+        check(tcpCountersRedacted(TcpCounters{}),
+              "tcp: empty counters treated as unavailable");
         check(tcpHealthSummaryText(health).contains(QStringLiteral("retrans")),
               "tcp: summary mentions retrans");
         check(tcpHealthDetailText(health).contains(QStringLiteral("syn-retr")),
@@ -441,6 +535,17 @@ int main(int argc, char *argv[]) {
               "security: summary text");
         check(securityDetailText(bad).contains(QStringLiteral("CAP_SYS_ADMIN")),
               "security: detail lists capability");
+
+        QList<SecurityFinding> host;
+        host.append({QStringLiteral("system integrity protection"), 0.0, true});
+        host.append({QStringLiteral("disk encryption"), 8.0, false});
+        host.append({QStringLiteral("gatekeeper assessments"), 0.0, true});
+        host.append({QStringLiteral("application firewall"), 6.0, false});
+        const SecurityPosture mac = postureFromFindings(host);
+        check(mac.available && std::fabs(mac.exposure - 3.5) < 1e-6
+                  && mac.grade == QStringLiteral("medium")
+                  && mac.exposedCount == 2,
+              "security: host-posture findings averaged");
     }
 
     {
@@ -1140,6 +1245,187 @@ int main(int argc, char *argv[]) {
               "watchdog-insight: forecast line");
         check(insights.contains(QStringLiteral("cpu")),
               "watchdog-insight: metric named");
+    }
+
+    {
+        const QByteArray cpuinfo = QByteArrayLiteral(
+            "processor\t: 0\n"
+            "vendor_id\t: GenuineIntel\n"
+            "model name\t: Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz\n"
+            "cpu MHz\t\t: 2600.000\n"
+            "cache size\t: 12288 KB\n"
+            "physical id\t: 0\n"
+            "cpu cores\t: 6\n"
+            "processor\t: 1\n"
+            "processor\t: 2\n");
+        const HostCpuInfo cpu = parseCpuInfo(cpuinfo);
+        check(cpu.vendorId == QStringLiteral("GenuineIntel"),
+              "hostinfo: cpu vendor");
+        check(cpu.modelName.contains(QStringLiteral("i7-9750H")),
+              "hostinfo: cpu model");
+        check(cpu.logicalProcessors == 3 && cpu.cores == 6
+                  && cpu.packages == 1,
+              "hostinfo: cpu topology");
+        check(std::fabs(cpu.mhz - 2600.0) < 1e-6, "hostinfo: cpu mhz");
+        check(cpu.cacheSize == QStringLiteral("12288 KB"),
+              "hostinfo: cpu cache");
+
+        const QByteArray mounts = QByteArrayLiteral(
+            "/dev/nvme0n1p2 / ext4 rw,relatime 0 0\n"
+            "proc /proc proc rw 0 0\n"
+            "sysfs /sys sysfs rw 0 0\n"
+            "tmpfs /run tmpfs rw 0 0\n");
+        const QList<HostFsInfo> fs = parseMounts(mounts);
+        check(fs.size() == 2, "hostinfo: pseudo filesystems filtered");
+        check(fs.at(0).name == QStringLiteral("/dev/nvme0n1p2")
+                  && fs.at(0).mountedOn == QStringLiteral("/"),
+              "hostinfo: root filesystem");
+
+        check(parseOsRelease(QByteArrayLiteral(
+                  "NAME=\"Ubuntu\"\nPRETTY_NAME=\"Ubuntu 24.04 LTS\"\n"))
+                  == QStringLiteral("Ubuntu 24.04 LTS"),
+              "hostinfo: os pretty name");
+    }
+
+    {
+        QList<QStringList> rows;
+        rows.append({QStringLiteral("123"), QStringLiteral("5"),
+                     QStringLiteral("100.5"), QStringLiteral("20.1"),
+                     QStringLiteral("10"),
+                     QStringLiteral("SELECT count(*) FROM pg_class")});
+        rows.append({QStringLiteral("-42"), QStringLiteral("2"),
+                     QStringLiteral("3.0"), QStringLiteral("1.5"),
+                     QStringLiteral("1"), QStringLiteral("SELECT 1")});
+        DbmSnapshot snapshot;
+        parseStatements(rows, snapshot);
+        check(snapshot.statementsAvailable && snapshot.statements.size() == 2,
+              "dbm: parsed pg_stat_statements rows");
+        check(snapshot.statements.first().calls == 5
+                  && std::fabs(snapshot.statements.first().totalMs - 100.5) < 1e-6
+                  && snapshot.statements.first().query.contains(
+                         QStringLiteral("pg_class")),
+              "dbm: statement metrics");
+        check(dbmStatementsText(snapshot).contains(QStringLiteral("pg_class")),
+              "dbm: statements text");
+        DbmSnapshot empty;
+        check(dbmStatementsText(empty).contains(QStringLiteral("not available")),
+              "dbm: statements unavailable text");
+    }
+
+    {
+        auto meta = [](const char *path, const char *hash, quint64 size,
+                       quint64 inode, unsigned int mode, qint64 mtime) {
+            FimFileMeta m;
+            m.path = QString::fromLatin1(path);
+            m.hash = QString::fromLatin1(hash);
+            m.size = size;
+            m.inode = inode;
+            m.mode = mode;
+            m.mtimeMs = mtime;
+            return m;
+        };
+
+        QHash<QString, FimFileMeta> previous;
+        previous.insert(QStringLiteral("/etc/passwd"),
+                        meta("/etc/passwd", "aa11", 100, 10, 0644, 1000));
+        previous.insert(QStringLiteral("/etc/hosts"),
+                        meta("/etc/hosts", "bb22", 50, 20, 0644, 2000));
+        previous.insert(QStringLiteral("/etc/old"),
+                        meta("/etc/old", "cc33", 30, 30, 0600, 3000));
+        previous.insert(QStringLiteral("/etc/cfg"),
+                        meta("/etc/cfg", "ff66", 40, 50, 0644, 3500));
+        previous.insert(QStringLiteral("/etc/gone"),
+                        meta("/etc/gone", "9191", 20, 60, 0644, 3600));
+
+        QHash<QString, FimFileMeta> current;
+        current.insert(QStringLiteral("/etc/passwd"),
+                       meta("/etc/passwd", "dd44", 120, 10, 0640, 5000));
+        current.insert(QStringLiteral("/etc/hosts"),
+                       meta("/etc/hosts", "bb22", 50, 20, 0644, 2000));
+        current.insert(QStringLiteral("/etc/new"),
+                       meta("/etc/new", "cc33", 30, 30, 0600, 4000));
+        current.insert(QStringLiteral("/etc/cfg"),
+                       meta("/etc/cfg", "ff66", 40, 50, 0600, 3500));
+        current.insert(QStringLiteral("/etc/added"),
+                       meta("/etc/added", "ee55", 10, 40, 0644, 6000));
+
+        const QList<FimChange> changes = diffFim(previous, current, 9000);
+        check(changes.size() == 5, "fim: five drift events");
+
+        int created = 0;
+        int modified = 0;
+        int metadata = 0;
+        int deleted = 0;
+        int renamed = 0;
+        QString renamedFrom;
+        for (const FimChange &change : changes) {
+            switch (change.kind) {
+            case FimChangeKind::Created:
+                ++created;
+                check(change.path == QStringLiteral("/etc/added"),
+                      "fim: created path");
+                break;
+            case FimChangeKind::Modified:
+                ++modified;
+                check(change.path == QStringLiteral("/etc/passwd")
+                          && change.oldHash == QStringLiteral("aa11")
+                          && change.hash == QStringLiteral("dd44"),
+                      "fim: modified hashes");
+                break;
+            case FimChangeKind::Metadata:
+                ++metadata;
+                check(change.path == QStringLiteral("/etc/cfg"),
+                      "fim: metadata path");
+                break;
+            case FimChangeKind::Deleted:
+                ++deleted;
+                check(change.path == QStringLiteral("/etc/gone"),
+                      "fim: deleted path");
+                break;
+            case FimChangeKind::Renamed:
+                ++renamed;
+                renamedFrom = change.oldPath;
+                check(change.path == QStringLiteral("/etc/new")
+                          && change.oldPath == QStringLiteral("/etc/old"),
+                      "fim: rename pair");
+                break;
+            }
+        }
+        check(created == 1 && modified == 1 && metadata == 1 && deleted == 1
+                  && renamed == 1,
+              "fim: change kinds classified");
+        check(renamedFrom == QStringLiteral("/etc/old"),
+              "fim: rename source path");
+
+        QHash<QString, FimFileMeta> same = current;
+        check(diffFim(current, same, 9000).isEmpty(),
+              "fim: identical scans -> no drift");
+
+        FimSnapshot baseline;
+        baseline.enabled = true;
+        baseline.available = true;
+        baseline.baseline = true;
+        baseline.fileCount = 7;
+        baseline.algorithm = QStringLiteral("sha256");
+        check(fimSummaryText(baseline).contains(QStringLiteral("baseline"))
+                  && fimSummaryText(baseline).contains(QStringLiteral("sha256")),
+              "fim: baseline summary");
+
+        FimSnapshot drift;
+        drift.enabled = true;
+        drift.available = true;
+        drift.fileCount = 7;
+        drift.algorithm = QStringLiteral("sha256");
+        drift.changes = changes;
+        check(fimSummaryText(drift).contains(QStringLiteral("5 change")),
+              "fim: drift summary count");
+        const QString detail = fimDetailText(drift);
+        check(detail.contains(QStringLiteral("MODIFIED"))
+                  && detail.contains(QStringLiteral("/etc/passwd"))
+                  && detail.contains(QStringLiteral("RENAMED")),
+              "fim: detail text");
+        check(fimDetailText(FimSnapshot{}).contains(QStringLiteral("disabled")),
+              "fim: disabled detail");
     }
 
     std::printf("%d failure(s)\n", failures);

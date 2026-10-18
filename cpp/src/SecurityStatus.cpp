@@ -204,6 +204,29 @@ SecurityPosture evaluateSecurity(const SecurityInput &input) {
     return posture;
 }
 
+SecurityPosture postureFromFindings(const QList<SecurityFinding> &findings) {
+    SecurityPosture posture;
+    posture.findings = findings;
+    posture.available = !findings.isEmpty();
+    posture.exposedCount = 0;
+    if (!findings.isEmpty()) {
+        double total = 0.0;
+        for (const SecurityFinding &finding : findings) {
+            total += finding.exposure;
+            if (!finding.hardened && finding.exposure > 0.0) {
+                ++posture.exposedCount;
+            }
+        }
+        posture.exposure = total
+                           / static_cast<double>(findings.size());
+    }
+    posture.grade = posture.exposure < 2.5   ? QStringLiteral("low")
+                    : posture.exposure < 5.0 ? QStringLiteral("medium")
+                    : posture.exposure < 7.5 ? QStringLiteral("high")
+                                             : QStringLiteral("critical");
+    return posture;
+}
+
 bool readSecurityInput(int pid, SecurityInput &out) {
     const QString base = QStringLiteral("/proc/%1").arg(pid);
     QFile status(base + QStringLiteral("/status"));

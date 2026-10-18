@@ -4,6 +4,8 @@
 #include <QString>
 #include <QStringList>
 
+class SystemBackend;
+
 enum class Runtime { Unknown, Python, Node, Java, Ruby, Php, Dotnet, Go };
 
 QString runtimeName(Runtime runtime);
@@ -28,5 +30,6 @@ struct RuntimeInfo {
 };
 
 RuntimeInfo detectRuntime(int pid);
+RuntimeInfo detectRuntime(int pid, SystemBackend &backend);
 QString runtimeSummaryText(const RuntimeInfo &info);
 QString runtimeDetailText(const RuntimeInfo &info);
