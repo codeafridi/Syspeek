@@ -20,6 +20,7 @@ jobs:
           version: "6.8.*"
           cache: true
           arch: ${{ runner.os == 'Windows' && 'win64_msvc2022' || '' }}
+          python-version: "3.12"
 
       - name: Configure (unix)
         if: runner.os != 'Windows'
