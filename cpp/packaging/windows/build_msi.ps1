@@ -123,3 +123,11 @@ $hash = (Get-FileHash -Algorithm SHA256 $msiOut).Hash.ToLower()
 "$hash  Syspeek-$Version-windows.msi" |
     Out-File -Encoding ascii (Join-Path $outDir "Syspeek-$Version-windows.msi.sha256")
 Write-Host "msi ok: $msiOut ($hash)"
+
+# Portable zip (Scoop-friendly; runs from any directory, no install).
+$zipOut = Join-Path $outDir "Syspeek-$Version-windows-portable.zip"
+Compress-Archive -Path "$stage/*" -DestinationPath $zipOut -Force
+$zipHash = (Get-FileHash -Algorithm SHA256 $zipOut).Hash.ToLower()
+"$zipHash  Syspeek-$Version-windows-portable.zip" |
+    Out-File -Encoding ascii (Join-Path $outDir "Syspeek-$Version-windows-portable.zip.sha256")
+Write-Host "portable ok: $zipOut ($zipHash)"

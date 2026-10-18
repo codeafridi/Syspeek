@@ -165,6 +165,14 @@ launchd / Homebrew). See [docs/macos.md](docs/macos.md) for the DMG
 install, Gatekeeper first-run steps, `install_macos.sh` service
 management and the supported-feature matrix.
 
+### Windows (beta, 0.8+)
+
+Same HUD with native collectors (GetSystemTimes / Toolhelp32 /
+NtQuerySystemInformation / PDH / SCM / EventLog / registry). See
+[docs/windows.md](docs/windows.md) for the MSI install, the portable
+zip, SmartScreen first-run steps, autostart and the supported-feature
+matrix.
+
 ## Use
 
 - **Drag** the panel anywhere (grab it, including the buttons).

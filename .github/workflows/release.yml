@@ -118,6 +118,8 @@ jobs:
           path: |
             cpp/build/packaging/Syspeek-*-windows.msi
             cpp/build/packaging/Syspeek-*-windows.msi.sha256
+            cpp/build/packaging/Syspeek-*-windows-portable.zip
+            cpp/build/packaging/Syspeek-*-windows-portable.zip.sha256
           if-no-files-found: error
 
   github-release:
@@ -146,6 +148,8 @@ jobs:
             dist-macos/*.dmg.sha256
             dist-windows/*.msi
             dist-windows/*.msi.sha256
+            dist-windows/*-portable.zip
+            dist-windows/*-portable.zip.sha256
           generate_release_notes: true
       # NOTE: the portable tarball + AppImage (with zsync) are built by the
       # maintainer via bash cpp/packaging/build_portable.sh && bash
