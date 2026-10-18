@@ -268,7 +268,7 @@ QString dumpReportJson(int maxProcs) {
         linuxproc::ProcDetail detailOut;
         if (backend.procSample(selfPid, memOut, detailOut)) {
             depth.insert(QStringLiteral("ctxSwitches"),
-                         static_cast<qulonglong>(detailOut.voluntaryCtx));
+                         static_cast<qlonglong>(detailOut.voluntaryCtx));
         }
         const QString cmdline = backend.processCmdline(selfPid);
         depth.insert(QStringLiteral("cmdlineLength"), cmdline.size());

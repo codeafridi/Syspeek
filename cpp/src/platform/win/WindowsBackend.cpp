@@ -60,7 +60,7 @@ struct NtProcInfo {
     LARGE_INTEGER kernelTime;
     USHORT imageNameLength;
     USHORT imageNameMaximumLength;
-    PVOID imageNamePad;
+    ULONG imageNamePad; // UNICODE_STRING x64: 2+2+pad4+ptr = 16 bytes
     wchar_t *imageNameBuffer;
     LONG basePriority;
     HANDLE uniqueProcessId;
@@ -1160,11 +1160,11 @@ QByteArray WindowsBackend::processEnv(int pid) {
         PVOID reserved2[10];
         USHORT imagePathLength;
         USHORT imagePathMaxLength;
-        PVOID imagePathPad;
+        ULONG imagePathPad; // UNICODE_STRING x64 = 16 bytes
         wchar_t *imagePathBuffer;
         USHORT cmdLineLength;
         USHORT cmdLineMaxLength;
-        PVOID cmdLinePad;
+        ULONG cmdLinePad;
         wchar_t *cmdLineBuffer;
         PVOID environment;
     };
@@ -1258,11 +1258,11 @@ QString WindowsBackend::processCmdline(int pid) {
         PVOID reserved2[10];
         USHORT imagePathLength;
         USHORT imagePathMaxLength;
-        PVOID imagePathPad;
+        ULONG imagePathPad; // UNICODE_STRING x64 = 16 bytes
         wchar_t *imagePathBuffer;
         USHORT cmdLineLength;
         USHORT cmdLineMaxLength;
-        PVOID cmdLinePad;
+        ULONG cmdLinePad;
         wchar_t *cmdLineBuffer;
     };
     static_assert(offsetof(NtRtlCmd, cmdLineLength) == 0x70,
