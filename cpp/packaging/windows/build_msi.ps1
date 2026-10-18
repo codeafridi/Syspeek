@@ -116,7 +116,7 @@ wix --version
 $outDir = Join-Path $cppBuild "packaging"
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $msiOut = Join-Path $outDir "Syspeek-$Version-windows.msi"
-wix build -arch x64 -d Version=$Version -b $stage -o $msiOut `
+wix build -arch x64 -d Version=$Version -b $stage -b $PSScriptRoot -o $msiOut `
     (Join-Path $PSScriptRoot "Syspeek.wxs") $payloadPath
 
 $hash = (Get-FileHash -Algorithm SHA256 $msiOut).Hash.ToLower()
