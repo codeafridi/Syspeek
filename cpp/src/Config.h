@@ -92,6 +92,17 @@ struct FimConfig {
         QStringLiteral("/etc/cron.d"), QStringLiteral("/etc/pam.d"),
         QStringLiteral("/etc/ssh"),    QStringLiteral("/Library/LaunchDaemons"),
         QStringLiteral("/usr/local/etc"), QStringLiteral("/opt/homebrew/etc")};
+#elif defined(Q_OS_WIN)
+    QStringList paths = {
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\drivers\\etc\\hosts"),
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\drivers\\etc\\services"),
+        qEnvironmentVariable("SystemRoot")
+            + QStringLiteral("\\System32\\Tasks"),
+        qEnvironmentVariable("APPDATA")
+            + QStringLiteral(
+                "\\Microsoft\\Windows\\Start Menu\\Programs\\Startup")};
 #else
     QStringList paths = {
         QStringLiteral("/etc/passwd"), QStringLiteral("/etc/group"),

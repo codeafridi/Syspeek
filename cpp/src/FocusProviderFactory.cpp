@@ -13,6 +13,10 @@
 #include "platform/mac/MacFocusProvider.h"
 #endif
 
+#ifdef Q_OS_WIN
+#include "platform/win/WinFocusProvider.h"
+#endif
+
 #include <QProcessEnvironment>
 
 FocusProviderKind selectProviderKind(const SessionInfo &info) {
@@ -72,6 +76,8 @@ QString focusProviderKindName(FocusProviderKind kind) {
         return QStringLiteral("xdotool");
     case FocusProviderKind::Mac:
         return QStringLiteral("mac-nsworkspace");
+    case FocusProviderKind::Windows:
+        return QStringLiteral("windows-getforegroundwindow");
     case FocusProviderKind::Null:
     default:
         return QStringLiteral("null");
@@ -83,6 +89,9 @@ std::unique_ptr<FocusedWindowProvider> createFocusProvider(const Config &config)
     Q_UNUSED(config);
     return std::make_unique<CachingFocusProvider>(
         std::make_unique<MacFocusProvider>(), config.focusCacheTtlMs);
+#elif defined(Q_OS_WIN)
+    return std::make_unique<CachingFocusProvider>(
+        std::make_unique<WinFocusProvider>(), config.focusCacheTtlMs);
 #else
     const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
 

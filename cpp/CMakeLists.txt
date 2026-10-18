@@ -199,9 +199,20 @@ elseif(APPLE)
         src/platform/mac/MacOverlay.mm
         src/platform/mac/MacOverlay.h)
 elseif(WIN32)
+    find_package(Qt6 QUIET COMPONENTS DBus)
     target_sources(syspeek_core PRIVATE
         src/platform/win/WindowsBackend.cpp
-        src/platform/win/WindowsBackend.h)
+        src/platform/win/WindowsBackend.h
+        src/platform/win/WinFocusProvider.cpp
+        src/platform/win/WinFocusProvider.h)
+    if(TARGET Qt6::DBus)
+        target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+    endif()
+    target_link_libraries(syspeek_core PUBLIC
+        iphlpapi ws2_32 psapi user32)
+    target_compile_definitions(syspeek_core PUBLIC
+        WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_WARNINGS)
 endif()
 
 target_include_directories(syspeek_core PUBLIC src)

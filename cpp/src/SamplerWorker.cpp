@@ -345,7 +345,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     const TcpHealth tcp = m_tcpSampler.sample();
     snap.tcpHealth = tcp;
     snap.tcpHealthAvailable = tcp.available;
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     if (tcp.available) {
         int established = 0;
         for (const linuxproc::SocketInfo &socket : sockets) {

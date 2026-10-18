@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-latest, macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -19,19 +19,31 @@ jobs:
         with:
           version: "6.8.*"
           cache: true
+          arch: ${{ runner.os == 'Windows' && 'win64_msvc2022' || '' }}
 
-      - name: Configure
+      - name: Configure (unix)
+        if: runner.os != 'Windows'
         run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build
+      - name: Configure (windows)
+        if: runner.os == 'Windows'
+        run: cmake -S cpp -B cpp/build
+
+      - name: Build (unix)
+        if: runner.os != 'Windows'
         run: cmake --build cpp/build -j 3
 
+      - name: Build (windows)
+        if: runner.os == 'Windows'
+        run: cmake --build cpp/build --config Release -j 3
+
       - name: Test
-        run: ctest --test-dir cpp/build --output-on-failure
+        run: ctest --test-dir cpp/build -C Release --output-on-failure
         env:
           QT_QPA_PLATFORM: offscreen
 
       - name: Dump smoke
+        if: runner.os != 'Windows'
         run: |
           SYSPEEK_BIN=./cpp/build/syspeek
           if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
@@ -69,6 +81,41 @@ jobs:
                   print("tcp extras:", json.dumps(extra, sort_keys=True))
           else:
               print("tcp sysctl unavailable (kernel denies) - stays gated")
+          PY
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Dump smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          SYSPEEK_BIN=./cpp/build/Release/syspeek.exe
+          echo "syspeek binary: $SYSPEEK_BIN"
+          "$SYSPEEK_BIN" --dump > "${RUNNER_TEMP}/syspeek-dump.json"
+          ps_count=$(powershell.exe -NoProfile -Command "(Get-Process).Count" | tr -d '\r')
+          echo "Get-Process count: $ps_count"
+          python - "${RUNNER_TEMP}/syspeek-dump.json" "$ps_count" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          h = d["host"]
+          assert d["processCount"] > 0, d
+          assert len(d["processes"]) > 0, d
+          assert h["cores"] > 0, h
+          assert h["memTotalKb"] > 0, h
+          assert d["platform"] == "windows", d["platform"]
+          print("dump ok: windows", h["cores"], "cores",
+                int(h["memTotalKb"] // 1024 // 1024), "MiB",
+                d["processCount"], "procs (Get-Process ≈",
+                sys.argv[2], ")")
+          tcp = d.get("tcp", {})
+          if tcp.get("available"):
+              for key in ("inSegs", "outSegs", "retransSegs"):
+                  v = tcp.get(key)
+                  assert isinstance(v, int) and v >= 0, (key, v)
+              print("tcp ok: in %d out %d retrans %d"
+                    % (tcp["inSegs"], tcp["outSegs"], tcp["retransSegs"]))
+          else:
+              print("tcp gated:", tcp)
           PY
         env:
           QT_QPA_PLATFORM: offscreen

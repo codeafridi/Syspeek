@@ -36,8 +36,10 @@
 #include <csignal>
 #include <cstdio>
 #include <memory>
+#if !defined(Q_OS_WIN)
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 namespace {
 
@@ -53,11 +55,13 @@ void latencyLog(const char *name, qint64 value) {
                  static_cast<long long>(value));
 }
 
+#if !defined(Q_OS_WIN)
 void writeSignalByte(int) {
     const char byte = 0;
     const ssize_t written = ::write(g_signalFd[0], &byte, sizeof(byte));
     static_cast<void>(written);
 }
+#endif
 
 void logLine(const QString &message) {
     const QString path =
@@ -118,6 +122,7 @@ int main(int argc, char *argv[]) {
 
     g_latencyProbe = qEnvironmentVariableIsSet("SYSPEEK_LATENCY");
 
+#if !defined(Q_OS_WIN)
     struct sigaction ignoreAction;
     ignoreAction.sa_handler = SIG_IGN;
     sigemptyset(&ignoreAction.sa_mask);
@@ -148,6 +153,9 @@ int main(int argc, char *argv[]) {
         ::sigaction(SIGTERM, &action, nullptr);
         ::sigaction(SIGHUP, &action, nullptr);
     }
+#else
+    Q_UNUSED(app);
+#endif
 
     HudWindow hud;
     hud.setSnapshot(DisplaySnapshot{});

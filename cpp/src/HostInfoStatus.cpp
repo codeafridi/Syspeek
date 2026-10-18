@@ -13,12 +13,14 @@
 #include <sys/sysctl.h>
 #endif
 
+#if !defined(Q_OS_WIN)
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#endif
 
 #include <vector>
 
@@ -411,7 +413,11 @@ HostInfo collectHostInfoMac() {
 HostInfo collectHostInfo() {
 #if defined(Q_OS_MACOS)
     return collectHostInfoMac();
-#endif
+#elif defined(Q_OS_WIN)
+    // Windows gohai-style inventory (registry/SMBIOS/Win32_* equivalent)
+    // grounds independently; until then the card reports unavailable.
+    return HostInfo{};
+#else
     HostInfo info;
     info.available = true;
 
@@ -563,6 +569,7 @@ HostInfo collectHostInfo() {
         }
     }
     return info;
+#endif
 }
 
 QString hostInfoSummaryText(const HostInfo &info) {

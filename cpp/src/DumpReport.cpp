@@ -10,7 +10,11 @@
 #include <QThread>
 
 #include <algorithm>
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace {
 
@@ -191,7 +195,12 @@ QString dumpReportJson(int maxProcs) {
 
     QJsonObject root;
     root.insert(QStringLiteral("platform"), backend.platformName());
+#if defined(Q_OS_WIN)
+    root.insert(QStringLiteral("selfPid"),
+                static_cast<int>(::_getpid()));
+#else
     root.insert(QStringLiteral("selfPid"), static_cast<int>(::getpid()));
+#endif
     root.insert(QStringLiteral("capabilities"), capabilitiesJson(backend.capabilities()));
     root.insert(QStringLiteral("host"), host);
     root.insert(QStringLiteral("processCount"), pids.size());

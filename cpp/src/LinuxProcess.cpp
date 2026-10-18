@@ -8,10 +8,14 @@
 #include <QSet>
 
 #include <algorithm>
-
+#if defined(Q_OS_WIN)
+#include <io.h>
+#include <process.h>
+#else
 #include <unistd.h>
 
 #include <sys/statvfs.h>
+#endif
 
 namespace linuxproc {
 
@@ -476,6 +480,10 @@ QByteArray readFileBytes(const QString &path) {
 
 QList<unsigned long long> socketInodes(int pid) {
     QList<unsigned long long> inodes;
+#if defined(Q_OS_WIN)
+    Q_UNUSED(pid);
+    return inodes;
+#else
     const QString dir = procPath(pid, "fd");
     const QStringList entries =
         QDir(dir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
@@ -502,10 +510,15 @@ QList<unsigned long long> socketInodes(int pid) {
         }
     }
     return inodes;
+#endif
 }
 
 QList<QString> fdTargets(int pid) {
     QList<QString> targets;
+#if defined(Q_OS_WIN)
+    Q_UNUSED(pid);
+    return targets;
+#else
     const QString dir = procPath(pid, "fd");
     const QStringList entries =
         QDir(dir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
@@ -523,6 +536,7 @@ QList<QString> fdTargets(int pid) {
         }
     }
     return targets;
+#endif
 }
 
 bool parseNetTable(const QByteArray &content, const QString &proto,
@@ -899,6 +913,14 @@ bool hostLoad(double &l1, double &l5, double &l15) {
 
 bool diskUsage(const QString &path, unsigned long long &totalBytes,
                unsigned long long &freeBytes) {
+#if defined(Q_OS_WIN)
+    Q_UNUSED(path);
+    Q_UNUSED(totalBytes);
+    Q_UNUSED(freeBytes);
+    // Never used on Windows (the WindowsBackend owns diskUsage there);
+    // statvfs has no MinGW/MSVC equivalent in the POSIX form.
+    return false;
+#else
     struct statvfs stats;
     if (::statvfs(path.toLocal8Bit().constData(), &stats) != 0) {
         return false;
@@ -908,6 +930,7 @@ bool diskUsage(const QString &path, unsigned long long &totalBytes,
     totalBytes = static_cast<unsigned long long>(stats.f_blocks) * fragment;
     freeBytes = static_cast<unsigned long long>(stats.f_bavail) * fragment;
     return true;
+#endif
 }
 
 bool parseNetDevInterfaces(const QByteArray &content, QList<InterfaceStats> &out) {
@@ -1084,7 +1107,11 @@ bool procMem(int pid, MemInfo &out) {
 
     QFile statm(procPath(pid, "statm"));
     if (statm.open(QIODevice::ReadOnly)) {
+#if defined(Q_OS_WIN)
+        const long page = 4096;
+#else
         const long page = ::sysconf(_SC_PAGESIZE);
+#endif
         const unsigned long long pageSize =
             page > 0 ? static_cast<unsigned long long>(page) : 4096ULL;
         unsigned long long shared = 0;
@@ -1115,7 +1142,11 @@ bool procSample(int pid, MemInfo &mem, ProcDetail &detail) {
 
     QFile statm(procPath(pid, "statm"));
     if (statm.open(QIODevice::ReadOnly)) {
+#if defined(Q_OS_WIN)
+        const long page = 4096;
+#else
         const long page = ::sysconf(_SC_PAGESIZE);
+#endif
         const unsigned long long pageSize =
             page > 0 ? static_cast<unsigned long long>(page) : 4096ULL;
         unsigned long long shared = 0;

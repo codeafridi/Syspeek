@@ -2,7 +2,11 @@
 
 #include "FocusedWindowProvider.h"
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 FocusSampler::FocusSampler(const FocusedWindowProvider *provider,
                            SystemBackend &backend)
@@ -20,7 +24,11 @@ FocusSample FocusSampler::sample() const {
     result.providerName = m_provider->name();
 
     const int pid = m_provider->focusedPid();
+#if defined(Q_OS_WIN)
+    const int self = static_cast<int>(::_getpid());
+#else
     const int self = static_cast<int>(::getpid());
+#endif
 
     // Never report Syspeek's own overlay as the focused app. Clicking the
     // overlay focuses it on some compositors; fall back to the last real app.
