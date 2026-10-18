@@ -720,9 +720,12 @@ bool WindowsBackend::readDiskCounters(QList<DiskCounters> &out) {
     DWORD bytes = 0;
     DWORD itemCount = 0;
     std::vector<BYTE> buffer;
+    // pdhmsg.h (line 28): #define PDH_MORE_DATA 0x800007d2 - MSVC pdh.h
+    // does not pull pdhmsg.h in, so the constant is spelled literally.
+    constexpr DWORD kPdhMoreData = 0x800007d2;
     if (::PdhGetFormattedCounterArrayW(queueCounter, PDH_FMT_DOUBLE, &bytes,
                                        &itemCount, nullptr)
-        != PDH_MORE_DATA) {
+        != kPdhMoreData) {
         return false;
     }
     buffer.resize(bytes);
@@ -751,18 +754,16 @@ bool WindowsBackend::readDiskCounters(QList<DiskCounters> &out) {
             reinterpret_cast<const wchar_t *>(items[i].szName);
 
         auto rawFirst = [this](int leaf, const wchar_t *inst) -> LONGLONG {
+            // PdhGetRawCounterValue(H, LPDWORD type, PPDH_RAW_COUNTER);
+            // PDH_RAW_COUNTER = {CStatus, FILETIME TimeStamp,
+            //                    LONGLONG FirstValue, SecondValue,
+            //                    DWORD MultiCount}.
             PDH_RAW_COUNTER raw;
-            raw.CStatus = 0;
-            raw.dwType = 0;
-            raw.Time.dwLowDateTime = 0;
-            raw.Time.dwHighDateTime = 0;
-            raw.TimeStamp = 0;
-            raw.FirstValue = 0;
-            raw.SecondValue = 0;
-            raw.MultiCount = 0;
+            DWORD type = 0;
+            ZeroMemory(&raw, sizeof(raw));
             if (::PdhGetRawCounterValue(
                     static_cast<PDH_HCOUNTER>(m_pdhDiskHandles.at(leaf)),
-                    FALSE, inst, &raw)
+                    &type, &raw)
                 != ERROR_SUCCESS) {
                 return -1;
             }
