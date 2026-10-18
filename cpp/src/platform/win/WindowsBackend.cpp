@@ -1124,8 +1124,10 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
 void WindowsBackend::debugDepth(int pid, QJsonObject &out) {
     out.insert(QStringLiteral("diagCtx"), m_diagCtx);
     QMutexLocker locker(&m_mutex);
-    out.insert(QStringLiteral("ctxMapSize"), m_ctxMap.size());
-    out.insert(QStringLiteral("ctxSelf"), m_ctxMap.value(pid));
+    out.insert(QStringLiteral("ctxMapSize"),
+               static_cast<qlonglong>(m_ctxMap.size()));
+    out.insert(QStringLiteral("ctxSelf"),
+               static_cast<qlonglong>(m_ctxMap.value(pid)));
 }
 
 QByteArray WindowsBackend::processEnv(int pid) {
