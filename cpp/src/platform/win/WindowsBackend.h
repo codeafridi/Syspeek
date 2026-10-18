@@ -46,6 +46,8 @@ public:
     bool readDiskCounters(QList<DiskCounters> &out) override;
     QList<ServiceRecord> readServices() override;
     bool hostSecurityPosture(QList<SecurityFinding> &out) override;
+    QByteArray processEnv(int pid) override;
+    QString processCmdline(int pid) override;
 
 private:
     struct Snapshot {
@@ -69,6 +71,12 @@ private:
     QList<void *> m_pdhDiskHandles;
     long long m_pdhTimeBase = 0;
     QMutex m_pdhDiskMutex;
+
+    // Per-process cumulative context switches (NtQuerySystemInformation
+    // SystemProcessInformation walk; 1 s TTL cache).
+    bool systemContextSwitches(int pid, unsigned long long &out);
+    QHash<int, unsigned long long> m_ctxMap;
+    qint64 m_ctxMapAt = 0;
 #endif
     bool m_tcpCountersOk = false;
 };

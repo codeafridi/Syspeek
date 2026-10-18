@@ -128,6 +128,13 @@ jobs:
           print("posture ok:", security.get("findings"), "findings,",
                 security.get("exposed"), "exposed,",
                 security.get("grade"))
+          depth = d.get("selfDepth", {})
+          assert depth.get("ctxSwitches", 0) > 0, depth
+          assert depth.get("cmdlineLength", 0) > 0, depth
+          assert depth.get("envPairs", 0) > 0, depth
+          print("self depth ok: ctx", depth.get("ctxSwitches"), ",",
+                depth.get("cmdlineLength"), "chars cmdline,",
+                depth.get("envPairs"), "env pairs")
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs"):

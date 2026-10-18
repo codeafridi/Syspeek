@@ -197,8 +197,8 @@ QString dumpReportJson(int maxProcs) {
     QJsonObject root;
     root.insert(QStringLiteral("platform"), backend.platformName());
 #if defined(Q_OS_WIN)
-    root.insert(QStringLiteral("selfPid"),
-                static_cast<int>(::_getpid()));
+    const int selfPid = static_cast<int>(::_getpid());
+    root.insert(QStringLiteral("selfPid"), selfPid);
 #else
     root.insert(QStringLiteral("selfPid"), static_cast<int>(::getpid()));
 #endif
@@ -258,6 +258,28 @@ QString dumpReportJson(int maxProcs) {
         }
         root.insert(QStringLiteral("security"), security);
     }
+
+#if defined(Q_OS_WIN)
+    {
+        // Self-process depth: NtQuerySystemInformation ctx walk +
+        // PEB cmdline/environment (same-process ReadProcessMemory).
+        QJsonObject depth;
+        linuxproc::MemInfo memOut;
+        linuxproc::ProcDetail detailOut;
+        if (backend.procSample(selfPid, memOut, detailOut)) {
+            depth.insert(QStringLiteral("ctxSwitches"),
+                         static_cast<qulonglong>(detailOut.voluntaryCtx));
+        }
+        const QString cmdline = backend.processCmdline(selfPid);
+        depth.insert(QStringLiteral("cmdlineLength"), cmdline.size());
+        const QByteArray envData = backend.processEnv(selfPid);
+        depth.insert(QStringLiteral("envPairs"),
+                     envData.isEmpty()
+                         ? 0
+                         : envData.count('\n') + 1);
+        root.insert(QStringLiteral("selfDepth"), depth);
+    }
+#endif
 
     QJsonObject tcp;
     TcpCounters tcpCounters;

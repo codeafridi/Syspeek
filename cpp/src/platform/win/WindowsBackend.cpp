@@ -9,6 +9,7 @@
 #include <QMutexLocker>
 #include <QSettings>
 
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,101 @@
 namespace {
 
 constexpr qint64 kSnapshotTtlMs = 600;
+
+// ---- ntdll process depth (M50e), grounded on phnt ntexapi.h (the header
+// set shipped with SystemInformer's sources; the shipped SystemInformer
+// binary imports NtQuerySystemInformation) ----
+// x64 SYSTEM_THREAD_INFORMATION (phnt order; compiler alignment yields
+// contextSwitches at 0x40, stride 0x50):
+struct NtThreadInfo {
+    LARGE_INTEGER kernelTime;
+    LARGE_INTEGER userTime;
+    LARGE_INTEGER createTime;
+    ULONG waitTime;
+    PVOID startAddress;
+    PVOID clientId[2];
+    LONG priority;
+    LONG basePriority;
+    ULONG contextSwitches;
+    ULONG threadState;
+    ULONG waitReason;
+};
+// x64 SYSTEM_PROCESS_INFORMATION (phnt order; threads at 0x100):
+struct NtProcInfo {
+    ULONG nextEntryOffset;
+    ULONG numberOfThreads;
+    ULONGLONG workingSetPrivateSize;
+    ULONG hardFaultCount;
+    ULONG numberOfThreadsHighWatermark;
+    ULONGLONG cycleTime;
+    LARGE_INTEGER createTime;
+    LARGE_INTEGER userTime;
+    LARGE_INTEGER kernelTime;
+    USHORT imageNameLength;
+    USHORT imageNameMaximumLength;
+    PVOID imageNamePad;
+    wchar_t *imageNameBuffer;
+    LONG basePriority;
+    HANDLE uniqueProcessId;
+    HANDLE inheritedFromUniqueProcessId;
+    ULONG handleCount;
+    ULONG sessionId;
+    ULONG_PTR uniqueProcessKey;
+    SIZE_T peakVirtualSize;
+    SIZE_T virtualSize;
+    ULONG pageFaultCount;
+    SIZE_T peakWorkingSetSize;
+    SIZE_T workingSetSize;
+    SIZE_T quotaPeakPagedPoolUsage;
+    SIZE_T quotaPagedPoolUsage;
+    SIZE_T quotaPeakNonPagedPoolUsage;
+    SIZE_T quotaNonPagedPoolUsage;
+    SIZE_T pagefileUsage;
+    SIZE_T peakPagefileUsage;
+    SIZE_T privatePageCount;
+    LARGE_INTEGER readOperationCount;
+    LARGE_INTEGER writeOperationCount;
+    LARGE_INTEGER otherOperationCount;
+    LARGE_INTEGER readTransferCount;
+    LARGE_INTEGER writeTransferCount;
+    LARGE_INTEGER otherTransferCount;
+    NtThreadInfo threads[1];
+};
+static_assert(offsetof(NtThreadInfo, contextSwitches) == 0x40,
+              "NtThreadInfo x64 layout");
+static_assert(offsetof(NtProcInfo, threads) == 0x100,
+              "NtProcInfo x64 layout");
+
+constexpr ULONG kSystemProcessInformation = 5; // phnt SYSTEMINFORMATIONCLASS
+constexpr LONG kStatusInfoLengthMismatch = 0xC0000004;
+
+using NtQuerySystemInformationFn = LONG(WINAPI *)(ULONG, PVOID, ULONG,
+                                                  PULONG);
+using NtQueryInformationProcessFn = LONG(WINAPI *)(HANDLE, ULONG, PVOID,
+                                                   ULONG, PULONG);
+
+NtQuerySystemInformationFn ntQuerySystemInformation() {
+    static NtQuerySystemInformationFn fn = []() {
+        const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+        return ntdll != nullptr
+                   ? reinterpret_cast<NtQuerySystemInformationFn>(
+                         ::GetProcAddress(ntdll, "NtQuerySystemInformation"))
+                   : nullptr;
+    }();
+    return fn;
+}
+
+NtQueryInformationProcessFn ntQueryInformationProcess() {
+    static NtQueryInformationProcessFn fn = []() {
+        const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+        return ntdll != nullptr
+                   ? reinterpret_cast<NtQueryInformationProcessFn>(
+                         ::GetProcAddress(ntdll,
+                                          "NtQueryInformationProcess"))
+                   : nullptr;
+    }();
+    return fn;
+}
 
 ULONGLONG fileTimeQuad(const FILETIME &ft) {
     ULARGE_INTEGER value;
@@ -579,6 +675,15 @@ bool WindowsBackend::procSample(int pid, linuxproc::MemInfo &mem,
     if (threads != snap.threads.constEnd()) {
         detail.threads = static_cast<int>(threads.value());
     }
+
+    // Cumulative context switches: SystemProcessInformation walk (per-thread
+    // ContextSwitches summed); Darwin has no voluntary split either, so the
+    // mac precedent (voluntary = total) applies.
+    unsigned long long ctxTotal = 0;
+    if (systemContextSwitches(pid, ctxTotal)) {
+        detail.voluntaryCtx = ctxTotal;
+        detail.involuntaryCtx = 0;
+    }
     return ok;
 }
 
@@ -925,4 +1030,266 @@ bool WindowsBackend::hostSecurityPosture(QList<SecurityFinding> &out) {
     }
 
     return !out.isEmpty();
+}
+
+bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
+    const NtQuerySystemInformationFn query = ntQuerySystemInformation();
+    if (query == nullptr) {
+        return false;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_ctxMapAt != 0 && now - m_ctxMapAt < 1000) {
+            const auto cached = m_ctxMap.constFind(pid);
+            if (cached != m_ctxMap.constEnd()) {
+                out = cached.value();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    QByteArray buffer(1 << 20, Qt::Uninitialized);
+    LONG status = 0;
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        ULONG needed = 0;
+        status = query(kSystemProcessInformation, buffer.data(),
+                       static_cast<ULONG>(buffer.size()), &needed);
+        if (status == 0) {
+            break;
+        }
+        if (status != kStatusInfoLengthMismatch) {
+            return false;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+    if (status != 0) {
+        return false;
+    }
+
+    QHash<int, unsigned long long> map;
+    const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
+    const BYTE *end = cursor + buffer.size();
+    while (cursor + sizeof(ULONG) <= end) {
+        auto *record = reinterpret_cast<const NtProcInfo *>(cursor);
+        if (record->nextEntryOffset == 0) {
+            break;
+        }
+        const int recordPid =
+            static_cast<int>(reinterpret_cast<ULONG_PTR>(
+                record->uniqueProcessId));
+        unsigned long long sum = 0;
+        for (ULONG t = 0; t < record->numberOfThreads; ++t) {
+            sum += record->threads[t].contextSwitches;
+        }
+        if (recordPid != 0) {
+            map.insert(recordPid, sum);
+        }
+        cursor += record->nextEntryOffset;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    m_ctxMap = map;
+    m_ctxMapAt = now;
+    const auto found = map.constFind(pid);
+    if (found == map.constEnd()) {
+        return false;
+    }
+    out = found.value();
+    return true;
+}
+
+QByteArray WindowsBackend::processEnv(int pid) {
+    // PEB walk (cmdline/environment), same-user only: ReadProcessMemory
+    // fails gracefully on elevated targets -> empty result, the UI keeps
+    // whatever it had (matches the mac procargs2 strategy).
+    const NtQueryInformationProcessFn query = ntQueryInformationProcess();
+    if (query == nullptr) {
+        return QByteArray();
+    }
+    const HANDLE handle = ::OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE,
+        static_cast<DWORD>(pid));
+    if (handle == nullptr) {
+        return QByteArray();
+    }
+
+    // PROCESS_BASIC_INFORMATION (winternl.h): PebBaseAddress.
+    struct NtBasicInfo {
+        PVOID reserved1;
+        PVOID pebBaseAddress;
+        PVOID reserved2[2];
+        ULONG_PTR uniqueProcessId;
+        PVOID reserved3;
+    };
+    NtBasicInfo pbi = {};
+    if (query(handle, 0 /* ProcessBasicInformation */, &pbi, sizeof(pbi),
+              nullptr)
+        != 0) {
+        ::CloseHandle(handle);
+        return QByteArray();
+    }
+
+    // x64 PEB: ProcessParameters at 0x20 (winternl.h PEB field order).
+    struct NtPebShell {
+        BYTE reserved1[2];
+        BYTE beingDebugged;
+        BYTE reserved2[1];
+        PVOID reserved3[2];
+        PVOID ldr;
+        PVOID processParameters;
+    };
+    static_assert(offsetof(NtPebShell, processParameters) == 0x20,
+                  "PEB x64 ProcessParameters offset");
+
+    ULONG_PTR paramsAddress = 0;
+    SIZE_T got = 0;
+    if (!::ReadProcessMemory(handle, pbi.pebBaseAddress, &paramsAddress,
+                             sizeof(paramsAddress), &got)
+        || paramsAddress == 0) {
+        ::CloseHandle(handle);
+        return QByteArray();
+    }
+
+    // RTL_USER_PROCESS_PARAMETERS (winternl.h order) + the x64 Environment
+    // pointer that follows CommandLine (0x80).
+    struct NtRtlParams {
+        BYTE reserved1[16];
+        PVOID reserved2[10];
+        USHORT imagePathLength;
+        USHORT imagePathMaxLength;
+        PVOID imagePathPad;
+        wchar_t *imagePathBuffer;
+        USHORT cmdLineLength;
+        USHORT cmdLineMaxLength;
+        PVOID cmdLinePad;
+        wchar_t *cmdLineBuffer;
+        PVOID environment;
+    };
+    static_assert(offsetof(NtRtlParams, environment) == 0x80,
+                  "RTL_USER_PROCESS_PARAMETERS x64 Environment offset");
+
+    NtRtlParams params = {};
+    if (!::ReadProcessMemory(handle,
+                             reinterpret_cast<LPCVOID>(paramsAddress),
+                             &params, sizeof(params), &got)
+        || params.environment == nullptr) {
+        ::CloseHandle(handle);
+        return QByteArray();
+    }
+
+    QByteArray envUtf16(32768, Qt::Uninitialized);
+    if (!::ReadProcessMemory(handle, params.environment, envUtf16.data(),
+                             static_cast<SIZE_T>(envUtf16.size()), &got)) {
+        got = 0;
+    }
+    ::CloseHandle(handle);
+    if (got == 0) {
+        return QByteArray();
+    }
+
+    // UTF-16 multi-sz block -> "K=V" lines joined with \n.
+    const auto *begin = reinterpret_cast<const wchar_t *>(envUtf16.constData());
+    const size_t count = got / sizeof(wchar_t);
+    QStringList pairs;
+    size_t start = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (begin[i] != L'\0') {
+            continue;
+        }
+        if (i == start) {
+            break; // double NUL terminator
+        }
+        pairs.append(QString::fromWCharArray(begin + start, int(i - start)));
+        start = i + 1;
+    }
+    return pairs.join(QLatin1Char('\n')).toUtf8();
+}
+
+QString WindowsBackend::processCmdline(int pid) {
+    // Same PEB walk; CommandLine UNICODE_STRING (Length in bytes).
+    const NtQueryInformationProcessFn query = ntQueryInformationProcess();
+    if (query == nullptr) {
+        return QString();
+    }
+    const HANDLE handle = ::OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE,
+        static_cast<DWORD>(pid));
+    if (handle == nullptr) {
+        return QString();
+    }
+
+    struct NtBasicInfo {
+        PVOID reserved1;
+        PVOID pebBaseAddress;
+        PVOID reserved2[2];
+        ULONG_PTR uniqueProcessId;
+        PVOID reserved3;
+    };
+    NtBasicInfo pbi = {};
+    if (query(handle, 0 /* ProcessBasicInformation */, &pbi, sizeof(pbi),
+              nullptr)
+        != 0) {
+        ::CloseHandle(handle);
+        return QString();
+    }
+
+    struct NtPebShell {
+        BYTE reserved1[2];
+        BYTE beingDebugged;
+        BYTE reserved2[1];
+        PVOID reserved3[2];
+        PVOID ldr;
+        PVOID processParameters;
+    };
+    ULONG_PTR paramsAddress = 0;
+    SIZE_T got = 0;
+    if (!::ReadProcessMemory(handle, pbi.pebBaseAddress, &paramsAddress,
+                             sizeof(paramsAddress), &got)
+        || paramsAddress == 0) {
+        ::CloseHandle(handle);
+        return QString();
+    }
+
+    struct NtRtlCmd {
+        BYTE reserved1[16];
+        PVOID reserved2[10];
+        USHORT imagePathLength;
+        USHORT imagePathMaxLength;
+        PVOID imagePathPad;
+        wchar_t *imagePathBuffer;
+        USHORT cmdLineLength;
+        USHORT cmdLineMaxLength;
+        PVOID cmdLinePad;
+        wchar_t *cmdLineBuffer;
+    };
+    static_assert(offsetof(NtRtlCmd, cmdLineLength) == 0x70,
+                  "RTL_USER_PROCESS_PARAMETERS x64 CommandLine offset");
+    static_assert(offsetof(NtRtlCmd, cmdLineBuffer) == 0x78,
+                  "RTL_USER_PROCESS_PARAMETERS x64 CommandLine.Buffer offset");
+
+    NtRtlCmd params = {};
+    if (!::ReadProcessMemory(handle,
+                             reinterpret_cast<LPCVOID>(paramsAddress),
+                             &params, sizeof(params), &got)
+        || params.cmdLineBuffer == nullptr) {
+        ::CloseHandle(handle);
+        return QString();
+    }
+
+    const int bytes = qMin<USHORT>(params.cmdLineLength, 32768);
+    QByteArray cmdUtf16(bytes == 0 ? 2 : bytes, Qt::Uninitialized);
+    if (!::ReadProcessMemory(handle, params.cmdLineBuffer,
+                             cmdUtf16.data(),
+                             static_cast<SIZE_T>(cmdUtf16.size()), &got)) {
+        ::CloseHandle(handle);
+        return QString();
+    }
+    ::CloseHandle(handle);
+
+    return QString::fromWCharArray(
+        reinterpret_cast<const wchar_t *>(cmdUtf16.constData()),
+        int(got / sizeof(wchar_t)));
 }
