@@ -24,7 +24,7 @@ jobs:
         with:
           version: "6.8.*"
           cache: true
-          arch: ${{ runner.os == 'Windows' && 'win64_msvc2022' || '' }}
+          arch: ${{ runner.os == 'Windows' && 'win64_msvc2022_64' || '' }}
           setup-python: ${{ runner.os != 'Windows' }}
 
       - name: Configure (unix)
