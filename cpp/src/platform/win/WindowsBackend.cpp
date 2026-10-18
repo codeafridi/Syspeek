@@ -20,6 +20,7 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include <psapi.h>
+#include <pdh.h>
 #include <tlhelp32.h>
 
 namespace {
@@ -192,8 +193,72 @@ WindowsBackend::WindowsBackend() {
 }
 
 WindowsBackend::~WindowsBackend() {
+    closePdhDiskQuery();
     if (m_wsaReady) {
         ::WSACleanup();
+    }
+}
+
+bool WindowsBackend::ensurePdhDiskQuery() {
+    if (m_pdhQuery != nullptr) {
+        return true;
+    }
+
+    PDH_HQUERY query = nullptr;
+    if (::PdhOpenQueryW(nullptr, 0, &query) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    static const wchar_t *kPaths[] = {
+        L"\\PhysicalDisk(*)\\Disk Reads/sec",
+        L"\\PhysicalDisk(*)\\Disk Writes/sec",
+        L"\\PhysicalDisk(*)\\Disk Read Bytes/sec",
+        L"\\PhysicalDisk(*)\\Disk Write Bytes/sec",
+        L"\\PhysicalDisk(*)\\Avg. Disk sec/Read",
+        L"\\PhysicalDisk(*)\\Avg. Disk sec/Write",
+        L"\\PhysicalDisk(*)\\Current Disk Queue Length",
+        L"\\PhysicalDisk(*)\\% Idle Time",
+        L"\\PhysicalDisk(*)\\Avg. Disk Read Queue Length",
+        L"\\PhysicalDisk(*)\\Avg. Disk Write Queue Length",
+    };
+
+    QList<void *> handles;
+    for (const wchar_t *path : kPaths) {
+        PDH_HCOUNTER handle = nullptr;
+        if (::PdhAddEnglishCounterW(query, path, nullptr, &handle)
+            != ERROR_SUCCESS) {
+            ::PdhCloseQuery(query);
+            return false;
+        }
+        handles.append(static_cast<void *>(handle));
+    }
+
+    LARGE_INTEGER timeBase;
+    timeBase.QuadPart = 0;
+    if (::PdhGetCounterTimeBase(static_cast<PDH_HCOUNTER>(handles.at(0)),
+                                &timeBase)
+            != ERROR_SUCCESS
+        || timeBase.QuadPart <= 0) {
+        timeBase.QuadPart = 10000000; // classic 100 ns perf time base
+    }
+
+    if (::PdhCollectQueryData(query) != ERROR_SUCCESS) {
+        ::PdhCloseQuery(query);
+        return false;
+    }
+
+    m_pdhQuery = static_cast<void *>(query);
+    m_pdhDiskHandles = handles;
+    m_pdhTimeBase = timeBase.QuadPart;
+    return true;
+}
+
+void WindowsBackend::closePdhDiskQuery() {
+    // PDH counters are owned by the query; one close releases all of them.
+    if (m_pdhQuery != nullptr) {
+        ::PdhCloseQuery(static_cast<PDH_HQUERY>(m_pdhQuery));
+        m_pdhQuery = nullptr;
+        m_pdhDiskHandles.clear();
     }
 }
 
@@ -622,4 +687,126 @@ QList<ServiceRecord> WindowsBackend::readServices() {
 
     ::CloseServiceHandle(mgr);
     return out;
+}
+
+bool WindowsBackend::readDiskCounters(QList<DiskCounters> &out) {
+    QMutexLocker locker(&m_pdhDiskMutex);
+    if (!ensurePdhDiskQuery()) {
+        return false;
+    }
+
+    enum Leaf {
+        kReads = 0,
+        kWrites = 1,
+        kReadBytes = 2,
+        kWriteBytes = 3,
+        kAvgSecRead = 4,
+        kAvgSecWrite = 5,
+        kQueue = 6,
+        kIdle = 7,
+        kQueueRead = 8,
+        kQueueWrite = 9,
+    };
+
+    if (::PdhCollectQueryData(static_cast<PDH_HQUERY>(m_pdhQuery))
+        != ERROR_SUCCESS) {
+        return false;
+    }
+
+    const PDH_HCOUNTER queueCounter = static_cast<PDH_HCOUNTER>(
+        m_pdhDiskHandles.at(kQueue));
+
+    // Wildcard handle array pass: collects the per-instance names.
+    DWORD bytes = 0;
+    DWORD itemCount = 0;
+    std::vector<BYTE> buffer;
+    if (::PdhGetFormattedCounterArrayW(queueCounter, PDH_FMT_DOUBLE, &bytes,
+                                       &itemCount, nullptr)
+        != PDH_MORE_DATA) {
+        return false;
+    }
+    buffer.resize(bytes);
+    if (::PdhGetFormattedCounterArrayW(queueCounter, PDH_FMT_DOUBLE, &bytes,
+                                       &itemCount,
+                                       reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(
+                                           buffer.data()))
+        != ERROR_SUCCESS) {
+        return false;
+    }
+
+    auto *items = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(
+        buffer.data());
+    const double msPerTick =
+        m_pdhTimeBase > 0 ? 1000.0 / double(m_pdhTimeBase) : 0.0001;
+    const double upNowMs = double(::GetTickCount64());
+
+    QList<DiskCounters> rows;
+    for (DWORD i = 0; i < itemCount; ++i) {
+        const QString name =
+            QString::fromWCharArray(items[i].szName).trimmed();
+        if (name.isEmpty()) {
+            continue;
+        }
+        const wchar_t *instance =
+            reinterpret_cast<const wchar_t *>(items[i].szName);
+
+        auto rawFirst = [this](int leaf, const wchar_t *inst) -> LONGLONG {
+            PDH_RAW_COUNTER raw;
+            raw.dwType = 0;
+            raw.Time.dwLowDateTime = 0;
+            raw.Time.dwHighDateTime = 0;
+            raw.TimeStamp = 0;
+            raw.FirstValue = 0;
+            raw.SecondValue = 0;
+            raw.MultiCount = 0;
+            if (::PdhGetRawCounterValue(
+                    static_cast<PDH_HCOUNTER>(m_pdhDiskHandles.at(leaf)),
+                    FALSE, inst, &raw)
+                != ERROR_SUCCESS) {
+                return -1;
+            }
+            return raw.FirstValue;
+        };
+
+        const LONGLONG reads = rawFirst(kReads, instance);
+        const LONGLONG readsBytes = rawFirst(kReadBytes, instance);
+        const LONGLONG writes = rawFirst(kWrites, instance);
+        const LONGLONG writesBytes = rawFirst(kWriteBytes, instance);
+        const LONGLONG msRead = rawFirst(kAvgSecRead, instance);
+        const LONGLONG msWrite = rawFirst(kAvgSecWrite, instance);
+        const LONGLONG queueNow = rawFirst(kQueue, instance);
+        const LONGLONG idle = rawFirst(kIdle, instance);
+        const LONGLONG queueRead = rawFirst(kQueueRead, instance);
+        const LONGLONG queueWrite = rawFirst(kQueueWrite, instance);
+        if (reads < 0 || writes < 0 || idle < 0) {
+            continue;
+        }
+
+        DiskCounters row;
+        row.name = name;
+        row.reads = static_cast<quint64>(qMax<LONGLONG>(reads, 0));
+        row.sectorsRead =
+            static_cast<quint64>(qMax<LONGLONG>(readsBytes, 0) / 512);
+        row.writes = static_cast<quint64>(qMax<LONGLONG>(writes, 0));
+        row.sectorsWritten =
+            static_cast<quint64>(qMax<LONGLONG>(writesBytes, 0) / 512);
+        row.msReading =
+            static_cast<quint64>(qMax<LONGLONG>(0, msRead) * msPerTick);
+        row.msWriting =
+            static_cast<quint64>(qMax<LONGLONG>(0, msWrite) * msPerTick);
+        row.iosInProgress = static_cast<quint64>(qMax<LONGLONG>(0, queueNow));
+        const double idleCumMs = qMax<LONGLONG>(0, idle) * msPerTick;
+        row.msDoingIo =
+            static_cast<quint64>(qMax(0.0, upNowMs - idleCumMs));
+        const double weightedMs = qMax<LONGLONG>(0, queueRead) * msPerTick
+            + qMax<LONGLONG>(0, queueWrite) * msPerTick;
+        row.weightedMsDoingIo = static_cast<quint64>(weightedMs);
+        rows.append(row);
+    }
+
+    if (rows.isEmpty()) {
+        return false;
+    }
+    out = rows;
+    return true;
 }

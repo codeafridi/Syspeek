@@ -1,5 +1,6 @@
 #include "DumpReport.h"
 
+#include "DiskStatus.h"
 #include "platform/PlatformFactory.h"
 
 #include <QHash>
@@ -217,10 +218,35 @@ QString dumpReportJson(int maxProcs) {
                     servicesFailedCount(serviceRows));
     root.insert(QStringLiteral("services"), services);
 
+    {
+        QJsonObject disks;
+        QList<DiskCounters> first;
+        if (backend.readDiskCounters(first)) {
+            QThread::msleep(250);
+            QList<DiskCounters> second;
+            if (backend.readDiskCounters(second)) {
+                const QList<DiskRow> rates =
+                    computeDiskRates(first, second, 250.0);
+                disks.insert(QStringLiteral("instances"), rates.size());
+                int hottest = 0;
+                int busiest = 0;
+                for (const DiskRow &row : rates) {
+                    hottest = qMax(hottest,
+                                   qRound(row.readPerSec + row.writePerSec));
+                    busiest = qMax(busiest, qRound(row.utilPercent));
+                }
+                disks.insert(QStringLiteral("ioPerSec"), hottest);
+                disks.insert(QStringLiteral("utilPercent"), busiest);
+            }
+        } else {
+            disks.insert(QStringLiteral("instances"), 0);
+        }
+        root.insert(QStringLiteral("disks"), disks);
+    }
+
     QJsonObject tcp;
     TcpCounters tcpCounters;
-    const bool tcpAvailable = backend.readTcpCounters(tcpCounters);
-    tcp.insert(QStringLiteral("available"), tcpAvailable);
+    const bool tcpAvailable = backend.readTcpCounters(tcpCounters);    tcp.insert(QStringLiteral("available"), tcpAvailable);
     if (tcpAvailable) {
         tcp.insert(QStringLiteral("inSegs"),
                    static_cast<qint64>(tcpCounters.tcp.value(

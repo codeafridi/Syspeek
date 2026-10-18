@@ -118,6 +118,11 @@ jobs:
           print("scm services ok:", services.get("count"),
                 "running", services.get("running"),
                 "failed", services.get("failed"))
+          disks = d.get("disks", {})
+          assert disks.get("instances", 0) > 0, disks
+          print("disks ok:", disks.get("instances"), "instances,",
+                disks.get("ioPerSec"), "io/s peak,",
+                disks.get("utilPercent"), "% util peak")
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs"):

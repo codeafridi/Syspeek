@@ -43,6 +43,7 @@ public:
 
     QList<linuxproc::SocketInfo> readNetSockets() override;
     bool readTcpCounters(TcpCounters &out) override;
+    bool readDiskCounters(QList<DiskCounters> &out) override;
     QList<ServiceRecord> readServices() override;
 
 private:
@@ -59,6 +60,15 @@ private:
     bool m_wsaReady = false;
     mutable QMutex m_mutex;
     mutable Snapshot m_snapshot;
+#if defined(Q_OS_WIN)
+    // PDH disk sampling (persistent query; raw counter reads).
+    bool ensurePdhDiskQuery();
+    void closePdhDiskQuery();
+    void *m_pdhQuery = nullptr;
+    QList<void *> m_pdhDiskHandles;
+    LONGLONG m_pdhTimeBase = 0;
+    QMutex m_pdhDiskMutex;
+#endif
     bool m_tcpCountersOk = false;
 };
 
