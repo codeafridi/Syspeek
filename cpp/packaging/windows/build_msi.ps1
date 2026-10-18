@@ -48,8 +48,10 @@ function Get-ComponentIds([string] $relativePath) {
 
 $directoryIds = @{"." = "INSTALLFOLDER" }
 $directoryXml = New-Object System.Text.StringBuilder
-[void]$directoryXml.AppendLine('    <StandardDirectory Id="ProgramFiles64Folder">')
-[void]$directoryXml.AppendLine('      <Directory Id="INSTALLFOLDER" Name="Syspeek">')
+# INSTALLFOLDER itself is authored in Syspeek.wxs; the payload fragment
+# only appends plugin subdirectories via DirectoryRef (a link, not a
+# redefinition - duplicate symbols collide otherwise).
+[void]$directoryXml.AppendLine('    <DirectoryRef Id="INSTALLFOLDER">')
 
 $subDirs = @()
 foreach ($file in $files) {
@@ -67,10 +69,9 @@ foreach ($relDir in $subDirs) {
     $dirName = $relDir.Replace("/", "\")
     $dirId = "D" + ("{0:x8}" -f ($dirName.ToLower().GetHashCode()))
     $directoryIds[$relDir] = $dirId
-    [void]$directoryXml.AppendLine("        <Directory Id=`"$dirId`" Name=`"$(Split-Path $dirName -Leaf)`" />")
+    [void]$directoryXml.AppendLine("      <Directory Id=`"$dirId`" Name=`"$(Split-Path $dirName -Leaf)`" />")
 }
-[void]$directoryXml.AppendLine('      </Directory>')
-[void]$directoryXml.AppendLine('    </StandardDirectory>')
+[void]$directoryXml.AppendLine('    </DirectoryRef>')
 
 $componentXml = New-Object System.Text.StringBuilder
 [void]$componentXml.AppendLine('    <ComponentGroup Id="PayloadComponents">')
