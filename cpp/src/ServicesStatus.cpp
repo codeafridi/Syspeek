@@ -121,7 +121,12 @@ bool serviceRecordsToUnits(const QList<ServiceRecord> &records, QList<UnitRow> &
             row.sub = QStringLiteral("running");
             break;
         case 1: // SERVICE_STOPPED
-            if (rec.exitCode != 0) {
+            // ERROR_SERVICE_NOT_ACTIVE (1062) / ERROR_SERVICE_NEVER_STARTED
+            // (1077) mark services that simply have not run, not failures
+            // (winerror.h 937/952); dwWin32ExitCode != 0 otherwise is a
+            // genuine failure exit.
+            if (rec.exitCode != 0 && rec.exitCode != 1062
+                && rec.exitCode != 1077) {
                 row.active = QStringLiteral("failed");
                 row.sub = QStringLiteral("failed");
             } else {

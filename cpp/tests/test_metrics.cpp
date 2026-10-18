@@ -154,10 +154,15 @@ int main(int argc, char *argv[]) {
     scmStopped.name = QStringLiteral("Browser");
     scmStopped.state = 1;
     scmRecords.append(scmStopped);
+    ServiceRecord scmNeverStarted;
+    scmNeverStarted.name = QStringLiteral("neverstart");
+    scmNeverStarted.state = 1;
+    scmNeverStarted.exitCode = 1077;
+    scmRecords.append(scmNeverStarted);
     ServiceRecord scmFailed;
     scmFailed.name = QStringLiteral("brokenvc");
     scmFailed.state = 1;
-    scmFailed.exitCode = 1077;
+    scmFailed.exitCode = 3221226505; // 0xC0000149 real crash exit
     scmRecords.append(scmFailed);
     ServiceRecord scmPending;
     scmPending.name = QStringLiteral("a-pending");
@@ -172,7 +177,7 @@ int main(int argc, char *argv[]) {
     scmRecords.append(scmEmpty);
 
     QList<UnitRow> scmUnits;
-    check(serviceRecordsToUnits(scmRecords, scmUnits) && scmUnits.size() == 5,
+    check(serviceRecordsToUnits(scmRecords, scmUnits) && scmUnits.size() == 6,
           "serviceRecordsToUnits: records mapped, empty name skipped");
     check(scmUnits.at(0).name == QStringLiteral("Browser")
               && scmUnits.at(0).active == QStringLiteral("inactive")
@@ -190,7 +195,11 @@ int main(int argc, char *argv[]) {
           "serviceRecordsToUnits: START_PENDING -> activating");
     check(scmUnits.at(4).name == QStringLiteral("brokenvc")
               && scmUnits.at(4).sub == QStringLiteral("failed"),
-          "serviceRecordsToUnits: STOPPED + exit != 0 -> failed");
+          "serviceRecordsToUnits: STOPPED + crash exit -> failed");
+    check(scmUnits.at(5).name == QStringLiteral("neverstart")
+              && scmUnits.at(5).active == QStringLiteral("inactive")
+              && scmUnits.at(5).sub == QStringLiteral("dead"),
+          "serviceRecordsToUnits: 1077 never-started -> inactive, not failed");
     check(servicesRunningCount(scmUnits) == 1
               && servicesFailedCount(scmUnits) == 1,
           "scm counts align with launchctl semantics");
