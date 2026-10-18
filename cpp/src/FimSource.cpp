@@ -234,6 +234,9 @@ void FimSource::onTick() {
                        + st.st_mtimespec.tv_nsec / 1000000;
         meta.ctimeMs = static_cast<qint64>(st.st_ctimespec.tv_sec) * 1000
                        + st.st_ctimespec.tv_nsec / 1000000;
+#elif defined(Q_OS_WIN)
+        meta.mtimeMs = static_cast<qint64>(st.st_mtime) * 1000;
+        meta.ctimeMs = static_cast<qint64>(st.st_ctime) * 1000;
 #else
         meta.mtimeMs = static_cast<qint64>(st.st_mtim.tv_sec) * 1000
                        + st.st_mtim.tv_nsec / 1000000;

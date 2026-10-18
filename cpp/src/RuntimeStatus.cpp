@@ -149,9 +149,9 @@ RuntimeInfo detectRuntime(int pid) {
     info.name = runtimeName(info.runtime);
 
     // SSI / APM instrumentation hints (LD_PRELOAD, lang agent options).
-    QFile environ(base + QStringLiteral("/environ"));
-    if (environ.open(QIODevice::ReadOnly)) {
-        const QString env = QString::fromUtf8(environ.readAll());
+    QFile envFile(base + QStringLiteral("/environ"));
+    if (envFile.open(QIODevice::ReadOnly)) {
+        const QString env = QString::fromUtf8(envFile.readAll());
         if (env.contains(QStringLiteral("dd-trace"))
             || env.contains(QStringLiteral("datadog"))
             || env.contains(QStringLiteral("dd-java-agent"))) {
