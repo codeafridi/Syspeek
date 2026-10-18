@@ -20,6 +20,8 @@
 #include "platform/PlatformFactory.h"
 
 #include <QApplication>
+#include <QSettings>
+#include <QCoreApplication>
 #include <QByteArray>
 #include <QDateTime>
 #include <QEventLoop>
@@ -93,17 +95,14 @@ void autostartCommand(const QString &mode) {
         run.setValue(name, QStringLiteral("\"%1\"")
                               .arg(QCoreApplication::applicationFilePath()));
         run.sync();
-        std::fprintf(stdout, "autostart: enabled (HKCU Run)
-");
+        std::fprintf(stdout, "autostart: enabled (HKCU Run)\n");
     } else if (mode == QStringLiteral("off")) {
         run.remove(name);
         run.sync();
-        std::fprintf(stdout, "autostart: disabled
-");
+        std::fprintf(stdout, "autostart: disabled\n");
     } else {
         const QString value = run.value(name).toString();
-        std::fprintf(stdout, "autostart: %s
-",
+        std::fprintf(stdout, "autostart: %s\n",
                      value.isEmpty() ? "disabled" : "enabled");
     }
 }
