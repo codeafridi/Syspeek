@@ -9,8 +9,8 @@
       Version="$(var.Version)"
       Language="1033"
       UpgradeCode="9C7C4470-8E27-4BDB-98C9-3774BF58B4F9"
-      InstallerVersion="500"
-      scope="perMachine">
+      InstallerVersion="500">
+    <Property Id="ALLUSERS" Value="1" Secure="yes" />
     <SummaryInformation Description="Syspeek local system HUD" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Syspeek is already installed." />
     <MediaTemplate EmbedCab="yes" />
