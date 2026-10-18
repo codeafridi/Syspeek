@@ -662,7 +662,8 @@ QList<ServiceRecord> WindowsBackend::readServices() {
         resume = 0;
         success = ::EnumServicesStatusExW(mgr, SC_ENUM_PROCESS_INFO,
                                           SERVICE_WIN32, SERVICE_STATE_ALL,
-                                          buffer.data(),
+                                          reinterpret_cast<BYTE *>(
+                                              buffer.data()),
                                           DWORD(buffer.size()), &bytes, &count,
                                           &resume, nullptr);
     }
@@ -678,9 +679,9 @@ QList<ServiceRecord> WindowsBackend::readServices() {
             rec.displayName = QString::fromWCharArray(
                 rows[i].lpDisplayName != nullptr ? rows[i].lpDisplayName
                                                  : L"");
-            rec.state = int(rows[i].ServiceStatus.dwCurrentState);
-            rec.exitCode = rows[i].ServiceStatus.dwWin32ExitCode;
-            rec.processId = int(rows[i].ServiceStatus.dwProcessId);
+            rec.state = int(rows[i].ServiceStatusProcess.dwCurrentState);
+            rec.exitCode = rows[i].ServiceStatusProcess.dwWin32ExitCode;
+            rec.processId = int(rows[i].ServiceStatusProcess.dwProcessId);
             out.append(rec);
         }
     }
@@ -752,6 +753,7 @@ bool WindowsBackend::readDiskCounters(QList<DiskCounters> &out) {
 
         auto rawFirst = [this](int leaf, const wchar_t *inst) -> LONGLONG {
             PDH_RAW_COUNTER raw;
+            raw.CStatus = 0;
             raw.dwType = 0;
             raw.Time.dwLowDateTime = 0;
             raw.Time.dwHighDateTime = 0;
