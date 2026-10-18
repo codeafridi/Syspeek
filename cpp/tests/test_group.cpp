@@ -7,9 +7,18 @@
 #include <QCoreApplication>
 #include <QHash>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
@@ -64,7 +73,7 @@ int main(int argc, char *argv[]) {
           "orderedTree(unknown) is just the root");
 
 #ifdef Q_OS_LINUX
-    const int self = static_cast<int>(::getpid());
+    const int self = static_cast<int>(GETPID());
     const ProcessGroup group = ProcessGrouper().discover(self);
     check(group.rootPid > 0, "discover(self) has a root");
     check(group.pids.contains(self), "discover(self) contains self");

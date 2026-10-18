@@ -6,10 +6,19 @@
 #include <QHash>
 #include <QList>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 namespace {
 
@@ -338,7 +347,7 @@ int main(int argc, char *argv[]) {
               "real: totalCpuTicks positive");
         check(linuxproc::onlineCpuCount() > 0, "real: onlineCpuCount positive");
 
-        const int self = static_cast<int>(::getpid());
+        const int self = static_cast<int>(GETPID());
         unsigned long long ticks = 0;
         unsigned long long start = 0;
         check(linuxproc::procCpu(self, ticks, start) && start != 0,

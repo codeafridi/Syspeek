@@ -9,10 +9,20 @@
 #include <QTemporaryFile>
 
 #include <signal.h>
+#if !defined(Q_OS_WIN)
 #include <sys/wait.h>
+#endif
+#if !defined(Q_OS_WIN)
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if !defined(Q_OS_WIN)
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 #ifdef Q_OS_LINUX
 
@@ -53,7 +63,7 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    const int self = static_cast<int>(::getpid());
+    const int self = GETPID();
     const int deadPid = 1 << 30;
 
     check(linuxproc::exists(self), "exists(self) is true");
@@ -136,5 +146,7 @@ int main(int argc, char *argv[]) {
     std::printf("focus tests skipped (linux-only)\n");
     return 0;
 }
+
+#endif
 
 #endif

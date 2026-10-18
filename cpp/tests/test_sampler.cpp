@@ -8,10 +8,15 @@
 #include <QThread>
 
 #include <signal.h>
+#if !defined(Q_OS_WIN)
 #include <sys/wait.h>
+#endif
+#if !defined(Q_OS_WIN)
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if !defined(Q_OS_WIN)
 
 namespace {
 
@@ -109,3 +114,5 @@ int main(int argc, char *argv[]) {
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
+
+#endif

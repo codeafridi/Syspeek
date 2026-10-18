@@ -14,10 +14,19 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
 #include <memory>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
@@ -135,7 +144,7 @@ int main(int argc, char *argv[]) {
               && linuxCaps.psi,
           "linux: capabilities on");
 
-    const int self = static_cast<int>(::getpid());
+    const int self = static_cast<int>(GETPID());
     check(linux.exists(self), "linux: exists(self)");
     check(!linux.comm(self).isEmpty(), "linux: comm(self)");
     check(!linux.allPids().isEmpty(), "linux: allPids() non-empty");

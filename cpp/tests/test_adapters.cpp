@@ -8,9 +8,18 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#if defined(Q_OS_WIN)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
+#if defined(Q_OS_WIN)
+#define GETPID() ::_getpid()
+#else
+#define GETPID() ::getpid()
+#endif
 
 namespace {
 
@@ -42,7 +51,7 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    const int me = static_cast<int>(::getpid());
+    const int me = static_cast<int>(GETPID());
     const QString pid = QString::number(me);
 
     QTemporaryDir dir;
