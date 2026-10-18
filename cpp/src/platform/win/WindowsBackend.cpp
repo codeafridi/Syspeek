@@ -1066,10 +1066,8 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
         buffer.resize(buffer.size() * 2);
     }
     if (status != 0) {
-        m_diagCtx = status;
         return false;
     }
-
 
     QHash<int, unsigned long long> map;
     const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
