@@ -17,7 +17,12 @@
 #endif
 
 #include <cstdio>
-#if !defined(Q_OS_WIN)
+#if defined(Q_OS_WIN)
+int main() {
+    std::printf("skip: POSIX-only test\n");
+    return 0;
+}
+#else
 #if defined(Q_OS_WIN)
 #define GETPID() ::_getpid()
 #else
