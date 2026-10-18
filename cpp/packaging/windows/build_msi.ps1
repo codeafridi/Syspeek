@@ -25,13 +25,14 @@ if (Test-Path $stage) {
     Remove-Item -Recurse -Force $stage
 }
 New-Item -ItemType Directory -Force $stage | Out-Null
-Copy-Item $exe $stage
+$stagedExe = Join-Path $stage "syspeek.exe"
+Copy-Item $exe $stagedExe
 
-# Assemble the Qt runtime next to the exe (Core/Gui/Widgets/Network +
-# platforms/plugins). No translations, no DirectX/D3D redistributables,
-# no OpenGL software rasterizer.
+# Assemble the Qt runtime next to the staged exe (Core/Gui/Widgets/
+# Network + platforms/plugins). No translations, no DirectX/D3D
+# redistributables, no OpenGL software rasterizer.
 windeployqt --release --no-translations --no-system-d3d-compiler `
-    --no-opengl-sw --no-compiler-runtime $exe
+    --no-opengl-sw --no-compiler-runtime $stagedExe
 
 # ---- Generate payload.wxs: one Component per file, nested Directories.
 $files = Get-ChildItem -Recurse -File $stage
@@ -52,7 +53,7 @@ $subDirs = @()
 foreach ($file in $files) {
     $relLeaf = $file.FullName.Substring($stage.Length + 1)
     $relDir = Split-Path $relLeaf -Parent
-    if ($null -eq $relDir) { $relDir = "." }
+    if ([string]::IsNullOrEmpty($relDir)) { $relDir = "." }
     if (-not $directoryIds.ContainsKey($relDir)) {
         $subDirs += $relDir
         $directoryIds[$relDir] = $null
@@ -74,7 +75,7 @@ $componentXml = New-Object System.Text.StringBuilder
 foreach ($file in $files | Sort-Object DataSource) {
     $relLeaf = $file.FullName.Substring($stage.Length + 1)
     $relDir = Split-Path $relLeaf -Parent
-    if ($null -eq $relDir) { $relDir = "." }
+    if ([string]::IsNullOrEmpty($relDir)) { $relDir = "." }
     $ids = Get-ComponentIds $relLeaf
     $dirId = $directoryIds[$relDir]
     $leafName = Split-Path $relLeaf -Leaf
