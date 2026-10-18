@@ -39,7 +39,7 @@ struct DockerSnapshot {
     qint64 sampledAtMs = 0;
 };
 
-QList<DockerContainer> parseDockerPs(const QByteArray &stdout, bool *ok);
+QList<DockerContainer> parseDockerPs(const QByteArray &payload, bool *ok);
 
 int parseDockerExitCode(const QString &status);
 
@@ -47,7 +47,7 @@ int dockerRunningCount(const QList<DockerContainer> &containers);
 int dockerIssueCount(const QList<DockerContainer> &containers);
 bool dockerContainerIsIssue(const DockerContainer &container);
 
-DockerState classifyDockerFailure(const QByteArray &stderr);
+DockerState classifyDockerFailure(const QByteArray &payload);
 
 QString dockerSummaryText(const DockerSnapshot &snapshot);
 QString dockerDetailText(const DockerSnapshot &snapshot);
