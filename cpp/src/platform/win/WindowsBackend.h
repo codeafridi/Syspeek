@@ -46,6 +46,7 @@ public:
     bool readDiskCounters(QList<DiskCounters> &out) override;
     QList<ServiceRecord> readServices() override;
     bool hostSecurityPosture(QList<SecurityFinding> &out) override;
+    void debugDepth(int pid, QJsonObject &out);
     QByteArray processEnv(int pid) override;
     QString processCmdline(int pid) override;
 
@@ -77,6 +78,7 @@ private:
     bool systemContextSwitches(int pid, unsigned long long &out);
     QHash<int, unsigned long long> m_ctxMap;
     qint64 m_ctxMapAt = 0;
+    int m_diagCtx = -99;
 #endif
     bool m_tcpCountersOk = false;
 };

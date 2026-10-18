@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QJsonObject>
 #include <QMutexLocker>
 #include <QSettings>
 
@@ -1035,6 +1036,7 @@ bool WindowsBackend::hostSecurityPosture(QList<SecurityFinding> &out) {
 bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
     const NtQuerySystemInformationFn query = ntQuerySystemInformation();
     if (query == nullptr) {
+        m_diagCtx = -1; // no ntdll resolve
         return false;
     }
 
@@ -1047,6 +1049,7 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
                 out = cached.value();
                 return true;
             }
+            m_diagCtx = -2; // walk ok, pid missing (cached)
             return false;
         }
     }
@@ -1061,13 +1064,30 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
             break;
         }
         if (status != kStatusInfoLengthMismatch) {
+            m_diagCtx = status; // raw NTSTATUS
             return false;
         }
         buffer.resize(buffer.size() * 2);
     }
     if (status != 0) {
+        m_diagCtx = status;
         return false;
     }
+
+    ULONG records = 0;
+    {
+        const BYTE *probe = reinterpret_cast<const BYTE *>(buffer.constData());
+        const BYTE *endProbe = probe + buffer.size();
+        while (probe + sizeof(ULONG) <= endProbe) {
+            auto *record = reinterpret_cast<const NtProcInfo *>(probe);
+            if (record->nextEntryOffset == 0) {
+                break;
+            }
+            ++records;
+            probe += record->nextEntryOffset;
+        }
+    }
+    m_diagCtx = 1000 + static_cast<int>(records); // walk ok
 
     QHash<int, unsigned long long> map;
     const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
@@ -1099,6 +1119,13 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
     }
     out = found.value();
     return true;
+}
+
+void WindowsBackend::debugDepth(int pid, QJsonObject &out) {
+    out.insert(QStringLiteral("diagCtx"), m_diagCtx);
+    QMutexLocker locker(&m_mutex);
+    out.insert(QStringLiteral("ctxMapSize"), m_ctxMap.size());
+    out.insert(QStringLiteral("ctxSelf"), m_ctxMap.value(pid));
 }
 
 QByteArray WindowsBackend::processEnv(int pid) {

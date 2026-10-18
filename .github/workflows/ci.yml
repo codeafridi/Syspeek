@@ -129,7 +129,8 @@ jobs:
                 security.get("exposed"), "exposed,",
                 security.get("grade"))
           depth = d.get("selfDepth", {})
-          assert depth.get("ctxSwitches", 0) > 0, depth
+          assert depth.get("ctxSwitches", 0) > 0, (
+              depth, d.get("selfDiag", {}))
           assert depth.get("cmdlineLength", 0) > 0, depth
           assert depth.get("envPairs", 0) > 0, depth
           print("self depth ok: ctx", depth.get("ctxSwitches"), ",",
