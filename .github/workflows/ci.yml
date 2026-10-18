@@ -158,6 +158,23 @@ jobs:
           SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
           ls -la cpp/build/packaging/
 
+
+      - name: Package MSI (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
+          Get-ChildItem cpp/build/packaging
+
+      - name: Upload msi artifact (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: syspeek-windows-msi
+          path: |
+            cpp/build/packaging/Syspeek-*-windows.msi
+            cpp/build/packaging/Syspeek-*-windows.msi.sha256
+          if-no-files-found: error
       - name: Upload dmg artifact (mac)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4

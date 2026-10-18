@@ -1,0 +1,42 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Syspeek MSI: single-cab per-machine installer of the windeployqt
+       stage (build_msi.ps1 generates the payload fragment). Unsigned (no
+       Apple Developer/Windows Authenticode cert yet): SmartScreen
+       first-run is documented in docs/windows.md. -->
+  <Package
+      Name="Syspeek"
+      Manufacturer="Syspeek project"
+      Version="$(var.Version)"
+      Language="1033"
+      UpgradeCode="9C7C4470-8E27-4BDB-98C9-3774BF58B4F9"
+      InstallerVersion="500"
+      scope="perMachine">
+    <SummaryInformation Description="Syspeek local system HUD" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Syspeek is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPPRODUCTICON" Value="SyspeekIco" />
+    <Icon Id="SyspeekIco" SourceFile="syspeek.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Syspeek" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="SyspeekProgramMenu" Name="Syspeek" />
+    </StandardDirectory>
+
+    <Component Id="Shortcuts" Directory="SyspeekProgramMenu" Bitness="always64">
+      <Shortcut Id="SyspeekStartMenuShortcut" Name="Syspeek"
+                Description="Syspeek local system HUD"
+                Target="[INSTALLFOLDER]syspeek.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveSyspeekProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKMU" Key="Software\Syspeek" Name="installed"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="Syspeek" Level="1">
+      <ComponentGroupRef Id="PayloadComponents" />
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+  </Package>
+</Wix>

@@ -234,6 +234,10 @@ target_compile_options(syspeek_core PRIVATE
 
 add_executable(syspeek src/main.cpp)
 target_link_libraries(syspeek PRIVATE syspeek_core)
+if(WIN32)
+    target_sources(syspeek PRIVATE
+        packaging/windows/syspeek.rc)
+endif()
 
 if(APPLE)
     set_target_properties(syspeek PROPERTIES
