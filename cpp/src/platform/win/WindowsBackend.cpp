@@ -205,6 +205,7 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     PlatformCapabilities caps;
     caps.fim = true;
     caps.systemServices = true;
+    caps.journal = true;
     caps.tcpCounters = m_tcpCountersOk;
     return caps;
 }

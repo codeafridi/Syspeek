@@ -4,6 +4,10 @@
 #include "platform/mac/MacLogSource.h"
 #endif
 
+#if defined(Q_OS_WIN)
+#include "platform/win/WinLogSource.h"
+#endif
+
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QTimer>
@@ -60,6 +64,17 @@ void JournalSource::beginQuery() {
         return;
     }
     emitFailure(QStringLiteral("unified log unavailable"));
+    return;
+#elif defined(Q_OS_WIN)
+    QByteArray data;
+    if (fetchEventLogJournalJson(data, 600, 300)) {
+        m_stdout.clear();
+        m_running = true;
+        m_stdout += data;
+        onFinished(0, QProcess::NormalExit);
+        return;
+    }
+    emitFailure(QStringLiteral("event log unavailable"));
     return;
 #else
     const QString path = QStandardPaths::findExecutable(QStringLiteral("journalctl"));

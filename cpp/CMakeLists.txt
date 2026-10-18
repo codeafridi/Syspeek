@@ -204,7 +204,9 @@ elseif(WIN32)
         src/platform/win/WindowsBackend.cpp
         src/platform/win/WindowsBackend.h
         src/platform/win/WinFocusProvider.cpp
-        src/platform/win/WinFocusProvider.h)
+        src/platform/win/WinFocusProvider.h
+        src/platform/win/WinLogSource.cpp
+        src/platform/win/WinLogSource.h)
     if(TARGET Qt6::DBus)
         target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
     endif()
