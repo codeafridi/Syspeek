@@ -45,6 +45,7 @@ public:
     bool readTcpCounters(TcpCounters &out) override;
     bool readDiskCounters(QList<DiskCounters> &out) override;
     QList<ServiceRecord> readServices() override;
+    bool hostSecurityPosture(QList<SecurityFinding> &out) override;
 
 private:
     struct Snapshot {

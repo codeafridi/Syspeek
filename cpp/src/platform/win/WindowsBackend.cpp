@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QMutexLocker>
+#include <QSettings>
 
 #include <string>
 #include <utility>
@@ -811,4 +812,117 @@ bool WindowsBackend::readDiskCounters(QList<DiskCounters> &out) {
     }
     out = rows;
     return true;
+}
+
+bool WindowsBackend::hostSecurityPosture(QList<SecurityFinding> &out) {
+    // Key set grounded on the shipped osquery 5.23.1 windows MSI's own
+    // windows_hardening.conf pack (shipped artifact content): each check
+    // below is a registry probe the pack itself performs, with the weak
+    // state it flags (EnableLUA data=0, SecureBoot State value, CFG
+    // EnableCfg, ASLR moveImages, SEHOP KernelSEHOPEnabled, DeveloperMode
+    // AppModelUnlock). Missing values follow the pack's semantics: absent
+    // EnableLUA/moveImages are defaults-on (hardened), values that cannot
+    // be read at all are skipped like the mac tool-failure rule.
+    out.clear();
+
+    auto dwordValue = [](const QString &keyPath,
+                         const QString &valueName) -> QVariant {
+        QSettings settings(keyPath, QSettings::NativeFormat);
+        return settings.value(valueName);
+    };
+
+    {
+        const QVariant lua = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows"
+                "\\CurrentVersion\\Policies\\System"),
+            QStringLiteral("EnableLUA"));
+        // Pack semantics: EnableLUA data=0 is the weak state; absent = on.
+        if (!lua.isNull() && lua.toUInt() == 0) {
+            out.append({QStringLiteral("user account control"), 8.0, false});
+        } else {
+            out.append({QStringLiteral("user account control"), 0.0, true});
+        }
+    }
+
+    {
+        const QVariant secureBoot = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control"
+                "\\SecureBoot\\State"),
+            QStringLiteral("UEFISecureBootEnabled"));
+        if (!secureBoot.isNull()) {
+            if (secureBoot.toUInt() != 0) {
+                out.append({QStringLiteral("secure boot"), 0.0, true});
+            } else {
+                out.append({QStringLiteral("secure boot"), 8.0, false});
+            }
+        }
+    }
+
+    {
+        const QVariant cfg = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control"
+                "\\Session Manager\\Memory Management"),
+            QStringLiteral("EnableCfg"));
+        if (!cfg.isNull()) {
+            if (cfg.toUInt() != 0) {
+                out.append({QStringLiteral("control flow guard"), 0.0, true});
+            } else {
+                out.append({QStringLiteral("control flow guard"), 8.0, false});
+            }
+        }
+    }
+
+    {
+        const QVariant moveImages = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control"
+                "\\Session Manager\\Memory Management"),
+            QStringLiteral("moveImages"));
+        // ASLR: moveImages non-zero disables mandatory relocation.
+        if (!moveImages.isNull() && moveImages.toUInt() != 0) {
+            out.append({QStringLiteral("aslr image relocation"), 8.0, false});
+        } else {
+            out.append({QStringLiteral("aslr image relocation"), 0.0, true});
+        }
+    }
+
+    {
+        const QVariant sehop = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control"
+                "\\Session Manager\\Kernel"),
+            QStringLiteral("KernelSEHOPEnabled"));
+        if (!sehop.isNull()) {
+            if (sehop.toUInt() != 0) {
+                out.append({QStringLiteral("sehop"), 0.0, true});
+            } else {
+                out.append({QStringLiteral("sehop"), 6.0, false});
+            }
+        }
+    }
+
+    {
+        const QVariant devMode = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows"
+                "\\CurrentVersion\\AppModelUnlock"),
+            QStringLiteral("AllowDevelopmentWithoutDevLicense"));
+        const QVariant trustedApps = dwordValue(
+            QStringLiteral(
+                "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows"
+                "\\CurrentVersion\\AppModelUnlock"),
+            QStringLiteral("AllowAllTrustedApps"));
+        const bool unlocked = (!devMode.isNull() && devMode.toUInt() != 0)
+            || (!trustedApps.isNull() && trustedApps.toUInt() != 0);
+        if (unlocked) {
+            out.append({QStringLiteral("developer mode"), 6.0, false});
+        } else {
+            out.append({QStringLiteral("developer mode"), 0.0, true});
+        }
+    }
+
+    return !out.isEmpty();
 }

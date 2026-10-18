@@ -244,6 +244,21 @@ QString dumpReportJson(int maxProcs) {
         root.insert(QStringLiteral("disks"), disks);
     }
 
+    {
+        QJsonObject security;
+        QList<SecurityFinding> findings;
+        if (backend.hostSecurityPosture(findings)) {
+            const SecurityPosture graded = postureFromFindings(findings);
+            security.insert(QStringLiteral("findings"), findings.size());
+            security.insert(QStringLiteral("exposed"), graded.exposedCount);
+            security.insert(QStringLiteral("exposure"), graded.exposure);
+            security.insert(QStringLiteral("grade"), graded.grade);
+        } else {
+            security.insert(QStringLiteral("findings"), 0);
+        }
+        root.insert(QStringLiteral("security"), security);
+    }
+
     QJsonObject tcp;
     TcpCounters tcpCounters;
     const bool tcpAvailable = backend.readTcpCounters(tcpCounters);    tcp.insert(QStringLiteral("available"), tcpAvailable);
