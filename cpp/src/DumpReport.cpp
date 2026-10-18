@@ -2,9 +2,6 @@
 
 #include "DiskStatus.h"
 #include "platform/PlatformFactory.h"
-#if defined(Q_OS_WIN)
-#include "platform/win/WindowsBackend.h"
-#endif
 
 #include <QHash>
 #include <QJsonArray>
@@ -281,12 +278,6 @@ QString dumpReportJson(int maxProcs) {
                          ? 0
                          : envData.count('\n') + 1);
         root.insert(QStringLiteral("selfDepth"), depth);
-        auto *winBackend = dynamic_cast<WindowsBackend *>(&backend);
-        if (winBackend != nullptr) {
-            QJsonObject diag;
-            winBackend->debugDepth(selfPid, diag);
-            root.insert(QStringLiteral("selfDiag"), diag);
-        }
     }
 #endif
 
