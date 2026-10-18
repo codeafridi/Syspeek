@@ -1074,7 +1074,6 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
         return false;
     }
 
-    m_diagCtx = 1000 + static_cast<int>(map.size()); // walk ok
 
     QHash<int, unsigned long long> map;
     const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
@@ -1102,6 +1101,7 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
     QMutexLocker locker(&m_mutex);
     m_ctxMap = map;
     m_ctxMapAt = now;
+    m_diagCtx = 1000 + static_cast<int>(map.size()); // walk ok
     const auto found = map.constFind(pid);
     if (found == map.constEnd()) {
         return false;
@@ -1159,7 +1159,7 @@ void WindowsBackend::debugDepth(int pid, QJsonObject &out) {
         out.insert(QStringLiteral(
                         "rpmPeb"),
                    ::ReadProcessMemory(handle,
-                                       static_cast<LPCVOID>(
+                                       reinterpret_cast<LPCVOID>(
                                            reinterpret_cast<ULONG_PTR>(
                                                pbi.pebBaseAddress)
                                            + 0x20),
@@ -1220,8 +1220,8 @@ QByteArray WindowsBackend::processEnv(int pid) {
     ULONG_PTR paramsAddress = 0;
     SIZE_T got = 0;
     if (!::ReadProcessMemory(
-            handle, static_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
-                        pbi.pebBaseAddress)
+            handle, reinterpret_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
+                            pbi.pebBaseAddress)
                         + kPebParamsOffset),
             &paramsAddress, sizeof(paramsAddress), &got)
         || paramsAddress == 0) {
@@ -1323,8 +1323,8 @@ QString WindowsBackend::processCmdline(int pid) {
     ULONG_PTR paramsAddress = 0;
     SIZE_T got = 0;
     if (!::ReadProcessMemory(
-            handle, static_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
-                        pbi.pebBaseAddress)
+            handle, reinterpret_cast<LPCVOID>(reinterpret_cast<ULONG_PTR>(
+                            pbi.pebBaseAddress)
                         + 0x20), // PEB.ProcessParameters (rx_winternl.h order)
             &paramsAddress, sizeof(paramsAddress), &got)
         || paramsAddress == 0) {
