@@ -225,7 +225,7 @@ bool WindowsBackend::ensurePdhDiskQuery() {
     QList<void *> handles;
     for (const wchar_t *path : kPaths) {
         PDH_HCOUNTER handle = nullptr;
-        if (::PdhAddEnglishCounterW(query, path, nullptr, &handle)
+        if (::PdhAddEnglishCounterW(query, path, 0, &handle)
             != ERROR_SUCCESS) {
             ::PdhCloseQuery(query);
             return false;
@@ -233,13 +233,12 @@ bool WindowsBackend::ensurePdhDiskQuery() {
         handles.append(static_cast<void *>(handle));
     }
 
-    LARGE_INTEGER timeBase;
-    timeBase.QuadPart = 0;
+    LONGLONG timeBase = 0;
     if (::PdhGetCounterTimeBase(static_cast<PDH_HCOUNTER>(handles.at(0)),
                                 &timeBase)
             != ERROR_SUCCESS
-        || timeBase.QuadPart <= 0) {
-        timeBase.QuadPart = 10000000; // classic 100 ns perf time base
+        || timeBase <= 0) {
+        timeBase = 10000000; // classic 100 ns perf time base
     }
 
     if (::PdhCollectQueryData(query) != ERROR_SUCCESS) {
@@ -249,7 +248,7 @@ bool WindowsBackend::ensurePdhDiskQuery() {
 
     m_pdhQuery = static_cast<void *>(query);
     m_pdhDiskHandles = handles;
-    m_pdhTimeBase = timeBase.QuadPart;
+    m_pdhTimeBase = timeBase;
     return true;
 }
 

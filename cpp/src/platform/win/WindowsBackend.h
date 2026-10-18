@@ -66,7 +66,7 @@ private:
     void closePdhDiskQuery();
     void *m_pdhQuery = nullptr;
     QList<void *> m_pdhDiskHandles;
-    LONGLONG m_pdhTimeBase = 0;
+    long long m_pdhTimeBase = 0;
     QMutex m_pdhDiskMutex;
 #endif
     bool m_tcpCountersOk = false;
