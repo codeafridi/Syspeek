@@ -177,14 +177,22 @@ QString windowsSelfExePath() {
 void attachParentConsole() {
     const HANDLE out = ::GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD mode = 0;
-    if (out != nullptr && out != INVALID_HANDLE_VALUE
-            && ::GetConsoleMode(out, &mode)) {
+    const bool console = out != nullptr && out != INVALID_HANDLE_VALUE
+        && ::GetConsoleMode(out, &mode) != 0;
+    const bool redirected = out != nullptr && out != INVALID_HANDLE_VALUE;
+    std::fprintf(stderr, "diag: out=%d console=%d redirected=%d\n",
+                 out == nullptr ? -1 : (out == INVALID_HANDLE_VALUE ? -2 : 1),
+                 console ? 1 : 0,
+                 redirected ? 1 : 0); // TEMP-START-DIAG
+    if (console) {
         return;
     }
-    if (out != nullptr && out != INVALID_HANDLE_VALUE) {
+    if (redirected) {
         return; // redirected to a file or pipe: leave the handles alone
     }
     if (!::AttachConsole(ATTACH_PARENT_PROCESS)) {
+        std::fprintf(stderr, "diag: attach failed err=%lu\n",
+                     ::GetLastError()); // TEMP-START-DIAG
         return;
     }
     std::freopen("CONOUT$", "w", stdout);
@@ -259,20 +267,28 @@ int windowsStopOthers() {
 
 bool windowsVerb(const QString &verb) {
     if (verb == QStringLiteral("start")) {
+        std::fprintf(stderr, "start: begin\n"); // TEMP-START-DIAG
         const QList<DWORD> others = syspeekPidsExcludingSelf();
+        std::fprintf(stderr, "start: pids=%lld\n",
+                     static_cast<long long>(others.size())); // TEMP-START-DIAG
         if (!others.isEmpty()) {
             std::fprintf(stdout, "already running: %d instance(s)\n",
                          others.size());
+            std::fflush(stdout);
             return true;
         }
         const QString exe = windowsSelfExePath();
-        if (exe.isEmpty()
-                || !QProcess::startDetached(exe, QStringList())) {
+        const bool detached =
+            QProcess::startDetached(exe, QStringList());
+        std::fprintf(stderr, "start: detached=%d exe=%ls\n", detached ? 1 : 0,
+                     exe.toStdWString().c_str()); // TEMP-START-DIAG
+        if (exe.isEmpty() || !detached) {
             std::fprintf(stderr, "start failed: could not launch %s\n",
                          qUtf8Printable(exe));
             return true;
         }
         std::fprintf(stdout, "started: HUD launched\n");
+        std::fflush(stdout);
         return true;
     }
     if (verb == QStringLiteral("status")) {
