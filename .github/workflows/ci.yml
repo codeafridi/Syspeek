@@ -286,7 +286,10 @@ jobs:
         shell: bash
         run: |
           sh -n install.sh
-          sh install.sh --no-autostart
+          ZIPW=$(ls "$PWD"/cpp/build/packaging/Syspeek-*-windows-portable.zip | head -1)
+          test -f "$ZIPW"
+          WINZIP=$(cygpath -m "$ZIPW")
+          SYSPEEK_WIN_URL="file:///$WINZIP" sh install.sh --no-autostart
           test -f "$LOCALAPPDATA/Syspeek/syspeek.exe"
           test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
           test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
@@ -308,6 +311,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $zip = (Get-Item "$PWD/cpp/build/packaging/Syspeek-*-windows-portable.zip" | Select-Object -First 1)
+          $env:SYSPEEK_WIN_URL = 'file:///' + ($zip.FullName -replace '\\', '/')
+          Write-Host "using local zip: $env:SYSPEEK_WIN_URL"
           ./cpp/packaging/windows/install.ps1 -NoAutostart
           if (-not (Test-Path "$env:LOCALAPPDATA\Syspeek\syspeek.exe")) { throw 'install: exe missing' }
           $shim = Get-Command syspeek -ErrorAction Stop | Select-Object -ExpandProperty Source
