@@ -249,6 +249,10 @@ jobs:
           $inst = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.installer.yaml -Raw
           if ($inst -notmatch 'InstallerSha256:\s*[0-9a-f]{64}') { throw 'manifest: hash missing' }
           if ($inst -match '\$MSISHA|\$ZIPSHA|__MSISHA__|__ZIPSHA__') { throw 'manifest: unexpanded token' }
+          $ver = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.yaml -Raw
+          if ($ver -notmatch '(?m)^DefaultLocale:\s*en-US\s*$') { throw 'manifest: version manifest missing DefaultLocale' }
+          $loc = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.locale.en-US.yaml -Raw
+          if ($loc -notmatch '(?m)^PackageLocale:\s*en-US\s*$') { throw 'manifest: locale manifest missing PackageLocale' }
           Get-Content cpp/packaging/windows/manifests/0.0.0/syspeek-scoop.json | ConvertFrom-Json | Out-Null
           Write-Host 'manifest smoke ok'
 

@@ -40,6 +40,7 @@ $pkgId = "Codeafridi.Syspeek"
 WriteNoBom (Join-Path $outRoot "$pkgId.yaml") (@'
 PackageIdentifier: Codeafridi.Syspeek
 PackageVersion: __VERSION__
+DefaultLocale: en-US
 PackageName: Syspeek
 Publisher: Syspeek project
 PackageUrl: https://github.com/codeafridi/Syspeek
