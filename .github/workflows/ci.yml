@@ -201,8 +201,18 @@ jobs:
           test -x /Applications/Syspeek.app/Contents/MacOS/syspeek
           test -x /Applications/Syspeek.app/Contents/Resources/syspeek
           test -x /usr/local/bin/syspeek
-          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump |
-            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; fs=d.get("filesystems",{}).get("entries",[]); assert fs and all(e["freeG"]<=e["totalG"]+0.01 for e in fs if "freeG" in e), fs[:3]; print("mac install dump ok:", d["processCount"], "procs", len(fs), "fs")'
+          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump > /tmp/mac-smoke-dump.json 2>/dev/null
+          python3 - /tmp/mac-smoke-dump.json <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d["processCount"] > 0 and d["host"]["cores"] > 0, d
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), (
+              fs[:3] if fs else "shipped bundle pre-M54: no block yet")
+          extra = f", {len(fs)} fs" if fs else " (shipped pre-M54: no fs block)"
+          print("mac install dump ok:", d["processCount"], "procs" + extra)
+          PY
           /usr/local/bin/syspeek status
           sh install.sh --uninstall
           test ! -d /Applications/Syspeek.app
