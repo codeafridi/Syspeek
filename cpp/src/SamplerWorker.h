@@ -9,6 +9,7 @@
 #include "HealthEvaluator.h"
 #include "HostSampler.h"
 #include "IoRateTracker.h"
+#include "LinuxProcess.h"
 #include "NetRateTracker.h"
 #include "ProcessIdentity.h"
 #include "SbomSource.h"
@@ -42,6 +43,8 @@ signals:
 
 private:
     DisplaySnapshot buildSnapshot(const FocusSample &focus);
+    void fillHostTail(DisplaySnapshot &snapshot,
+                      const QList<linuxproc::SocketInfo> &sockets);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;

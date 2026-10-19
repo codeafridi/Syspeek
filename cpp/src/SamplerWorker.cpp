@@ -64,6 +64,12 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     DisplaySnapshot snap;
 
     if (!focus.available) {
+        // M58: no early return. Desktops without any focus provider
+        // (LXQt/XFCE/Cinnamon plain X sessions) used to leave EVERY
+        // card at "--" because the host/disks/tcp tail was skipped
+        // wholesale. Without focus the per-app card stays "--" and the
+        // health/SLO bookkeeping resets, but the host cards keep
+        // updating every tick.
         snap.status = QStringLiteral("no-focus");
         m_cpuText = QStringLiteral("--");
         m_memText = QStringLiteral("--");
@@ -72,6 +78,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         m_health.reset();
         m_slo.record(false, QDateTime::currentMSecsSinceEpoch());
         snap.slo = m_slo.report(m_sloSpec);
+        fillHostTail(snap, {});
         return snap;
     }
 
@@ -318,33 +325,40 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                  QDateTime::currentMSecsSinceEpoch());
     snap.slo = m_slo.report(m_sloSpec);
 
+    fillHostTail(snap, sockets);
+
+    return snap;
+}
+
+void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
+                                 const QList<linuxproc::SocketInfo> &sockets) {
     const HostSample host = m_hostSampler.sample();
     if (host.available) {
-        snap.hostAvailable = true;
-        snap.hostWarming = host.warming;
-        snap.hostCpuPercent = host.cpuPercent;
-        snap.hostMemTotalKb = host.mem.totalKb;
-        snap.hostMemAvailableKb = host.mem.availableKb;
-        snap.hostDiskTotalBytes = host.diskTotalBytes;
-        snap.hostDiskFreeBytes = host.diskFreeBytes;
-        snap.hostNetRxPerSec = host.netRxPerSec;
-        snap.hostNetTxPerSec = host.netTxPerSec;
-        snap.hostLoad1 = host.load1;
+        snapshot.hostAvailable = true;
+        snapshot.hostWarming = host.warming;
+        snapshot.hostCpuPercent = host.cpuPercent;
+        snapshot.hostMemTotalKb = host.mem.totalKb;
+        snapshot.hostMemAvailableKb = host.mem.availableKb;
+        snapshot.hostDiskTotalBytes = host.diskTotalBytes;
+        snapshot.hostDiskFreeBytes = host.diskFreeBytes;
+        snapshot.hostNetRxPerSec = host.netRxPerSec;
+        snapshot.hostNetTxPerSec = host.netTxPerSec;
+        snapshot.hostLoad1 = host.load1;
     }
 
-    snap.hostInfo = m_hostInfo;
+    snapshot.hostInfo = m_hostInfo;
 
     const DiskSnapshot disk = m_diskSampler.sample();
-    snap.disksAvailable = disk.available;
-    snap.disksWarming = disk.warming;
-    snap.disks = disk.disks;
-    snap.ioPressure = disk.pressure;
-    snap.ioPressureAvailable = disk.pressure.available;
-    snap.diskIntervalMs = disk.intervalMs;
+    snapshot.disksAvailable = disk.available;
+    snapshot.disksWarming = disk.warming;
+    snapshot.disks = disk.disks;
+    snapshot.ioPressure = disk.pressure;
+    snapshot.ioPressureAvailable = disk.pressure.available;
+    snapshot.diskIntervalMs = disk.intervalMs;
 
     const TcpHealth tcp = m_tcpSampler.sample();
-    snap.tcpHealth = tcp;
-    snap.tcpHealthAvailable = tcp.available;
+    snapshot.tcpHealth = tcp;
+    snapshot.tcpHealthAvailable = tcp.available;
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     if (tcp.available) {
         int established = 0;
@@ -354,9 +368,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                 ++established;
             }
         }
-        snap.tcpHealth.currEstab = established;
+        snapshot.tcpHealth.currEstab = established;
     }
 #endif
-
-    return snap;
 }

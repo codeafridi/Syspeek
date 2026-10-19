@@ -86,7 +86,10 @@ int main() {
     const KubeSnapshot summary = snap(res.pods, res.deployments);
     check(kubeSummaryText(summary) == QStringLiteral("k8s: 3 issues"),
           "summary counts pod+deployment issues");
-    check(kubeSummaryText(KubeSnapshot{}) == QString(), "NotConfigured hidden");
+    check(kubeSummaryText(KubeSnapshot{})
+              == QStringLiteral("k8s: not configured - no kubecontext "
+                                "(kubeconfig or cluster credentials needed)"),
+          "NotConfigured -> explicit hint (M58, was silent-empty)");
 
     KubeSnapshot noIssues;
     noIssues.state = KubeState::Ok;

@@ -3,6 +3,10 @@
 #
 # One-line install — the SAME command on every OS:
 #   curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+#   (or, when curl is absent:  wget -qO- ...   — see README)
+# Everything the installer downloads after bootstrap goes through a
+# fallback ladder: native curl -> wget -> snap curl -> busybox wget ->
+# distro package-manager rescue -> manual instructions.
 #
 # Linux x86-64 (glibc >= 2.34): downloads a self-contained build (Qt 6 bundled
 # — nothing else to install) into ~/.local/opt/syspeek, adds a `syspeek`
@@ -73,14 +77,63 @@ done
 log() { printf '%s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-fetch() { # <url> <dest>
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$2" "$1"
+under_snap() { # <tool> — true when the tool resolves under /snap (sandboxed)
+  case "$(readlink -f "$(command -v "$1" 2>/dev/null)" 2>/dev/null)" in
+    /snap/*) return 0 ;;
+    *)       return 1 ;;
+  esac
+}
+
+pkg_install_curl() { # best-effort distro rescue; 0 iff curl became usable
+  if command -v apt-get >/dev/null 2>&1; then
+    run_priv apt-get update -y >/dev/null 2>&1 || true
+    run_priv apt-get install -y curl >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    run_priv dnf install -y curl >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    run_priv yum install -y curl >/dev/null 2>&1
+  elif command -v zypper >/dev/null 2>&1; then
+    run_priv zypper --non-interactive install curl >/dev/null 2>&1
+  elif command -v pacman >/dev/null 2>&1; then
+    run_priv pacman -S --noconfirm curl >/dev/null 2>&1
+  elif command -v apk >/dev/null 2>&1; then
+    run_priv apk add curl >/dev/null 2>&1
   else
-    die "need curl or wget to download the bundle"
+    return 1
   fi
+  command -v curl >/dev/null 2>&1 && command curl -fsSL \
+    "https://github.com/${REPO}" -o /dev/null >/dev/null 2>&1
+}
+
+fetch() { # <url> <dest> — downloader ladder (M58a), works without native curl
+  if command -v curl >/dev/null 2>&1 && ! under_snap curl; then
+    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
+  fi
+  if command -v wget >/dev/null 2>&1 && ! under_snap wget; then
+    wget -q -T 20 -O "$2" "$1" && return 0
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    log "note: the curl on this machine is a snap (sandbox may block writes)"
+    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
+    log "snap curl failed - continuing down the ladder"
+  fi
+  if command -v busybox >/dev/null 2>&1; then
+    busybox wget -q -T 20 -O "$2" "$1" && return 0
+  fi
+  log "no working downloader; trying the distro package manager once more"
+  if pkg_install_curl; then
+    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
+    if command -v wget >/dev/null 2>&1; then
+      wget -q -T 20 -O "$2" "$1" && return 0
+    fi
+  fi
+  die "could not download $(basename "$1")
+install a downloader manually, then re-run this installer:
+  debian/ubuntu:  sudo apt-get install -y curl
+  fedora/rhel:    sudo dnf install -y curl
+  arch:           sudo pacman -S curl
+  alpine:         sudo apk add curl
+  or get the bundle directly from https://github.com/${REPO}/releases"
 }
 
 run_priv() { # <cmd...> — passwordless sudo when possible, else interactive
@@ -338,12 +391,29 @@ case "\$cmd" in
   start)     systemctl --user start "\$UNIT" ;;
   stop)      systemctl --user stop "\$UNIT" 2>/dev/null || pkill -f "\$APP/syspeek" 2>/dev/null || true ;;
   restart)   systemctl --user restart "\$UNIT" ;;
-  status)    systemctl --user status "\$UNIT" --no-pager 2>/dev/null || pgrep -af "\$APP/syspeek" || echo "not running" ;;
+  status)    systemctl --user status "\$UNIT" --no-pager 2>/dev/null || pgrep -af "\$APP/syspeek" || echo "not running" ; [ -f "\$APP/VERSION" ] && printf 'version: ' && cat "\$APP/VERSION" || true ;;
+  vers)      [ -f "\$APP/VERSION" ] && cat "\$APP/VERSION" || echo "unknown" ;;
   logs)      journalctl --user -u "\$UNIT" -f ;;
   enable)    systemctl --user enable --now "\$UNIT" ;;
   disable)   systemctl --user disable --now "\$UNIT" ;;
-  update)    curl -fsSL ${RAW}/install.sh | sh ;;
-  uninstall) curl -fsSL ${RAW}/install.sh | sh -s -- --uninstall ;;
+  update)    t="\$(mktemp)"
+             if wget -q -T 20 -O "\$t" ${RAW}/install.sh 2>/dev/null \
+                || curl -fsSL --connect-timeout 10 -o "\$t" ${RAW}/install.sh \
+                || busybox wget -q -T 20 -O "\$t" ${RAW}/install.sh; then
+               sh "\$t"
+             else
+               echo "syspeek update: no working downloader (wget/curl/busybox)" >&2
+             fi
+             rm -f "\$t" ;;
+  uninstall) t="\$(mktemp)"
+             if wget -q -T 20 -O "\$t" ${RAW}/install.sh 2>/dev/null \
+                || curl -fsSL --connect-timeout 10 -o "\$t" ${RAW}/install.sh \
+                || busybox wget -q -T 20 -O "\$t" ${RAW}/install.sh; then
+               sh "\$t" -s -- --uninstall
+             else
+               echo "syspeek uninstall: no working downloader (wget/curl/busybox)" >&2
+             fi
+             rm -f "\$t" ;;
   path)      echo "\$APP" ;;
   *)         exec "\$APP/run.sh" "\$cmd" "\$@" ;;
 esac
@@ -505,6 +575,11 @@ linux_install() {
   mkdir -p "$APP_DIR"
   tar xzf "$tmp/bundle.tar.gz" -C "$APP_DIR"
   chmod +x "$APP_DIR/run.sh" "$APP_DIR/syspeek" 2>/dev/null || true
+  if [ -f "$APP_DIR/VERSION" ]; then
+    log "Version: $(cat "$APP_DIR/VERSION")"
+  else
+    log "Version: unknown (bundle predates M58 VERSION stamping; fine)"
+  fi
 
   write_wrapper
   install_autostart
@@ -528,6 +603,12 @@ EOF
     *) log ""; log "note: add $BIN_DIR to your PATH to use the 'syspeek' command." ;;
   esac
 }
+
+# Library mode (M58a tests): source install.sh with SYSPEEK_LIB=1 to reuse
+# fetch()/run_priv() without executing the main dispatch.
+if [ "${SYSPEEK_LIB:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 kernel_sys="$(uname -s)"
 case "$kernel_sys" in

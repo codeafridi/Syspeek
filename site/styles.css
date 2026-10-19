@@ -215,16 +215,9 @@ code {
 .card h3 { margin: 0 0 8px; font-size: 0.98rem; }
 .card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
 
-.plain {
-  list-style: none; padding: 0; margin: 22px auto 0; max-width: 620px;
-  text-align: left; color: var(--muted);
-}
-.plain li { padding: 8px 0 8px 22px; position: relative; }
-.plain li::before {
-  content: ""; position: absolute; left: 2px; top: 17px;
-  width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
-}
-.plain strong { color: var(--text); }
+.alts { margin: 10px 0 0; color: var(--muted); font-size: 0.85rem; }
+.alts a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.alts a:hover { color: var(--text); }
 
 .getstarted .terminal { margin: 0 auto 16px; }
 

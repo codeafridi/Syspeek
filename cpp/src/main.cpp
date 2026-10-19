@@ -15,6 +15,8 @@
 #include "StatsdSource.h"
 #include "DbmSource.h"
 #include "DumpReport.h"
+#include "AppLog.h"
+#include "ProbeRun.h"
 #include "TlsSource.h"
 #include "FimSource.h"
 #include "platform/PlatformFactory.h"
@@ -29,11 +31,18 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QMetaType>
+#include <QDir>
+#include <QProcess>
 #include <QProcessEnvironment>
 #include <QSocketNotifier>
 #include <QThread>
 #include <QTimer>
 #include <QtGlobal>
+
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#include <tlhelp32.h>
+#endif
 
 #include <csignal>
 #include <cstdio>
@@ -83,6 +92,18 @@ void logLine(const QString &message) {
 }
 
 #if defined(Q_OS_WIN)
+// Own executable path via the M49-grounded API
+// (QueryFullProcessImageNameW); works before QApplication exists.
+QString windowsSelfExePath() {
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    if (::QueryFullProcessImageNameW(::GetCurrentProcess(), 0,
+                                     path, &size)) {
+        return QString::fromWCharArray(path, static_cast<int>(size));
+    }
+    return QString();
+}
+
 // HKCU Run key autostart (SystemInformer quotes
 // Software\\Microsoft\\Windows\\CurrentVersion\\Run).
 void autostartCommand(const QString &mode) {
@@ -93,7 +114,7 @@ void autostartCommand(const QString &mode) {
     const QString name = QStringLiteral("Syspeek");
     if (mode == QStringLiteral("on")) {
         run.setValue(name, QStringLiteral("\"%1\"")
-                              .arg(QCoreApplication::applicationFilePath()));
+                              .arg(windowsSelfExePath()));
         run.sync();
         std::fprintf(stdout, "autostart: enabled (HKCU Run)\n");
     } else if (mode == QStringLiteral("off")) {
@@ -106,18 +127,139 @@ void autostartCommand(const QString &mode) {
                      value.isEmpty() ? "disabled" : "enabled");
     }
 }
+
+// Windows verbs (M56): stop/disable/restart/status/uninstall. Same
+// API family grounded in the kept artifact dumps (windows_exporter,
+// SystemInformer, Datadog Windows agent strings: Toolhelp enumeration,
+// OpenProcess/TerminateProcess, GetCurrentProcessId) and the shipped
+// taskkill self-avoidance precedent (Wine taskkill.c skips
+// pid == self_pid) - we never kill our own PID.
+QList<DWORD> syspeekPidsExcludingSelf() {
+    QList<DWORD> out;
+    HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return out;
+    }
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    const DWORD selfId = ::GetCurrentProcessId();
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (_wcsicmp(entry.szExeFile, L"syspeek.exe") == 0
+                    && entry.th32ProcessID != selfId) {
+                out.append(entry.th32ProcessID);
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    ::CloseHandle(snapshot);
+    return out;
+}
+
+int windowsStopOthers() {
+    int stopped = 0;
+    for (DWORD pid : syspeekPidsExcludingSelf()) {
+        HANDLE process = ::OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+        if (process == nullptr) {
+            continue;
+        }
+        if (::TerminateProcess(process, 0)) {
+            ++stopped;
+        }
+        ::CloseHandle(process);
+    }
+    return stopped;
+}
+
+bool windowsVerb(const QString &verb) {
+    if (verb == QStringLiteral("status")) {
+        autostartCommand(QStringLiteral("status"));
+        const QList<DWORD> others = syspeekPidsExcludingSelf();
+        std::fprintf(stdout, "other instances: %d\n", others.size());
+        return true;
+    }
+    if (verb == QStringLiteral("stop")
+            || verb == QStringLiteral("disable")
+            || verb == QStringLiteral("uninstall")
+            || verb == QStringLiteral("restart")) {
+        const int stopped = windowsStopOthers();
+        if (verb == QStringLiteral("disable")
+                || verb == QStringLiteral("uninstall")) {
+            autostartCommand(QStringLiteral("off"));
+        }
+        if (verb == QStringLiteral("uninstall")) {
+            const QString shimDir = QDir::fromNativeSeparators(
+                qEnvironmentVariable("LOCALAPPDATA")
+                + QStringLiteral("/Microsoft/WindowsApps"));
+            QFile::remove(shimDir + QStringLiteral("/syspeek.cmd"));
+            QFile::remove(shimDir + QStringLiteral("/syspeek"));
+            const QString appDir = QFileInfo(
+                    QCoreApplication::applicationFilePath())
+                .absolutePath();
+            std::fprintf(stdout,
+                         "teardown done: HUD stopped, autostart removed, "
+                         "shims removed\n");
+            std::fprintf(stdout,
+                         "the running exe locks its folder - delete it "
+                         "after this command exits:\n  "
+                         "Remove-Item -Recurse -Force \"%s\"\n",
+                         qUtf8Printable(appDir));
+        }
+        if (verb == QStringLiteral("restart")) {
+            const QString exe = windowsSelfExePath();
+            if (!exe.isEmpty()) {
+                QProcess::startDetached(exe, QStringList());
+            }
+        }
+        std::fprintf(stdout, "stopped: %d other instance(s)\n", stopped);
+        return true;
+    }
+    return false;
+}
 #endif
 
 } // namespace
 
 int main(int argc, char *argv[]) {
+    QCoreApplication::setApplicationName(QStringLiteral("syspeek"));
+    QCoreApplication::setOrganizationName(QStringLiteral("dev.syspeek"));
+    installAppMessageLogger();
+
     for (int i = 1; i < argc; ++i) {
-        if (QByteArray(argv[i]) == QByteArrayLiteral("--dump")) {
+        const QByteArray arg(argv[i]);
+        if (arg == QByteArrayLiteral("--dump")) {
             const QByteArray report = dumpReportJson().toUtf8();
             std::fwrite(report.constData(), 1, report.size(), stdout);
             return 0;
         }
+        if (arg.startsWith(QByteArrayLiteral("--probe"))) {
+            return probeRun(argc, argv);
+        }
+        if (arg == QByteArrayLiteral("logs")) {
+            const int status = printAppLogTail(40) ? 0 : 2;
+            if (status != 0) {
+                std::printf("no hud.log yet on this user account\n");
+            }
+            return status;
+        }
     }
+
+#if defined(Q_OS_WIN)
+    {
+        const QString verb = argc == 2
+            ? QString::fromLocal8Bit(argv[1])
+            : QString();
+        if (!verb.isEmpty()
+                && (verb == QStringLiteral("stop")
+                    || verb == QStringLiteral("disable")
+                    || verb == QStringLiteral("uninstall")
+                    || verb == QStringLiteral("restart")
+                    || verb == QStringLiteral("status"))) {
+            if (windowsVerb(verb)) {
+                return 0;
+            }
+        }
+    }
+#endif
 
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
         && !qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")

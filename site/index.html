@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Syspeek — a tiny focused-process HUD for Linux, macOS, and Windows</title>
-  <meta name="description" content="Syspeek is a small, always on top HUD for Linux, macOS, and Windows that follows the app you're focused on and shows its CPU and memory plus optional Docker and Kubernetes health." />
+  <title>Syspeek. A focused process HUD for Linux, macOS and Windows</title>
+  <meta name="description" content="Syspeek is a small overlay HUD that live tracks the CPU and memory of the app you are using, with optional Docker and Kubernetes health. Linux, macOS and Windows. C++ and Qt 6, fully open source." />
   <meta name="theme-color" content="#f4f5f8" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311151b'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23d9a441'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -34,7 +34,6 @@
       <nav class="nav-mid">
         <a href="#features">Features</a>
         <a href="#install">Install</a>
-        <a href="#compatibility">Compatibility</a>
       </nav>
       <div class="nav-right">
         <a class="ver" href="https://github.com/codeafridi/Syspeek/releases" rel="noopener" title="Releases">v0.8.1</a>
@@ -53,16 +52,15 @@
   <main id="top">
     <section class="hero">
       <div class="wrap">
-        <p class="eyebrow">Linux · macOS · Windows — C++20 · Qt 6</p>
-        <h1>A tiny, always on top HUD for the app you're focused on.</h1>
+        <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6.</p>
+        <h1>The HUD that follows the app you're using.</h1>
         <p class="lede">
-          No more hunting through <code>top</code>. Syspeek follows the window you're using
-          and shows that application's CPU and memory plus optional Docker and
-          Kubernetes health in a compact panel that stays out of your way — on Linux,
-          macOS, and Windows, with native collectors on each.
+          Pick any window and Syspeek shows that app's CPU, memory, threads and
+          file descriptors live, in a small panel that floats over your desktop.
+          Docker and Kubernetes health come along when you want them.
         </p>
 
-        <div class="terminal" id="install">
+        <div class="terminal" id="quick">
           <div class="terminal-bar">
             <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="terminal-title">install</span>
@@ -73,10 +71,8 @@
           </div>
         </div>
         <p class="note">
-          The same one line installs on all three platforms. Self-contained build — Qt is
-          bundled, so there's no compiler or Qt runtime to install. Starts at login.
-          On Windows: <code>irm raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex</code> (PowerShell).
-          Also available: the <a href="#install-methods">AppImage, .deb, DMG, and MSI</a>.
+          The same one line works on every OS because Qt ships inside the app.
+          See <a href="#install">Install</a> for what each command does.
         </p>
 
         <div class="actions">
@@ -98,117 +94,69 @@
     <section class="section" id="features">
       <div class="wrap">
         <p class="section-kicker">What it shows</p>
-        <h2>One panel, the numbers that matter.</h2>
+        <h2>One panel. The numbers that matter.</h2>
         <div class="grid">
           <article class="card">
             <h3>Focused application</h3>
-            <p>The processes behind the window you're using right now — PID, CPU percentage, resident memory, plus threads, file descriptors, and context switches — updated live.</p>
+            <p>PID, CPU percent and resident memory of the window you are using, plus threads, open files and context switches. Refreshed every second.</p>
           </article>
           <article class="card">
             <h3>Docker</h3>
-            <p>Running container count, plus flags for unhealthy, restarting, and recently exited containers.</p>
+            <p>Container count at a glance, with unhealthy, restarting and recently exited containers flagged.</p>
           </article>
           <article class="card">
             <h3>Kubernetes</h3>
-            <p>Problem pods (<code>CrashLoopBackOff</code>, image-pull failures, <code>OOMKilled</code>) and deployments with too few ready replicas, from your current <code>kubectl</code> context.</p>
+            <p>Problem pods (<code>CrashLoopBackOff</code>, <code>OOMKilled</code>, image pull failures) and deployments short on ready replicas, from your current <code>kubectl</code> context.</p>
           </article>
           <article class="card">
             <h3>Runs where you work</h3>
-            <p>GNOME, KDE, Sway, niri, and X11 on Linux; native focus and collectors on macOS and Windows. Features an OS cannot provide are shown as <em>not supported on this OS</em> — never silently blank.</p>
+            <p>Real focus tracking on GNOME, KDE, Hyprland, Sway, niri and plain X11. Native collectors on macOS and Windows. Anything an OS cannot provide is labelled <em>not supported on this OS</em>, never silently blank.</p>
           </article>
         </div>
-        <p class="muted small">Optional integrations run off the UI thread, so a missing tool never blocks the overlay.</p>
       </div>
     </section>
 
-    <section class="section" id="compatibility">
-      <div class="wrap">
-        <p class="section-kicker">Compatibility</p>
-        <h2>Runs on your desktop.</h2>
-        <p class="muted">
-          On Linux, built and tested on Ubuntu, Debian, Fedora, RHEL 9 clones, openSUSE, Arch, and
-          Alpine. The installer ships Qt 6 with the app, so it also runs on distros that
-          don't package Qt 6 like openSUSE Leap, Amazon Linux 2023, and similar.
-        </p>
-        <ul class="plain">
-          <li><strong>Linux</strong> — portable install (x86-64, glibc ≥ 2.34) or from source with your distro's Qt 6 (RHEL family via EPEL; Alpine uses musl).</li>
-          <li><strong>macOS</strong> (beta, 0.7+) — DMG with Qt bundled, minimum macOS 12 (Monterey); no permissions required. Unsigned build: right-click → Open on first launch.</li>
-          <li><strong>Windows</strong> (beta, 0.8+) — MSI or portable zip, Windows 10 or newer; native collectors (SCM, EventLog, PDH, TCP stats). Unsigned build: <em>More info → Run anyway</em> on first launch.</li>
-          <li><strong>Controls</strong> — <code>syspeek stop</code>, <code>syspeek disable</code>, <code>syspeek update</code>, <code>syspeek uninstall</code> (per-OS verb sets: run the installer with <code>-h</code>; Windows autostart is <code>syspeek --autostart=on|off|status</code>).</li>
-        </ul>
-      </div>
-    </section>
-
-    <section class="section getstarted" id="install-methods">
+    <section class="section getstarted" id="install">
       <div class="wrap">
         <p class="section-kicker">Get started</p>
-        <h2>Pick your platform.</h2>
+        <h2>Pick your OS. One line each.</h2>
         <div class="methods">
           <article class="card method">
-            <h3>One line <span class="tag">recommended</span></h3>
-            <p>Linux, macOS, or Windows (Git Bash). Adds a <code>syspeek</code> command, starts at login, and sets up the Linux focus bridge when needed.</p>
+            <h3>Linux <span class="tag">recommended</span></h3>
+            <p>Installs to your home directory, adds a <code>syspeek</code> command and starts at login. Works on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and friends (64 bit, glibc 2.34 or newer).</p>
             <div class="terminal">
               <div class="terminal-bar">
                 <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">any OS</span>
+                <span class="terminal-title">bash</span>
               </div>
               <div class="terminal-body">
-                <code id="cmd-portable"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
-                <button class="copy" type="button" data-copy="#cmd-portable" aria-label="Copy portable install command">Copy</button>
+                <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+                <button class="copy" type="button" data-copy="#cmd-linux" aria-label="Copy Linux install command">Copy</button>
               </div>
             </div>
+            <p class="alts">No curl on the box? <a href="https://github.com/codeafridi/Syspeek#install" rel="noopener">wget variant and details</a>. Alternatives: <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">.deb, AppImage, SHA256SUMS</a>.</p>
           </article>
 
           <article class="card method">
-            <h3>.deb <span class="tag">Debian / Ubuntu</span></h3>
-            <p>Native package. Installs <code>/usr/bin/syspeek</code>, a user unit, and a launcher.</p>
+            <h3>macOS</h3>
+            <p>The same line fetches the latest DMG, copies <code>Syspeek.app</code> to <code>/Applications</code> and registers login autostart. Needs macOS 12 Monterey or newer. No permissions required, and the installer
+            clears the quarantine flag so Gatekeeper stays quiet.</p>
             <div class="terminal">
               <div class="terminal-bar">
                 <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">deb</span>
+                <span class="terminal-title">terminal</span>
               </div>
               <div class="terminal-body">
-                <code id="cmd-deb"><span class="prompt">$</span> sudo apt install ./syspeek_0.8.1_amd64.deb</code>
-                <button class="copy" type="button" data-copy="#cmd-deb" aria-label="Copy deb install command">Copy</button>
+                <code id="cmd-mac"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+                <button class="copy" type="button" data-copy="#cmd-mac" aria-label="Copy macOS install command">Copy</button>
               </div>
             </div>
-            <p class="muted small">Grab the <code>.deb</code> + <code>SHA256SUMS</code> from the <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">latest release</a>, verify with <code>sha256sum -c SHA256SUMS --ignore-missing</code>.</p>
+            <p class="alts">Prefer the manual path? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the DMG</a>, or follow <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/macos.md" rel="noopener">docs/macos.md</a>.</p>
           </article>
 
           <article class="card method">
-            <h3>AppImage <span class="tag">Linux</span></h3>
-            <p>One file, no install step. Download it, make it executable, run it. Self-updates via delta (<code>.zsync</code> on the release page, use AppImageUpdate).</p>
-            <div class="terminal">
-              <div class="terminal-bar">
-                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">appimage</span>
-              </div>
-              <div class="terminal-body">
-                <code id="cmd-appimage"><span class="prompt">$</span> curl -fLO https://github.com/codeafridi/Syspeek/releases/latest/download/Syspeek-0.8.1-x86_64.AppImage &amp;&amp; chmod +x Syspeek-0.8.1-x86_64.AppImage &amp;&amp; ./Syspeek-0.8.1-x86_64.AppImage</code>
-                <button class="copy" type="button" data-copy="#cmd-appimage" aria-label="Copy AppImage command">Copy</button>
-              </div>
-            </div>
-          </article>
-
-          <article class="card method">
-            <h3>DMG <span class="tag">macOS</span></h3>
-            <p>App bundle with Qt included. Copy to <code>/Applications</code> (or <code>~/Applications</code> without admin), then first-run it once so Gatekeeper allows the unsigned build.</p>
-            <div class="terminal">
-              <div class="terminal-bar">
-                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">dmg</span>
-              </div>
-              <div class="terminal-body">
-                <code id="cmd-dmg"><span class="prompt">$</span> curl -fLO https://github.com/codeafridi/Syspeek/releases/latest/download/Syspeek-0.8.1-macos.dmg</code>
-                <button class="copy" type="button" data-copy="#cmd-dmg" aria-label="Copy DMG download command">Copy</button>
-              </div>
-            </div>
-            <p class="muted small">Or use the one-liner above — it fetches the DMG and installs the bundle + LaunchAgent + <code>syspeek</code> command for you. Steps for the manual path: <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/macos.md" rel="noopener">docs/macos.md</a>.</p>
-          </article>
-
-          <article class="card method">
-            <h3>PowerShell / MSI <span class="tag">Windows</span></h3>
-            <p>Portable install into <code>%LOCALAPPDATA%\Syspeek</code> with <code>syspeek</code> shims on PATH and HKCU Run autostart. From PowerShell, no Git Bash needed.</p>
+            <h3>Windows</h3>
+            <p>Installs into your user directory with <code>syspeek</code> on PATH and login autostart. Needs Windows 10 or newer. Just PowerShell, no Git Bash.</p>
             <div class="terminal">
               <div class="terminal-bar">
                 <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -219,17 +167,17 @@
                 <button class="copy" type="button" data-copy="#cmd-win" aria-label="Copy PowerShell install command">Copy</button>
               </div>
             </div>
-            <p class="muted small">Prefer a native installer? Grab the <code>.msi</code> (or portable zip + SHA256) from the <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">latest release</a>. Details: <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/windows.md" rel="noopener">docs/windows.md</a>.</p>
+            <p class="alts">Fan of setup wizards? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the MSI or portable zip</a>. SmartScreen may ask once: choose Run anyway. Details: <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/windows.md" rel="noopener">docs/windows.md</a>.</p>
           </article>
         </div>
-        <p class="muted small">Docs, build notes, and source live in the <a href="https://github.com/codeafridi/Syspeek" rel="noopener">GitHub repository</a>.</p>
+        <p class="muted small">After install: <code>syspeek</code> to run it, <code>syspeek status</code> to check it, <code>syspeek stop</code> to quit it, <code>syspeek update</code> to upgrade. Docs and the full source live in the <a href="https://github.com/codeafridi/Syspeek" rel="noopener">repository</a>.</p>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="wrap footer-inner">
-      <span>Syspeek — MIT licensed.</span>
+      <span>Syspeek. MIT license.</span>
       <span class="footer-links">
         <a href="https://github.com/codeafridi/Syspeek" rel="noopener">GitHub</a>
         <a href="https://github.com/codeafridi/Syspeek/releases" rel="noopener">Releases</a>

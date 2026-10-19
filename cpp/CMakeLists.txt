@@ -76,8 +76,8 @@ add_library(syspeek_core STATIC
     src/HealthEvaluator.h
     src/NullFocusProvider.cpp
     src/NullFocusProvider.h
-    src/XdotoolFocusProvider.cpp
-    src/XdotoolFocusProvider.h
+    src/X11FocusProvider.cpp
+    src/X11FocusProvider.h
     src/HyprctlFocusProvider.cpp
     src/HyprctlFocusProvider.h
     src/SwaymsgFocusProvider.cpp
@@ -164,6 +164,10 @@ add_library(syspeek_core STATIC
     src/FimSource.h
     src/DumpReport.cpp
     src/DumpReport.h
+    src/AppLog.cpp
+    src/AppLog.h
+    src/ProbeRun.cpp
+    src/ProbeRun.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
@@ -228,6 +232,14 @@ if(APPLE)
     target_compile_options(syspeek_core PUBLIC $<$<COMPILE_LANGUAGE:OBJCXX>:-Wno-deprecated-declarations>)
 elseif(UNIX)
     target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+    find_package(X11 QUIET)
+    if(X11_FOUND)
+        target_link_libraries(syspeek_core PUBLIC X11::X11)
+        target_compile_definitions(syspeek_core PUBLIC SYSPEEK_X11=1)
+    else()
+        message(WARNING
+            "X11 dev headers not found; native X11 focus provider disabled")
+    endif()
 endif()
 target_compile_options(syspeek_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>)
