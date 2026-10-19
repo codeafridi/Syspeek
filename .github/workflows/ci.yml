@@ -253,7 +253,7 @@ jobs:
           if ($ver -notmatch '(?m)^DefaultLocale:\s*en-US\s*$') { throw 'manifest: version manifest missing DefaultLocale' }
           $loc = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.locale.en-US.yaml -Raw
           if ($loc -notmatch '(?m)^PackageLocale:\s*en-US\s*$') { throw 'manifest: locale manifest missing PackageLocale' }
-          Get-Content cpp/packaging/windows/manifests/0.0.0/syspeek-scoop.json | ConvertFrom-Json | Out-Null
+          Get-Content cpp/packaging/windows/manifests/scoop/syspeek-scoop.json | ConvertFrom-Json | Out-Null
           Write-Host 'manifest smoke ok'
 
       - name: Installer smoke (linux)

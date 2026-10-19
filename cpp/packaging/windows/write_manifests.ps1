@@ -106,7 +106,11 @@ ManifestVersion: 1.6.0
 '@.Replace('__VERSION__', $Version))
 
 # ---- Scoop (portable zip; MSI offered via the notes) ----
-WriteNoBom (Join-Path $outRoot "syspeek-scoop.json") ($(
+# Kept OUTSIDE the winget manifests dir: winget validate on the directory
+# parses every file it finds, and a Scoop json is not a winget manifest.
+$scoopRoot = Join-Path (Join-Path $PSScriptRoot "manifests") "scoop"
+New-Item -ItemType Directory -Force $scoopRoot | Out-Null
+WriteNoBom (Join-Path $scoopRoot "syspeek-scoop.json") ($(
     [ordered]@{
         homepage    = "https://github.com/codeafridi/Syspeek"
         description = "Local system HUD (CPU, memory, network, processes, containers) overlay."
@@ -123,5 +127,5 @@ WriteNoBom (Join-Path $outRoot "syspeek-scoop.json") ($(
         }
     } | ConvertTo-Json -Depth 4) )
 
-Write-Host ("manifests written to {0} (msi {1}, zip {2})" -f $outRoot, (Join-Path $outRoot "$pkgId.installer.yaml"), (Join-Path $outRoot "syspeek-scoop.json"))
+Write-Host ("manifests written to {0} (msi {1}, scoop {2})" -f $outRoot, (Join-Path $outRoot "$pkgId.installer.yaml"), (Join-Path $scoopRoot "syspeek-scoop.json"))
 Write-Host "submit winget -> microsoft/winget-pkgs (fork then PR); scoop -> a bucket repo"
