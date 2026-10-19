@@ -111,6 +111,14 @@ void autostartCommand(const QString &mode) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        if (QByteArray(argv[i]) == QByteArrayLiteral("--dump")) {
+            const QByteArray report = dumpReportJson().toUtf8();
+            std::fwrite(report.constData(), 1, report.size(), stdout);
+            return 0;
+        }
+    }
+
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
         && !qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")
         && !qEnvironmentVariableIsEmpty("DISPLAY")) {
@@ -119,12 +127,6 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Syspeek"));
-
-    if (app.arguments().contains(QStringLiteral("--dump"))) {
-        const QByteArray report = dumpReportJson().toUtf8();
-        std::fwrite(report.constData(), 1, report.size(), stdout);
-        return 0;
-    }
 
 #if defined(Q_OS_WIN)
     for (const QString &arg : app.arguments()) {
