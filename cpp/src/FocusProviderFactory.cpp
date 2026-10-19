@@ -7,7 +7,7 @@
 #include "NiriFocusProvider.h"
 #include "NullFocusProvider.h"
 #include "SwaymsgFocusProvider.h"
-#include "XdotoolFocusProvider.h"
+#include "X11FocusProvider.h"
 
 #ifdef Q_OS_MACOS
 #include "platform/mac/MacFocusProvider.h"
@@ -73,7 +73,7 @@ QString focusProviderKindName(FocusProviderKind kind) {
     case FocusProviderKind::Niri:
         return QStringLiteral("niri");
     case FocusProviderKind::X11:
-        return QStringLiteral("xdotool");
+        return QStringLiteral("x11-native");
     case FocusProviderKind::Mac:
         return QStringLiteral("mac-nsworkspace");
     case FocusProviderKind::Windows:
@@ -121,8 +121,11 @@ std::unique_ptr<FocusedWindowProvider> createFocusProvider(const Config &config)
         return std::make_unique<CachingFocusProvider>(
             std::make_unique<NiriFocusProvider>(), ttl);
     case FocusProviderKind::X11:
+        // M58: native X11 provider (no external tool); covers LXQt/XFCE/
+        // MATE/Cinnamon/Deepin/i3 and generic X sessions where xdotool
+        // is not installed.
         return std::make_unique<CachingFocusProvider>(
-            std::make_unique<XdotoolFocusProvider>(), ttl);
+            std::make_unique<X11FocusProvider>(), ttl);
     case FocusProviderKind::Null:
     default:
         return std::make_unique<NullFocusProvider>();

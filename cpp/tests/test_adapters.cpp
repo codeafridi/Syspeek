@@ -1,7 +1,7 @@
 #include "HyprctlFocusProvider.h"
 #include "NiriFocusProvider.h"
 #include "SwaymsgFocusProvider.h"
-#include "XdotoolFocusProvider.h"
+#include "X11FocusProvider.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -57,18 +57,11 @@ int main(int argc, char *argv[]) {
     QTemporaryDir dir;
     check(dir.isValid(), "temp dir created");
 
-    const QString xdotool = writeScript(
-        dir, QStringLiteral("xdotool"),
-        QStringLiteral("[ \"$1\" = \"getwindowfocus\" ] && "
-                       "[ \"$2\" = \"getwindowpid\" ] || exit 2\necho %1\n")
-            .arg(pid));
-    XdotoolFocusProvider xdotoolProvider(xdotool);
-    check(xdotoolProvider.name() == QStringLiteral("xdotool"),
-          "xdotool adapter name");
-#ifndef Q_OS_WIN
-    check(xdotoolProvider.focusedPid() == me,
-          "xdotool adapter returns pid from command (args validated)");
-#endif
+    X11FocusProvider broken(QStringLiteral(":99"));
+    check(broken.name() == QStringLiteral("x11-native"),
+          "x11 native provider name");
+    check(broken.focusedPid() == -1,
+          "unopenable DISPLAY -> no focus");
 
     const QString hyprctl = writeScript(
         dir, QStringLiteral("hyprctl"),
@@ -106,21 +99,23 @@ int main(int argc, char *argv[]) {
           "niri adapter returns pid from focused-window JSON");
 #endif
 
-    XdotoolFocusProvider nonzero(
+    SwaymsgFocusProvider nonzero(
         writeScript(dir, QStringLiteral("badexit"), QStringLiteral("exit 3\n")));
-    check(nonzero.focusedPid() == -1, "non-zero exit -> -1");
+    check(nonzero.focusedPid() == -1,
+          "non-zero exit -> -1 (shared QProcess adapter path)");
 
-    XdotoolFocusProvider garbage(
+    SwaymsgFocusProvider garbage(
         writeScript(dir, QStringLiteral("garbage"),
-                    QStringLiteral("echo notanumber\n")));
-    check(garbage.focusedPid() == -1, "non-numeric output -> -1");
+                    QStringLiteral("echo notajson\n")));
+    check(garbage.focusedPid() == -1, "non-JSON output -> -1");
 
-    XdotoolFocusProvider dead(
+    SwaymsgFocusProvider dead(
         writeScript(dir, QStringLiteral("dead"),
-                    QStringLiteral("echo 1073741824\n")));
+                    QStringLiteral("echo '{\"type\":\"root\",\"focused\":"
+                                   "true,\"pid\":1073741824}'\n")));
     check(dead.focusedPid() == -1, "dead pid -> -1");
 
-    XdotoolFocusProvider slow(
+    SwaymsgFocusProvider slow(
         writeScript(dir, QStringLiteral("slow"), QStringLiteral("sleep 5\n")));
     QElapsedTimer timer;
     timer.start();

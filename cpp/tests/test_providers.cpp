@@ -8,7 +8,7 @@
 #include "LinuxProcess.h"
 #include "NullFocusProvider.h"
 #include "SwaymsgFocusProvider.h"
-#include "XdotoolFocusProvider.h"
+#include "X11FocusProvider.h"
 
 #include <QCoreApplication>
 
@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
               == QStringLiteral("gnome-pidfile"),
           "Gnome kind name");
     check(focusProviderKindName(FocusProviderKind::X11)
-              == QStringLiteral("xdotool"),
+              == QStringLiteral("x11-native"),
           "X11 kind name");
     check(focusProviderKindName(FocusProviderKind::Hyprland)
               == QStringLiteral("hyprctl"),
@@ -148,10 +148,10 @@ int main(int argc, char *argv[]) {
     check(nullProvider.name() == QStringLiteral("null"), "null provider name");
     check(nullProvider.focusedPid() == -1, "null provider returns -1");
 
-    XdotoolFocusProvider missingXdotool(QStringLiteral("/nonexistent/xdotool"));
-    check(missingXdotool.name() == QStringLiteral("xdotool"),
-          "xdotool provider name");
-    check(missingXdotool.focusedPid() == -1, "missing xdotool command -> -1");
+    X11FocusProvider unnamed(QStringLiteral(":99"));
+    check(unnamed.name() == QStringLiteral("x11-native"),
+          "x11 native provider name");
+    check(unnamed.focusedPid() == -1, "unopenable DISPLAY -> -1");
 
     {
         qint64 fakeNow = 1000;
