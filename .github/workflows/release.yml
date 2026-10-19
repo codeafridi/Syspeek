@@ -114,6 +114,23 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version $version
           Get-ChildItem cpp/build/packaging
 
+      - name: Write winget + Scoop manifests
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/write_manifests.ps1 -Version $version
+          Get-ChildItem cpp/packaging/windows/manifests/$version
+
+      - name: Validate manifests (winget, if available)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Host 'winget CLI not present on runner; validate skipped'
+            exit 0
+          }
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          winget validate "cpp/packaging/windows/manifests/$version"
+
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -123,6 +140,13 @@ jobs:
             cpp/build/packaging/Syspeek-*-windows.msi.sha256
             cpp/build/packaging/Syspeek-*-windows-portable.zip
             cpp/build/packaging/Syspeek-*-windows-portable.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload manifests artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syspeek-winget-manifests
+          path: cpp/packaging/windows/manifests/
           if-no-files-found: error
 
   github-release:

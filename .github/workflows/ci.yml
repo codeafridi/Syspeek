@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m58]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58]
   pull_request:
 
 jobs:
@@ -206,6 +206,37 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
           Get-ChildItem cpp/build/packaging
 
+      - name: VC runtime bundled (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem cpp/build/packaging/Syspeek-*-windows-portable.zip |
+            Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = $archive.Entries | ForEach-Object { $_.FullName }
+            foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+              if ($names -notcontains $dll) { throw "MSVC runtime not bundled in zip: $dll" }
+            }
+            Write-Host "vc runtime bundled ok: $($names.Count) entries"
+          } finally {
+            $archive.Dispose()
+          }
+          $wxs = Get-Content cpp/packaging/windows/payload.wxs -Raw
+          if ($wxs -notmatch 'vcruntime140\.dll') { throw 'payload.wxs missing vc runtime' }
+
+      - name: Manifest smoke (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/write_manifests.ps1 -Version 0.0.0
+          $inst = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.installer.yaml -Raw
+          if ($inst -notmatch 'InstallerSha256:\s*[0-9a-f]{64}') { throw 'manifest: hash missing' }
+          if ($inst -match '\$MSISHA|\$ZIPSHA|__MSISHA__|__ZIPSHA__') { throw 'manifest: unexpanded token' }
+          Get-Content cpp/packaging/windows/manifests/0.0.0/syspeek-scoop.json | ConvertFrom-Json | Out-Null
+          Write-Host 'manifest smoke ok'
+
       - name: Installer smoke (linux)
         if: runner.os == 'Linux'
         run: |
@@ -280,6 +311,12 @@ jobs:
           $shim = Get-Command syspeek -ErrorAction Stop | Select-Object -ExpandProperty Source
           Write-Host "shim: $shim"
           & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --autostart=status
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" stop 2>&1 | Tee-Object -Variable stopOut
+          if ("$stopOut" -notmatch 'stopped: \d+') { throw "stop verb: unexpected output ($stopOut)" }
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" stop
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" disable
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" status | Tee-Object -Variable statusOut
+          if ("$statusOut" -notmatch 'autostart: disabled') { throw "status verb: unexpected output ($statusOut)" }
           & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --dump | Out-File dump.json
           $dump = Get-Content dump.json -Raw | ConvertFrom-Json -AsHashtable
           if (($dump.processCount -as [int]) -lt 1) { throw 'dump: processCount missing' }
