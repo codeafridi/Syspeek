@@ -36,7 +36,7 @@
         <a href="#install">Install</a>
       </nav>
       <div class="nav-right">
-        <a class="ver" href="https://github.com/codeafridi/Syspeek/releases" rel="noopener" title="Releases">v0.8.1</a>
+        <a class="ver" href="https://github.com/codeafridi/Syspeek/releases" rel="noopener" title="Releases">v0.8.2</a>
         <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
           <svg class="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
           <svg class="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
@@ -57,27 +57,11 @@
         <p class="lede">
           Pick any window and Syspeek shows that app's CPU, memory, threads and
           file descriptors live, in a small panel that floats over your desktop.
-          Docker and Kubernetes health come along when you want them.
-        </p>
-
-        <div class="terminal" id="quick">
-          <div class="terminal-bar">
-            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="terminal-title">install</span>
-          </div>
-          <div class="terminal-body">
-            <code id="install-cmd"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
-            <button class="copy" type="button" data-copy="#install-cmd" aria-label="Copy install command">Copy</button>
-          </div>
-        </div>
-        <p class="note">
-          The same one line works on every OS because Qt ships inside the app.
-          See <a href="#install">Install</a> for what each command does.
         </p>
 
         <div class="actions">
-          <a class="btn primary" href="https://github.com/codeafridi/Syspeek" rel="noopener">View on GitHub</a>
-          <a class="btn" href="https://github.com/codeafridi/Syspeek/releases" rel="noopener">Releases</a>
+          <a class="btn primary" href="#install">Install now</a>
+          <a class="btn" href="https://github.com/codeafridi/Syspeek" rel="noopener">View on GitHub</a>
         </div>
 
         <div class="shot-frame">
@@ -119,58 +103,59 @@
     <section class="section getstarted" id="install">
       <div class="wrap">
         <p class="section-kicker">Get started</p>
-        <h2>Pick your OS. One line each.</h2>
-        <div class="methods">
-          <article class="card method">
-            <h3>Linux <span class="tag">recommended</span></h3>
-            <p>Installs to your home directory, adds a <code>syspeek</code> command and starts at login. Works on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and friends (64 bit, glibc 2.34 or newer).</p>
-            <div class="terminal">
-              <div class="terminal-bar">
-                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">bash</span>
-              </div>
-              <div class="terminal-body">
-                <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
-                <button class="copy" type="button" data-copy="#cmd-linux" aria-label="Copy Linux install command">Copy</button>
-              </div>
-            </div>
-            <p class="alts">No curl on the box? <a href="https://github.com/codeafridi/Syspeek#install" rel="noopener">wget variant and details</a>. Alternatives: <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">.deb, AppImage, SHA256SUMS</a>.</p>
-          </article>
-
-          <article class="card method">
-            <h3>macOS</h3>
-            <p>The same line fetches the latest DMG, copies <code>Syspeek.app</code> to <code>/Applications</code> and registers login autostart. Needs macOS 12 Monterey or newer. No permissions required, and the installer
-            clears the quarantine flag so Gatekeeper stays quiet.</p>
-            <div class="terminal">
-              <div class="terminal-bar">
-                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">terminal</span>
-              </div>
-              <div class="terminal-body">
-                <code id="cmd-mac"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
-                <button class="copy" type="button" data-copy="#cmd-mac" aria-label="Copy macOS install command">Copy</button>
-              </div>
-            </div>
-            <p class="alts">Prefer the manual path? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the DMG</a>, or follow <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/macos.md" rel="noopener">docs/macos.md</a>.</p>
-          </article>
-
-          <article class="card method">
-            <h3>Windows</h3>
-            <p>Installs into your user directory with <code>syspeek</code> on PATH and login autostart. Needs Windows 10 or newer. Just PowerShell, no Git Bash.</p>
-            <div class="terminal">
-              <div class="terminal-bar">
-                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="terminal-title">powershell</span>
-              </div>
-              <div class="terminal-body">
-                <code id="cmd-win"><span class="prompt">PS&gt;</span> irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex</code>
-                <button class="copy" type="button" data-copy="#cmd-win" aria-label="Copy PowerShell install command">Copy</button>
-              </div>
-            </div>
-            <p class="alts">Fan of setup wizards? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the MSI or portable zip</a>. SmartScreen may ask once: choose Run anyway. Details: <a href="https://github.com/codeafridi/Syspeek/blob/main/docs/windows.md" rel="noopener">docs/windows.md</a>.</p>
-          </article>
+        <h2>Click your OS. Copy one line.</h2>
+        <div class="ostabs" role="tablist" aria-label="Choose your operating system">
+          <button type="button" role="tab" data-os="linux" aria-selected="true">Linux</button>
+          <button type="button" role="tab" data-os="macos" aria-selected="false">macOS</button>
+          <button type="button" role="tab" data-os="windows" aria-selected="false">Windows</button>
         </div>
-        <p class="muted small">After install: <code>syspeek</code> to run it, <code>syspeek status</code> to check it, <code>syspeek stop</code> to quit it, <code>syspeek update</code> to upgrade. Docs and the full source live in the <a href="https://github.com/codeafridi/Syspeek" rel="noopener">repository</a>.</p>
+
+        <div class="ospanel" data-os="linux" role="tabpanel">
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="terminal-title">bash</span>
+            </div>
+            <div class="terminal-body">
+              <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+              <button class="copy" type="button" data-copy="#cmd-linux" aria-label="Copy Linux install command">Copy</button>
+            </div>
+          </div>
+          <p>Installs for your user only, puts <code>syspeek</code> on PATH and starts it at login. Runs on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and other 64 bit distros with glibc 2.34 or newer. No curl? The README has a wget version.</p>
+          <p class="alts">Prefer a package file? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the .deb or the AppImage</a> from Releases.</p>
+        </div>
+
+        <div class="ospanel" data-os="macos" role="tabpanel" hidden>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="terminal-title">terminal</span>
+            </div>
+            <div class="terminal-body">
+              <code id="cmd-mac"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+              <button class="copy" type="button" data-copy="#cmd-mac" aria-label="Copy macOS install command">Copy</button>
+            </div>
+          </div>
+          <p>Downloads the latest DMG, copies the app into <code>/Applications</code> and turns on login autostart. Needs macOS 12 Monterey or newer. No permissions asked, and the installer clears Gatekeeper for you.</p>
+          <p class="alts">Prefer a package file? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the DMG</a> from Releases.</p>
+        </div>
+
+        <div class="ospanel" data-os="windows" role="tabpanel" hidden>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="terminal-title">powershell</span>
+            </div>
+            <div class="terminal-body">
+              <code id="cmd-win"><span class="prompt">PS&gt;</span> irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex</code>
+              <button class="copy" type="button" data-copy="#cmd-win" aria-label="Copy PowerShell install command">Copy</button>
+            </div>
+          </div>
+          <p>Open PowerShell, paste the line, done. Installs into your user folder, puts <code>syspeek</code> on PATH and starts it at login. Needs Windows 10 or newer. No Git Bash required.</p>
+          <p class="alts">Prefer a setup wizard? <a href="https://github.com/codeafridi/Syspeek/releases/latest" rel="noopener">Download the MSI</a> from Releases. SmartScreen may ask once: choose Run anyway.</p>
+        </div>
+
+        <p class="muted small">After install: <code>syspeek</code> to run it, <code>syspeek status</code> to check it, <code>syspeek stop</code> to quit it, <code>syspeek update</code> to upgrade.</p>
       </div>
     </section>
   </main>
@@ -194,6 +179,17 @@
       var m = document.querySelector('meta[name="theme-color"]');
       if (m) m.setAttribute('content', next === 'dark' ? '#0c0e12' : '#f4f5f8');
       try { localStorage.setItem('theme', next); } catch (e) {}
+    });
+
+    document.querySelectorAll('.ostabs button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        document.querySelectorAll('.ostabs button').forEach(function (x) {
+          x.setAttribute('aria-selected', x === b ? 'true' : 'false');
+        });
+        document.querySelectorAll('.ospanel').forEach(function (p) {
+          p.hidden = p.dataset.os !== b.dataset.os;
+        });
+      });
     });
 
     document.querySelectorAll('.copy').forEach(function (btn) {
