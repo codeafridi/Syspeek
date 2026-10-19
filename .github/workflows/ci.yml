@@ -173,10 +173,10 @@ jobs:
           sh install.sh --no-bridge --no-autostart
           test -x "$HOME/.local/opt/syspeek/syspeek"
           test -x "$HOME/.local/bin/syspeek"
-          "$HOME/.local/opt/syspeek/syspeek" --dump |
+          QT_QPA_PLATFORM=offscreen "$HOME/.local/opt/syspeek/syspeek" --dump |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux install dump ok:", d["processCount"], "procs")'
           "$HOME/.local/bin/syspeek" status
-          "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
+          QT_QPA_PLATFORM=offscreen "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux wrapper passthrough ok")'
           sh install.sh --uninstall
           test ! -d "$HOME/.local/opt/syspeek"

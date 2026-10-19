@@ -174,7 +174,7 @@ mac_install() {
 
   res="$mac_app/Contents/Resources/syspeek"
   mkdir -p "$(dirname "$res")"
-  fetch "$RAW/install_macos.sh" "$res" \
+  fetch "$RAW/cpp/packaging/install_macos.sh" "$res" \
     || die "could not fetch the macOS verb manager (install_macos.sh)"
   chmod 0755 "$res"
 
