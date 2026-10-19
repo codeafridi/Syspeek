@@ -33,18 +33,21 @@ if ($env:SYSPEEK_NO_AUTOSTART) { $NoAutostart = $true }
 
 function LatestTag {
     if ($env:SYSPEEK_TEST_TAG) { return $env:SYSPEEK_TEST_TAG }
+    $null = Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+    $h = New-Object System.Net.Http.HttpClientHandler
+    $h.AllowAutoRedirect = $false
+    $c = New-Object System.Net.Http.HttpClient($h)
     try {
-        Invoke-WebRequest -Uri "https://github.com/$Repo/releases/latest" `
-            -MaximumRedirection 0 -UseBasicParsing | Out-Null
-    } catch {
-        $loc = $_.Exception.Response.Headers['Location']
-        if ($loc) { $loc = @($loc)[0] }
+        $resp = $c.GetAsync("https://github.com/$Repo/releases/latest").GetAwaiter().GetResult()
+        $loc = $resp.Headers.Location
+        if (-not $loc) { throw 'error: could not resolve the latest release' }
+        $tag = ($loc.ToString() -split '/')[-1]
+        if (-not $tag) { throw 'error: could not resolve the latest release' }
+        Info "latest release: $tag"
+        return $tag
+    } finally {
+        $c.Dispose()
     }
-    if (-not $loc) { throw 'error: could not resolve the latest release' }
-    $tag = ([string]$loc -split '/tag/')[-1]
-    if (-not $tag) { throw 'error: could not resolve the latest release' }
-    Info "latest release: $tag"
-    return $tag
 }
 
 function ZipUrl {
