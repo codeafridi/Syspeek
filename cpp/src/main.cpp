@@ -24,6 +24,8 @@
 #include <QApplication>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QByteArray>
 #include <QDateTime>
 #include <QEventLoop>
@@ -61,6 +63,23 @@ qint64 g_focusRequestedAtMs = 0;
 qint64 g_guiLastTickMs = 0;
 qint64 g_guiMaxLateMs = 0;
 
+// Per-user instance-key suffix for the single-instance gate (Everything
+// 1.4.1 grounds the model: default single instance, with the
+// allow_multiple_instances setting and the -first-instance flag in its
+// shipped strings).
+QString instanceUserKey() {
+#if defined(Q_OS_WIN)
+    char name[256] = {};
+    DWORD size = sizeof(name);
+    if (::GetUserNameA(name, &size)) {
+        return QString::fromLocal8Bit(name);
+    }
+    return QStringLiteral("user");
+#else
+    return QString::number(static_cast<qulonglong>(::getuid()));
+#endif
+}
+
 void latencyLog(const char *name, qint64 value) {
     std::fprintf(stderr, "[latency] %s=%lld\n", name,
                  static_cast<long long>(value));
@@ -75,6 +94,7 @@ void writeSignalByte(int) {
 #endif
 
 void logLine(const QString &message) {
+
     const QString path =
         QProcessEnvironment::systemEnvironment().value(
             QStringLiteral("SYSPEEK_LOG"));
@@ -102,6 +122,31 @@ QString windowsSelfExePath() {
         return QString::fromWCharArray(path, static_cast<int>(size));
     }
     return QString();
+}
+
+// GUI-subsystem processes have no console of their own; verb output typed
+// in a terminal would vanish. Attach to the calling console then re-open
+// CONOUT$ for stdio. Grounded: SDK psdk wincon.h (AttachConsole,
+// ATTACH_PARENT_PROCESS "Special PID for parent process for AttachConsole
+// API"); SystemInformer ships the console-API family (AllocConsole/
+// FreeConsole in si.strings); the Datadog Windows agent embeds CONOUT$
+// plus GetStdHandle/getStdHandle - the stdout-reattach model. Skipped
+// when stdout is already redirected (CI capture, pipes, files).
+void attachParentConsole() {
+    const HANDLE out = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (out != nullptr && out != INVALID_HANDLE_VALUE
+            && ::GetConsoleMode(out, &mode)) {
+        return;
+    }
+    if (out != nullptr && out != INVALID_HANDLE_VALUE) {
+        return; // redirected to a file or pipe: leave the handles alone
+    }
+    if (!::AttachConsole(ATTACH_PARENT_PROCESS)) {
+        return;
+    }
+    std::freopen("CONOUT$", "w", stdout);
+    std::freopen("CONOUT$", "w", stderr);
 }
 
 // HKCU Run key autostart (SystemInformer quotes
@@ -171,6 +216,23 @@ int windowsStopOthers() {
 }
 
 bool windowsVerb(const QString &verb) {
+    if (verb == QStringLiteral("start")) {
+        const QList<DWORD> others = syspeekPidsExcludingSelf();
+        if (!others.isEmpty()) {
+            std::fprintf(stdout, "already running: %d instance(s)\n",
+                         others.size());
+            return true;
+        }
+        const QString exe = windowsSelfExePath();
+        if (exe.isEmpty()
+                || !QProcess::startDetached(exe, QStringList())) {
+            std::fprintf(stderr, "start failed: could not launch %s\n",
+                         qUtf8Printable(exe));
+            return true;
+        }
+        std::fprintf(stdout, "started: HUD launched\n");
+        return true;
+    }
     if (verb == QStringLiteral("status")) {
         autostartCommand(QStringLiteral("status"));
         const QList<DWORD> others = syspeekPidsExcludingSelf();
@@ -220,6 +282,9 @@ bool windowsVerb(const QString &verb) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+#if defined(Q_OS_WIN)
+    attachParentConsole();
+#endif
     QCoreApplication::setApplicationName(QStringLiteral("syspeek"));
     QCoreApplication::setOrganizationName(QStringLiteral("dev.syspeek"));
     installAppMessageLogger();
@@ -249,7 +314,8 @@ int main(int argc, char *argv[]) {
             ? QString::fromLocal8Bit(argv[1])
             : QString();
         if (!verb.isEmpty()
-                && (verb == QStringLiteral("stop")
+                && (verb == QStringLiteral("start")
+                    || verb == QStringLiteral("stop")
                     || verb == QStringLiteral("disable")
                     || verb == QStringLiteral("uninstall")
                     || verb == QStringLiteral("restart")
@@ -279,6 +345,24 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 #endif
+
+    // Single-instance gate: a second HUD would stack two overlays.
+    const QString instanceKey = QStringLiteral("syspeek-hud-")
+        + instanceUserKey();
+    QLocalSocket instanceProbe;
+    instanceProbe.connectToServer(instanceKey);
+    if (instanceProbe.waitForConnected(150)) {
+        std::fprintf(stdout, "syspeek: HUD already running\n");
+        return 0;
+    }
+    instanceProbe.abort();
+#if !defined(Q_OS_WIN)
+    QLocalServer::removeServer(instanceKey);
+#endif
+    auto *instanceLock = new QLocalServer(&app);
+    if (!instanceLock->listen(instanceKey)) {
+        instanceLock->deleteLater();
+    }
 
     QString configError;
     const Config config = loadConfig(defaultConfigPath(), &configError);

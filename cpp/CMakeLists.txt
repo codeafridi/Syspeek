@@ -249,6 +249,10 @@ target_link_libraries(syspeek PRIVATE syspeek_core)
 if(WIN32)
     target_sources(syspeek PRIVATE
         packaging/windows/syspeek.rc)
+    # GUI subsystem: launching the HUD must never host it in a console
+    # window (shipped GUI tools are subsystem 2 - e.g. Everything.exe;
+    # console attachment for verb output is opt-in, see main.cpp).
+    set_target_properties(syspeek PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
 if(APPLE)
