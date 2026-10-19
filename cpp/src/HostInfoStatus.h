@@ -18,6 +18,8 @@ struct HostFsInfo {
     QString name;
     QString mountedOn;
     unsigned long long kbSize = 0;
+    unsigned long long kbFree = 0;
+    bool hasKbFree = false;
 };
 
 struct HostNetworkInfo {

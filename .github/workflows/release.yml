@@ -25,7 +25,7 @@ jobs:
           cmake --build cpp/build -j3
           QT_QPA_PLATFORM=offscreen ctest --test-dir cpp/build --output-on-failure
           ./cpp/build/syspeek.app/Contents/MacOS/syspeek --dump \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; print("mac dump ok:", d["processCount"], "procs")'
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; fs=d.get("filesystems",{}).get("entries",[]); assert fs and all(e["freeG"]<=e["totalG"]+0.01 for e in fs if "freeG" in e), fs[:3]; print("mac dump ok:", d["processCount"], "procs", len(fs), "fs")'
           SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
 
       - name: Upload macos artifacts
@@ -100,6 +100,9 @@ jobs:
           cmake --build cpp/build --config Release
           ctest --test-dir cpp/build -C Release --output-on-failure
           $json = & ./cpp/build/Release/syspeek.exe --dump | ConvertFrom-Json -AsHashtable
+          $fs = $json.filesystems.entries
+          if ($fs.Count -lt 1) { throw 'dump: no filesystem entries' }
+          Write-Host ("windows fs ok: {0} entries" -f $fs.Count)
           if ($json.processCount -le 0) { throw "dump: no processes" }
           if ($json.host.cores -le 0) { throw "dump: no cores" }
           Write-Host ("windows dump ok: {0} procs" -f $json.processCount)

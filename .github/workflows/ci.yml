@@ -87,6 +87,11 @@ jobs:
                   print("tcp extras:", json.dumps(extra, sort_keys=True))
           else:
               print("tcp sysctl unavailable (kernel denies) - stays gated")
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert fs, "filesystems block"
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), fs[:3]
+          print("filesystems ok:", len(fs), "entries")
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -128,6 +133,11 @@ jobs:
           print("posture ok:", security.get("findings"), "findings,",
                 security.get("exposed"), "exposed,",
                 security.get("grade"))
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert fs, "filesystems block"
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), fs[:3]
+          print("filesystems ok:", len(fs), "entries")
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
@@ -192,7 +202,7 @@ jobs:
           test -x /Applications/Syspeek.app/Contents/Resources/syspeek
           test -x /usr/local/bin/syspeek
           /Applications/Syspeek.app/Contents/MacOS/syspeek --dump |
-            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; print("mac install dump ok:", d["processCount"], "procs")'
+            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; fs=d.get("filesystems",{}).get("entries",[]); assert fs and all(e["freeG"]<=e["totalG"]+0.01 for e in fs if "freeG" in e), fs[:3]; print("mac install dump ok:", d["processCount"], "procs", len(fs), "fs")'
           /usr/local/bin/syspeek status
           sh install.sh --uninstall
           test ! -d /Applications/Syspeek.app
