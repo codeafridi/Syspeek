@@ -83,7 +83,18 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
     $zip = Join-Path $tmp 'syspeek.zip'
     $zipUrl = ZipUrl
-    Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing
+    $ok = $false
+    foreach ($attempt in 1..2) {
+        try {
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing -TimeoutSec 600
+            if ((Get-Item -LiteralPath $zip).Length -lt 10MB) { throw 'downloaded zip is too small' }
+            $ok = $true
+            break
+        } catch {
+            if ($attempt -eq 2) { throw "download failed: $($_.Exception.Message)" }
+            Info "download attempt $attempt failed, retrying"
+        }
+    }
 
     Get-Process -Name syspeek -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
