@@ -86,7 +86,14 @@ try {
     $ok = $false
     foreach ($attempt in 1..2) {
         try {
-            Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing -TimeoutSec 600
+            if ($zipUrl -match '^(?i)file:/') {
+                $localZip = [Uri]::UnescapeDataString(([Uri]$zipUrl).LocalPath)
+                Copy-Item -LiteralPath $localZip -Destination $zip -Force
+            } elseif ($zipUrl -match '^[a-zA-Z]:[\\/]') {
+                Copy-Item -LiteralPath $zipUrl -Destination $zip -Force
+            } else {
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing -TimeoutSec 600
+            }
             if ((Get-Item -LiteralPath $zip).Length -lt 10MB) { throw 'downloaded zip is too small' }
             $ok = $true
             break

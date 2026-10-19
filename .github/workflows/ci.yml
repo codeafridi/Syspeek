@@ -312,7 +312,7 @@ jobs:
         shell: pwsh
         run: |
           $zip = (Get-Item "$PWD/cpp/build/packaging/Syspeek-*-windows-portable.zip" | Select-Object -First 1)
-          $env:SYSPEEK_WIN_URL = 'file:///' + ($zip.FullName -replace '\\', '/')
+          $env:SYSPEEK_WIN_URL = $zip.FullName
           Write-Host "using local zip: $env:SYSPEEK_WIN_URL"
           ./cpp/packaging/windows/install.ps1 -NoAutostart
           if (-not (Test-Path "$env:LOCALAPPDATA\Syspeek\syspeek.exe")) { throw 'install: exe missing' }
