@@ -41,10 +41,16 @@ curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh 
   `/Applications` (falls back to `~/Applications` without admin rights),
   installs LaunchAgent autostart + the `syspeek` command in
   `/usr/local/bin`, and reports the Gatekeeper steps for the unsigned build.
-- **Windows (run inside Git Bash)** — downloads the portable zip into
-  `%LOCALAPPDATA%\Syspeek`, adds a `syspeek` command through the WindowsApps
-  PATH directory, sets HKCU Run autostart, and starts the HUD. Or run the
-  MSI from the [releases](../../releases) page instead.
+- **Windows** — PowerShell native bootstrap into `%LOCALAPPDATA%\Syspeek`,
+  `syspeek` shim through the WindowsApps PATH directory, HKCU Run
+  autostart, then the HUD starts:
+
+  ```powershell
+  irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex
+  ```
+
+  Or from Git Bash with the same `install.sh` as macOS/Linux. Or run
+  the MSI from the [releases](../../releases) page instead.
 
 Control it (Linux verbs below; macOS uses the launchctl verb set, Windows
 autostart/status are `--autostart=on|off|status` — run the installer with

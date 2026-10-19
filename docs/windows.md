@@ -17,7 +17,15 @@ shortcut, Add/Remove Programs entry, WiX major upgrades supported.
 anywhere, run `syspeek.exe` directly (Qt runtime is bundled next to the
 exe). No registry, no install.
 
-**Scripted portable install (one line, inside [Git Bash](https://git-scm.com/downloads)):**
+**Scripted portable install (Windows 10+):**
+
+PowerShell (no Git Bash needed) — options via env (`$env:SYSPEEK_NO_AUTOSTART='1'`, `$env:SYSPEEK_UNINSTALL='1'`):
+
+```powershell
+irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex
+```
+
+Git Bash — the same bash installer as macOS/Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
