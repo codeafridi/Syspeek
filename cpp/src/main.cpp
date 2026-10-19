@@ -15,6 +15,8 @@
 #include "StatsdSource.h"
 #include "DbmSource.h"
 #include "DumpReport.h"
+#include "AppLog.h"
+#include "ProbeRun.h"
 #include "TlsSource.h"
 #include "FimSource.h"
 #include "platform/PlatformFactory.h"
@@ -111,11 +113,26 @@ void autostartCommand(const QString &mode) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+    QCoreApplication::setApplicationName(QStringLiteral("syspeek"));
+    QCoreApplication::setOrganizationName(QStringLiteral("dev.syspeek"));
+    installAppMessageLogger();
+
     for (int i = 1; i < argc; ++i) {
-        if (QByteArray(argv[i]) == QByteArrayLiteral("--dump")) {
+        const QByteArray arg(argv[i]);
+        if (arg == QByteArrayLiteral("--dump")) {
             const QByteArray report = dumpReportJson().toUtf8();
             std::fwrite(report.constData(), 1, report.size(), stdout);
             return 0;
+        }
+        if (arg.startsWith(QByteArrayLiteral("--probe"))) {
+            return probeRun(argc, argv);
+        }
+        if (arg == QByteArrayLiteral("logs")) {
+            const int status = printAppLogTail(40) ? 0 : 2;
+            if (status != 0) {
+                std::printf("no hud.log yet on this user account\n");
+            }
+            return status;
         }
     }
 

@@ -76,8 +76,8 @@ add_library(syspeek_core STATIC
     src/HealthEvaluator.h
     src/NullFocusProvider.cpp
     src/NullFocusProvider.h
-    src/XdotoolFocusProvider.cpp
-    src/XdotoolFocusProvider.h
+    src/X11FocusProvider.cpp
+    src/X11FocusProvider.h
     src/HyprctlFocusProvider.cpp
     src/HyprctlFocusProvider.h
     src/SwaymsgFocusProvider.cpp
@@ -164,6 +164,10 @@ add_library(syspeek_core STATIC
     src/FimSource.h
     src/DumpReport.cpp
     src/DumpReport.h
+    src/AppLog.cpp
+    src/AppLog.h
+    src/ProbeRun.cpp
+    src/ProbeRun.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
