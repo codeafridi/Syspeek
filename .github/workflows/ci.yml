@@ -176,6 +176,17 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
           Get-ChildItem cpp/build/packaging
 
+      - name: Manifest smoke (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/write_manifests.ps1 -Version 0.0.0
+          $inst = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.installer.yaml -Raw
+          if ($inst -notmatch 'InstallerSha256:\s*[0-9a-f]{64}') { throw 'manifest: hash missing' }
+          if ($inst -match '\$MSISHA|\$ZIPSHA|__MSISHA__|__ZIPSHA__') { throw 'manifest: unexpanded token' }
+          Get-Content cpp/packaging/windows/manifests/0.0.0/syspeek-scoop.json | ConvertFrom-Json | Out-Null
+          Write-Host 'manifest smoke ok'
+
       - name: Installer smoke (linux)
         if: runner.os == 'Linux'
         run: |
