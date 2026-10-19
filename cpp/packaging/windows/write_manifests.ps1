@@ -122,5 +122,5 @@ WriteNoBom (Join-Path $outRoot "syspeek-scoop.json") ($(
         }
     } | ConvertTo-Json -Depth 4) )
 
-Write-Host ("manifests written to {0} (msi {1}, zip {2}; winget -> microsoft/winget-pkgs PR, scoop -> bucket repo)"
-            -f $outRoot, (Join-Path $outRoot "$pkgId.installer.yaml"), (Join-Path $outRoot "syspeek-scoop.json"))
+Write-Host ("manifests written to {0} (msi {1}, zip {2})" -f $outRoot, (Join-Path $outRoot "$pkgId.installer.yaml"), (Join-Path $outRoot "syspeek-scoop.json"))
+Write-Host "submit winget -> microsoft/winget-pkgs (fork then PR); scoop -> a bucket repo"
