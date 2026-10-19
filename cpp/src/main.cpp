@@ -157,7 +157,12 @@ QList<DWORD> syspeekPidsExcludingSelf() {
 
 int windowsStopOthers() {
     int stopped = 0;
-    for (DWORD pid : syspeekPidsExcludingSelf()) {
+    std::fprintf(stdout, "stop: begin enumeration\n");
+    std::fflush(stdout);
+    QList<DWORD> others = syspeekPidsExcludingSelf();
+    std::fprintf(stdout, "stop: enumerated %d syspeek pid(s)\n", others.size());
+    std::fflush(stdout);
+    for (DWORD pid : others) {
         HANDLE process = ::OpenProcess(PROCESS_TERMINATE, FALSE, pid);
         if (process == nullptr) {
             continue;
@@ -167,6 +172,8 @@ int windowsStopOthers() {
         }
         ::CloseHandle(process);
     }
+    std::fprintf(stdout, "stop: terminations done, count %d\n", stopped);
+    std::fflush(stdout);
     return stopped;
 }
 
