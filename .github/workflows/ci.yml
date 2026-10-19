@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53]
   pull_request:
 
 jobs:
@@ -173,10 +173,10 @@ jobs:
           sh install.sh --no-bridge --no-autostart
           test -x "$HOME/.local/opt/syspeek/syspeek"
           test -x "$HOME/.local/bin/syspeek"
-          QT_QPA_PLATFORM=offscreen "$HOME/.local/opt/syspeek/syspeek" --dump |
+          "$HOME/.local/opt/syspeek/syspeek" --dump |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux install dump ok:", d["processCount"], "procs")'
           "$HOME/.local/bin/syspeek" status
-          QT_QPA_PLATFORM=offscreen "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
+          "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux wrapper passthrough ok")'
           sh install.sh --uninstall
           test ! -d "$HOME/.local/opt/syspeek"
@@ -220,6 +220,23 @@ jobs:
           test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
           test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
           echo "windows installer ok"
+
+      - name: Installer smoke (windows pwsh)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./cpp/packaging/windows/install.ps1 -NoAutostart
+          if (-not (Test-Path "$env:LOCALAPPDATA\Syspeek\syspeek.exe")) { throw 'install: exe missing' }
+          $shim = Get-Command syspeek -ErrorAction Stop | Select-Object -ExpandProperty Source
+          Write-Host "shim: $shim"
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --autostart=status
+          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --dump | Out-File dump.json
+          $dump = Get-Content dump.json -Raw | ConvertFrom-Json -AsHashtable
+          if (($dump.processCount -as [int]) -lt 1) { throw 'dump: processCount missing' }
+          Write-Host "pwsh installer dump ok: $($dump.processCount) procs"
+          ./cpp/packaging/windows/install.ps1 -Uninstall
+          if (Test-Path "$env:LOCALAPPDATA\Syspeek") { throw 'uninstall: dir still present' }
+          Write-Host 'pwsh installer ok'
 
       - name: Upload msi artifact (windows)
         if: runner.os == 'Windows'
