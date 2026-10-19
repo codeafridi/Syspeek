@@ -64,6 +64,14 @@ the HUD does not read window titles.
 
 ## What runs on macOS
 
+Diagnostics: `syspeek --dump` (headless JSON snapshot, used by CI),
+`syspeek --probe[=ticks]` (live pipeline diagnostic - one machine-parseable
+line per tick: focus provider name, per-app cpu/mem, host cpu/mem/disks),
+and `syspeek logs` (tails the universal hud.log under
+`~/Library/Caches/dev.syspeek/syspeek/hud.log`). If the HUD ever shows a
+status you cannot explain, run `--probe` and attach the output with the
+log tail.
+
 | Card | State |
 |---|---|
 | Overview (CPU/MEM/LOAD), Processes, Threads/FDs, Memory, Network, Disks, Disk I/O, Interfaces | native collectors |

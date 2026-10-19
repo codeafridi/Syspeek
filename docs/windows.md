@@ -81,7 +81,16 @@ syspeek --autostart=on|off|status
 syspeek uninstall          stop + autostart off + remove shims,
                            prints the one folder-removal step left
 syspeek --dump             JSON snapshot of the machine
+syspeek --probe[=ticks]    live pipeline diagnostic (headless, no window);
+                           prints one line per tick + requested/received
+syspeek logs               tail the universal hud.log (last 40 lines)
 ```
+
+`--probe` is the "it shows only dashes" triage tool: a machine-parseable
+view of the same sample pipeline the HUD uses (focus provider, per-app
+cpu/mem, host cpu/mem/disks/tcp). `syspeek logs` shows what actually got
+collected/warned at runtime - the log lives at
+`%LOCALAPPDATA%\dev.syspeek\syspeek\hud.log`.
 
 `uninstall` cannot delete the folder containing the exe it is running
 from (Windows file locks it), so it prints the exact
