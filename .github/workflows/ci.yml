@@ -3,7 +3,21 @@ name: CI
 on:
   push:
     branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58]
+    paths-ignore:
+      - "site/**"
+      - "docs/**"
+      - "**.md"
+      - ".gitignore"
   pull_request:
+    paths-ignore:
+      - "site/**"
+      - "docs/**"
+      - "**.md"
+      - ".gitignore"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
