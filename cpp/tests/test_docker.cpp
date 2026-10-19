@@ -73,8 +73,10 @@ int main() {
               == DockerState::CommandFailed,
           "other error -> command failed (not unreachable)");
 
-    check(dockerSummaryText(DockerSnapshot{}) == QString(),
-          "default (NotInstalled) -> empty/hidden");
+    check(dockerSummaryText(DockerSnapshot{})
+              == QStringLiteral("docker: not installed - install Docker "
+                                "Engine or Docker Desktop to see containers"),
+          "NotInstalled -> explicit install hint (M58, was silent-empty)");
 
     DockerSnapshot unreachable;
     unreachable.state = DockerState::Unreachable;

@@ -129,7 +129,12 @@ DockerState classifyDockerFailure(const QByteArray &payload) {
 QString dockerSummaryText(const DockerSnapshot &snapshot) {
     switch (snapshot.state) {
     case DockerState::NotInstalled:
-        return QString();
+        // M58: silent-empty card told users nothing. Naming the missing
+        // dependency is the honest state (the docker CLI ships with
+        // Docker Engine / Docker Desktop).
+        return QStringLiteral(
+            "docker: not installed - install Docker Engine or Docker "
+            "Desktop to see containers");
     case DockerState::Starting:
         return QStringLiteral("docker: starting");
     case DockerState::PermissionDenied:

@@ -414,7 +414,12 @@ KubeState classifyKubeFailure(const QByteArray &payload) {
 QString kubeSummaryText(const KubeSnapshot &snapshot) {
     switch (snapshot.state) {
     case KubeState::NotConfigured:
-        return QString();
+        // M58: silent-empty card is an honesty violation; say what is
+        // needed (a kubeconfig + kubectl, or an in-cluster service
+        // account).
+        return QStringLiteral(
+            "k8s: not configured - no kubecontext (kubeconfig or cluster "
+            "credentials needed)");
     case KubeState::Unreachable:
         return QStringLiteral("k8s: unreachable");
     case KubeState::TimedOut:
