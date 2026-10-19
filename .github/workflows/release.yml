@@ -106,7 +106,7 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build --config Release
           ctest --test-dir cpp/build -C Release --output-on-failure
-          $json = & ./cpp/build/Release/syspeek.exe --dump | ConvertFrom-Json -AsHashtable
+          $json = $(cmd /c '"%CD%\cpp\build\Release\syspeek.exe" --dump') | ConvertFrom-Json -AsHashtable
           $fs = $json.filesystems.entries
           if ($fs.Count -lt 1) { throw 'dump: no filesystem entries' }
           Write-Host ("windows fs ok: {0} entries" -f $fs.Count)

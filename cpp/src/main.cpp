@@ -212,14 +212,17 @@ void autostartCommand(const QString &mode) {
                               .arg(windowsSelfExePath()));
         run.sync();
         std::fprintf(stdout, "autostart: enabled (HKCU Run)\n");
+        std::fflush(stdout);
     } else if (mode == QStringLiteral("off")) {
         run.remove(name);
         run.sync();
         std::fprintf(stdout, "autostart: disabled\n");
+        std::fflush(stdout);
     } else {
         const QString value = run.value(name).toString();
         std::fprintf(stdout, "autostart: %s\n",
                      value.isEmpty() ? "disabled" : "enabled");
+        std::fflush(stdout);
     }
 }
 
@@ -295,6 +298,7 @@ bool windowsVerb(const QString &verb) {
         autostartCommand(QStringLiteral("status"));
         const QList<DWORD> others = syspeekPidsExcludingSelf();
         std::fprintf(stdout, "other instances: %d\n", others.size());
+        std::fflush(stdout);
         return true;
     }
     if (verb == QStringLiteral("stop")
@@ -313,16 +317,17 @@ bool windowsVerb(const QString &verb) {
             QFile::remove(shimDir + QStringLiteral("/syspeek.cmd"));
             QFile::remove(shimDir + QStringLiteral("/syspeek"));
             const QString appDir = QFileInfo(
-                    QCoreApplication::applicationFilePath())
-                .absolutePath();
+                    windowsSelfExePath()).absolutePath();
             std::fprintf(stdout,
                          "teardown done: HUD stopped, autostart removed, "
                          "shims removed\n");
+            std::fflush(stdout);
             std::fprintf(stdout,
                          "the running exe locks its folder - delete it "
                          "after this command exits:\n  "
                          "Remove-Item -Recurse -Force \"%s\"\n",
                          qUtf8Printable(appDir));
+            std::fflush(stdout);
         }
         if (verb == QStringLiteral("restart")) {
             const QString exe = windowsSelfExePath();
@@ -331,6 +336,7 @@ bool windowsVerb(const QString &verb) {
             }
         }
         std::fprintf(stdout, "stopped: %d other instance(s)\n", stopped);
+        std::fflush(stdout);
         return true;
     }
     return false;
@@ -364,6 +370,13 @@ int main(int argc, char *argv[]) {
             }
             return status;
         }
+#if defined(Q_OS_WIN)
+        if (arg.startsWith(QByteArrayLiteral("--autostart="))) {
+            autostartCommand(QString::fromLocal8Bit(
+                arg.mid(QByteArrayLiteral("--autostart=").size())));
+            return 0;
+        }
+#endif
     }
 
 #if defined(Q_OS_WIN)
@@ -395,16 +408,6 @@ int main(int argc, char *argv[]) {
     QApplication::setApplicationName(QStringLiteral("Syspeek"));
     QApplication::setApplicationVersion(
         QString::fromLatin1(SYSPEEK_APP_VERSION));
-
-#if defined(Q_OS_WIN)
-    for (const QString &arg : app.arguments()) {
-        if (!arg.startsWith(QStringLiteral("--autostart="))) {
-            continue;
-        }
-        autostartCommand(arg.mid(QStringLiteral("--autostart=").size()));
-        return 0;
-    }
-#endif
 
     // Single-instance gate: a second HUD would stack two overlays.
     const QString instanceKey = QStringLiteral("syspeek-hud-")

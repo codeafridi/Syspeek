@@ -336,25 +336,25 @@ jobs:
           if (-not (Test-Path "$env:LOCALAPPDATA\Syspeek\syspeek.exe")) { throw 'install: exe missing' }
           $shim = Get-Command syspeek -ErrorAction Stop | Select-Object -ExpandProperty Source
           Write-Host "shim: $shim"
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --autostart=status
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" stop
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" start > start.out 2>&1
+          $exe = "$env:LOCALAPPDATA\Syspeek\syspeek.exe"
+          cmd /c "`"$exe`" stop"
+          cmd /c "`"$exe`" start > start.out 2>&1"
           Write-Host "start rc=$LASTEXITCODE"
           $startOut = Get-Content start.out -Raw
           if ("$startOut" -notmatch 'started: HUD launched') { throw "start verb: unexpected output ($startOut)" }
           Start-Sleep -Seconds 2
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" start > start2.out 2>&1
+          cmd /c "`"$exe`" start > start2.out 2>&1"
           $startAgainOut = Get-Content start2.out -Raw
           if ("$startAgainOut" -notmatch 'already running: \d+') { throw "start-already verb: unexpected output ($startAgainOut)" }
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" stop > stop.out 2>&1
+          cmd /c "`"$exe`" stop > stop.out 2>&1"
           $stopOut = Get-Content stop.out -Raw
           if ("$stopOut" -notmatch 'stopped: \d+') { throw "stop verb: unexpected output ($stopOut)" }
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" stop
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" disable
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" status > status.out 2>&1
+          cmd /c "`"$exe`" stop"
+          cmd /c "`"$exe`" disable"
+          cmd /c "`"$exe`" status > status.out 2>&1"
           $statusOut = Get-Content status.out -Raw
           if ("$statusOut" -notmatch 'autostart: disabled') { throw "status verb: unexpected output ($statusOut)" }
-          & "$env:LOCALAPPDATA\Syspeek\syspeek.exe" --dump | Out-File dump.json
+          cmd /c "`"$exe`" --dump > dump.json"
           $dump = Get-Content dump.json -Raw | ConvertFrom-Json -AsHashtable
           if (($dump.processCount -as [int]) -lt 1) { throw 'dump: processCount missing' }
           Write-Host "pwsh installer dump ok: $($dump.processCount) procs"
