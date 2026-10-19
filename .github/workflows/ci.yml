@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52]
   pull_request:
 
 jobs:
@@ -165,6 +165,61 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
           Get-ChildItem cpp/build/packaging
+
+      - name: Installer smoke (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sh -n install.sh
+          sh install.sh --no-bridge --no-autostart
+          test -x "$HOME/.local/opt/syspeek/syspeek"
+          test -x "$HOME/.local/bin/syspeek"
+          "$HOME/.local/opt/syspeek/syspeek" --dump |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux install dump ok:", d["processCount"], "procs")'
+          "$HOME/.local/bin/syspeek" status
+          "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux wrapper passthrough ok")'
+          sh install.sh --uninstall
+          test ! -d "$HOME/.local/opt/syspeek"
+          echo "linux installer ok"
+
+      - name: Installer smoke (mac)
+        if: runner.os == 'macOS'
+        run: |
+          sh -n install.sh
+          sh install.sh --no-autostart
+          test -d /Applications/Syspeek.app
+          test -x /Applications/Syspeek.app/Contents/MacOS/syspeek
+          test -x /Applications/Syspeek.app/Contents/Resources/syspeek
+          test -x /usr/local/bin/syspeek
+          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; print("mac install dump ok:", d["processCount"], "procs")'
+          /usr/local/bin/syspeek status
+          sh install.sh --uninstall
+          test ! -d /Applications/Syspeek.app
+          test ! -f /usr/local/bin/syspeek
+          echo "mac installer ok"
+
+      - name: Installer smoke (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sh -n install.sh
+          sh install.sh --no-autostart
+          test -f "$LOCALAPPDATA/Syspeek/syspeek.exe"
+          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
+          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
+          command -v syspeek
+          syspeek --autostart=status
+          cmd //c where syspeek
+          grep -E 'WindowsApps' <<<"$PATH"
+          "$LOCALAPPDATA/Syspeek/syspeek.exe" --autostart=status
+          "$LOCALAPPDATA/Syspeek/syspeek.exe" --dump > dump.json
+          python3 -c 'import json; d=json.load(open("dump.json")); assert d["processCount"]>0; assert d.get("software",{}).get("programs",0)>0; print("win install dump ok:", d["processCount"], "procs", d.get("software"))'
+          sh install.sh --uninstall
+          test ! -d "$LOCALAPPDATA/Syspeek"
+          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
+          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
+          echo "windows installer ok"
 
       - name: Upload msi artifact (windows)
         if: runner.os == 'Windows'

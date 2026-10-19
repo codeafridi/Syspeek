@@ -13,9 +13,22 @@ Linux is. Everything below was collected with native Windows APIs
 it. Per-machine install into `C:\Program Files\Syspeek`, Start Menu
 shortcut, Add/Remove Programs entry, WiX major upgrades supported.
 
-**Portable** — `Syspeek-<version>-windows-portable.zip`, unzip
+**Portable zip** — `Syspeek-<version>-windows-portable.zip`, unzip
 anywhere, run `syspeek.exe` directly (Qt runtime is bundled next to the
 exe). No registry, no install.
+
+**Scripted portable install (one line, inside [Git Bash](https://git-scm.com/downloads)):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+```
+
+It downloads the portable zip into `%LOCALAPPDATA%\Syspeek` (Expand-Archive),
+writes a `syspeek` command shim into `%LOCALAPPDATA%\Microsoft\WindowsApps`
+(already on PATH), sets HKCU Run autostart via the exe's own
+`--autostart=on` verb, and starts the HUD. `sh install.sh --uninstall`
+removes all of it. (That downloads the same zip; there is no MotW
+because curl does not stamp it.)
 
 **Scoop** — the bucket manifest is generated per release by
 `cpp/packaging/windows/write_manifests.ps1` (see `manifests/` in the

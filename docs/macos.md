@@ -6,12 +6,31 @@ as the Linux build, with native macOS collectors behind the same
 
 ## Install
 
+**One line (scripted, does steps 1-4 for you):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+```
+
+It downloads the latest DMG, copies `Syspeek.app` into `/Applications`
+(falls back to `~/Applications` when not an admin), installs the
+LaunchAgent autostart, adds the `syspeek` command in `/usr/local/bin`
+and clears the quarantine attribute (`curl` never applies it). It may
+prompt for the administrator password for `/Applications`; decline with
+Ctrl-C and install manually (steps 1-4) if you prefer.
+
+**Manual:**
+
 1. Download `Syspeek-<version>-macos.dmg` from
    [releases](https://github.com/codeafridi/Syspeek/releases/latest).
 2. Open the DMG and drag **Syspeek.app** into **Applications**.
 3. First run (build is unsigned, Gatekeeper blocks it once):
    - right-click `Syspeek.app` -> **Open** -> **Open**, or
    - `xattr -d com.apple.quarantine /Applications/Syspeek.app`
+4. Optional service management: the scripted install above also deploys
+   the `syspeek` verb manager (start|stop|update|...); for the manual
+   flow, copy `cpp/packaging/install_macos.sh` from the repo and run it
+   the same way.
 
 The app is a `LSUIElement` overlay: no Dock icon, no menu bar entry.
 Quit with `syspeek.sh stop` (below) or `pkill syspeek`; login autostart
