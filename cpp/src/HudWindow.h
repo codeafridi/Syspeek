@@ -29,6 +29,7 @@ class QLayout;
 class QMouseEvent;
 class QPushButton;
 class DashboardPanel;
+struct SettingsInfo;
 
 class HudWindow : public QWidget {
     Q_OBJECT
@@ -61,6 +62,8 @@ public:
     void setTlsSnapshot(const TlsSnapshot &snapshot);
 
     void setFimSnapshot(const FimSnapshot &snapshot);
+
+    void setSettingsInfo(const SettingsInfo &info);
 
     bool isExpanded() const { return m_detailsExpanded; }
 

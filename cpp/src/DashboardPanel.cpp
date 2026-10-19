@@ -1,5 +1,6 @@
 #include "DashboardPanel.h"
 
+#include "Theme.h"
 #include "platform/PlatformFactory.h"
 
 #include "LogParser.h"
@@ -7,6 +8,8 @@
 #include "SensitiveStatus.h"
 #include "Sparkline.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QColor>
 #include <QFont>
 #include <QFrame>
@@ -15,6 +18,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -24,9 +28,9 @@ namespace {
 
 QFont panelTitleFont() {
     QFont font;
-    font.setPointSize(8);
-    font.setBold(true);
-    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.0);
+    font.setPointSize(9);
+    font.setWeight(QFont::DemiBold);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.2);
     return font;
 }
 
@@ -53,15 +57,15 @@ QString formatRate(double bytesPerSec) {
 
 QString statusColor(const QString &status) {
     if (status == QStringLiteral("HIGH CPU")) {
-        return QStringLiteral("#d1685f");
+        return ui_theme::crit();
     }
     if (status == QStringLiteral("WARN")) {
-        return QStringLiteral("#c9a24a");
+        return ui_theme::warn();
     }
     if (status == QStringLiteral("OK")) {
-        return QStringLiteral("#5fae82");
+        return ui_theme::ok();
     }
-    return QStringLiteral("#7f8792");
+    return ui_theme::dim();
 }
 
 QLabel *makeTitle(const QString &text, QWidget *parent) {
@@ -88,11 +92,17 @@ QFrame *makeCard(const QString &title, QWidget *content, QWidget *parent) {
 QFrame *makeStatCard(const QString &caption, QWidget *content, QWidget *parent) {
     auto *card = new QFrame(parent);
     card->setObjectName(QStringLiteral("ddStat"));
+    auto *title = makeTitle(caption, card);
+    title->setFixedHeight(14);
+    title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     auto *layout = new QVBoxLayout(card);
-    layout->setContentsMargins(14, 12, 14, 14);
-    layout->setSpacing(4);
-    layout->addWidget(makeTitle(caption, card));
-    layout->addWidget(content);
+    layout->setContentsMargins(14, 11, 14, 12);
+    layout->setSpacing(7);
+    layout->addWidget(title);
+    layout->addWidget(content, 1);
+    if (auto *label = qobject_cast<QLabel *>(content)) {
+        label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    }
     return card;
 }
 
@@ -213,7 +223,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildProfilesView());
     m_views->addWidget(buildDatabasesView());
     m_views->addWidget(buildSecurityView());    m_views->addWidget(buildCostView());
-    m_views->addWidget(buildPlaceholderView(QStringLiteral("Settings")));
+    m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
             &QStackedWidget::setCurrentIndex);
@@ -223,81 +233,120 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     root->addWidget(body, 1);
 
     setStyleSheet(QStringLiteral(
-        "#ddRoot { background-color: #15171a; }"
-        "#ddTopbar { background-color: #1b1d21; border-bottom: 1px solid #2a2d33; }"
-        "#ddChip { color: #d5dae0; }"
-        "#ddApp { color: #d5dae0; }"
-        "#ddPid { color: #7f8792; }"
-        "#ddStatus { color: #7f8792; background-color: #23262b;"
-        "  padding: 3px 10px; border-radius: 3px; }"
-        "#ddCollapse { color: #c4cad1; background-color: #23262b;"
-        "  border: 1px solid #31353b; border-radius: 3px; padding: 4px 12px; }"
-        "#ddCollapse:hover { background-color: #2a2e34; }"
-        "#ddRail { background-color: #17191c; border: none;"
-        "  border-right: 1px solid #2a2d33; color: #9aa2ac; outline: none; }"
-        "#ddRail::item { padding: 8px 14px; }"
-        "#ddRail::item:selected { background-color: #22262c; color: #e2e7ec; }"
-        "#ddViews { background-color: #15171a; }"
-        "#ddCard { background-color: #1b1d21; border: 1px solid #2a2d33;"
-        "  border-radius: 4px; }"
-        "#ddStat { background-color: #1b1d21; border: 1px solid #2a2d33;"
-        "  border-radius: 4px; }"
-        "#ddCardTitle { color: #7f8792; }"
+        "#ddRoot { background-color: %BG%; }"
+        "#ddTopbar { background-color: %RAISED%; border-bottom: 1px solid %BORDER%; }"
+        "#ddChip { color: %ACCENT%; font-size: 9px; }"
+        "#ddApp { color: %TEXT%; font-size: 13px; }"
+        "#ddPid { color: %DIM%; font-size: 9px; }"
+        "#ddStatus { color: %OK%; background-color: transparent;"
+        "  border: 1px solid %OK%; padding: 2px 10px; border-radius: 2px;"
+        "  font-size: 8px; }"
+        "#ddCollapse { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 4px 12px;"
+        "  font-size: 9px; }"
+        "#ddCollapse:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddRail { background-color: %BG%; border: none;"
+        "  border-right: 1px solid %BORDER%; color: %DIM%; outline: none;"
+        "  font-size: 11px; }"
+        "#ddRail::item { padding: 7px 14px; border-left: 3px solid transparent; }"
+        "#ddRail::item:hover { background-color: %HOVER%; color: %TEXT%; }"
+        "#ddRail::item:selected { background-color: %HOVER%; color: %TEXT%;"
+        "  border-left: 3px solid %ACCENT%; }"
+        "#ddViews { background-color: %BG%; }"
+        "#ddViews QWidget { background-color: transparent; }"
+        "#ddCard { background-color: %SURFACE%; border: 1px solid %BORDER%;"
+        "  border-radius: 3px; }"
+        "#ddStat { background-color: %SURFACE%; border: 1px solid %BORDER%;"
+        "  border-radius: 3px; }"
+        "#ddCardTitle { color: %MUTED%; font-size: 9px; }"
         "#ddCpu, #ddMem, #ddProcCount, #ddStatusBig, #ddHostCpu, #ddHostMem,"
-        " #ddHostDisk, #ddHostNet, #ddHostLoad { color: #d5dae0; }"
-        "#ddMemDetail { color: #c4cad1; }"
-        "#ddFocusDetail, #ddOpenFiles { color: #c4cad1; }"
-        "#ddCgroup { color: #c4cad1; }"
-        "#ddDocker { color: #9fb0c4; }"
-        "#ddListen, #ddStates, #ddIfaces { color: #c4cad1; }"
-        "#ddTcpSummary { color: #c4cad1; }"
-        "#ddTcp { color: #9aa2ac; }"
-        "#ddSecuritySummary { color: #c4cad1; }"
-        "#ddSecurity { color: #9aa2ac; }"
-        "#ddThreats { color: #9aa2ac; }"
-        "#ddFimSummary { color: #c4cad1; }"
-        "#ddFim { color: #9aa2ac; }"
-        "#ddSoftwareSummary { color: #c4cad1; }"
-        "#ddSoftware { color: #9aa2ac; }"
-        "#ddPathSummary { color: #c4cad1; }"
-        "#ddPathTargets { color: #9aa2ac; }"
-        "#ddStatsdSummary { color: #c4cad1; }"
-        "#ddStatsd { color: #9aa2ac; }"
-        "#ddDbmSummary { color: #c4cad1; }"
-        "#ddDbm { color: #9aa2ac; }"
-        "#ddDbmStatements { color: #9aa2ac; }"
-        "#ddWatchdog { color: #9aa2ac; }"
-        "#ddRuntime { color: #9aa2ac; }"
-        "#ddForecast { color: #9aa2ac; }"
-        "#ddInsights { color: #9aa2ac; }"
-        "#ddProfileSummary { color: #c4cad1; }"
-        "#ddProfileThreads, #ddProfileOffCpu, #ddProfileMemory { color: #9aa2ac; }"
-        "#ddIncidentsSummary { color: #c4cad1; }"
-        "#ddIncidents { color: #9aa2ac; }"
-        "#ddTlsSummary { color: #c4cad1; }"
-        "#ddTls { color: #9aa2ac; }"
-        "#ddSensitiveSummary { color: #c4cad1; }"
-        "#ddSensitive { color: #9aa2ac; }"
-        "#ddSloSummary { color: #c4cad1; }"
-        "#ddSlo { color: #9aa2ac; }"
-        "#ddDeprecations { color: #9aa2ac; }"
-        "#ddHostInfoSummary { color: #c4cad1; }"
-        "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: #9aa2ac; }"
-        "#ddServices, #ddServicesSummary, #ddDeps { color: #c4cad1; }"
-        "#ddServicesChanges { color: #c4cad1; }"
-        "#ddLogs, #ddLogsSummary, #ddErrors { color: #c4cad1; }"
-        "#ddEndpoints, #ddInstrumentation, #ddDatabases { color: #c4cad1; }"
-        "#ddAlerts { color: #c4cad1; }"
-        "#ddSynthetic, #ddSyntheticSummary { color: #c4cad1; }"
-        "#ddKubeSummary, #ddKubeEvents { color: #c4cad1; }"
-        "#ddKubeDiagnosis, #ddKubeTimeline { color: #c4cad1; }"
-        "#ddPlaceholder { color: #5f6671; }"
+        " #ddHostDisk, #ddHostNet, #ddHostLoad { color: %TEXT%; }"
+        "#ddMemDetail { color: %DIM%; }"
+        "#ddFocusDetail, #ddOpenFiles { color: %DIM%; }"
+        "#ddCgroup { color: %DIM%; }"
+        "#ddDocker { color: %DIM%; }"
+        "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
+        "#ddTcpSummary { color: %DIM%; }"
+        "#ddTcp { color: %MUTED%; }"
+        "#ddSecuritySummary { color: %DIM%; }"
+        "#ddSecurity { color: %MUTED%; }"
+        "#ddThreats { color: %MUTED%; }"
+        "#ddFimSummary { color: %DIM%; }"
+        "#ddFim { color: %MUTED%; }"
+        "#ddSoftwareSummary { color: %DIM%; }"
+        "#ddSoftware { color: %MUTED%; }"
+        "#ddPathSummary { color: %DIM%; }"
+        "#ddPathTargets { color: %MUTED%; }"
+        "#ddStatsdSummary { color: %DIM%; }"
+        "#ddStatsd { color: %MUTED%; }"
+        "#ddDbmSummary { color: %DIM%; }"
+        "#ddDbm { color: %MUTED%; }"
+        "#ddDbmStatements { color: %MUTED%; }"
+        "#ddWatchdog { color: %DIM%; }"
+        "#ddRuntime { color: %MUTED%; }"
+        "#ddForecast { color: %MUTED%; }"
+        "#ddInsights { color: %MUTED%; }"
+        "#ddProfileSummary { color: %DIM%; }"
+        "#ddProfileThreads, #ddProfileOffCpu, #ddProfileMemory { color: %MUTED%; }"
+        "#ddIncidentsSummary { color: %DIM%; }"
+        "#ddIncidents { color: %MUTED%; }"
+        "#ddTlsSummary { color: %DIM%; }"
+        "#ddTls { color: %MUTED%; }"
+        "#ddSensitiveSummary { color: %DIM%; }"
+        "#ddSensitive { color: %MUTED%; }"
+        "#ddSloSummary { color: %DIM%; }"
+        "#ddSlo { color: %MUTED%; }"
+        "#ddDeprecations { color: %MUTED%; }"
+        "#ddHostInfoSummary { color: %DIM%; }"
+        "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
+        "#ddServices, #ddServicesSummary, #ddDeps { color: %DIM%; }"
+        "#ddServicesChanges { color: %DIM%; }"
+        "#ddLogs, #ddLogsSummary, #ddErrors { color: %DIM%; }"
+        "#ddEndpoints, #ddInstrumentation, #ddDatabases { color: %DIM%; }"
+        "#ddSynthetic, #ddSyntheticSummary { color: %DIM%; }"
+        "#ddKubeSummary, #ddKubeEvents { color: %DIM%; }"
+        "#ddKubeDiagnosis, #ddKubeTimeline { color: %DIM%; }"
+        "#ddSettingsInfo { color: %DIM%; }"
+        "#ddSettingsPath { color: %MUTED%; font-size: 9px; }"
+        "#ddCopy { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  padding: 2px 10px; font-size: 9px; }"
+        "#ddCopy:hover { color: %TEXT%; border-color: %MUTED%; }"
         "QTreeWidget { background-color: transparent; border: none;"
-        "  color: #c4cad1; }"
-        "QTreeWidget::item { padding: 1px 0px; }"
-        "QTreeWidget::item:selected { background: transparent; }"
-        "QHeaderView::section { background-color: #202327; color: #7f8792;"
-        "  border: none; border-bottom: 1px solid #2a2d33; padding: 4px 6px; }"));
+        "  color: %DIM%; font-size: 11px; }"
+        "QTreeWidget::item { padding: 2px 0px; }"
+        "QTreeWidget::item:selected { background-color: %HOVER%;"
+        "  color: %TEXT%; }"
+        "QTreeWidget::item:hover { background-color: %HOVER%; }"
+        "QHeaderView::section { background-color: transparent; color: %MUTED%;"
+        "  border: none; border-bottom: 1px solid %BORDER%; padding: 4px 8px;"
+        "  font-size: 9px; font-weight: normal; }"
+        "QScrollBar:vertical { background: transparent; width: 9px;"
+        "  margin: 0; }"
+        "QScrollBar::handle:vertical { background-color: %BORDER%;"
+        "  border-radius: 2px; min-height: 24px; margin: 1px 2px; }"
+        "QScrollBar::handle:vertical:hover { background-color: %MUTED%; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical"
+        " { height: 0; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical"
+        " { background: transparent; }"
+        "QScrollBar:horizontal { background: transparent; height: 9px;"
+        "  margin: 0; }"
+        "QScrollBar::handle:horizontal { background-color: %BORDER%;"
+        "  border-radius: 2px; min-width: 24px; margin: 2px 1px; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal"
+        " { width: 0; }"
+        "QPushButton { background-color: transparent; }")
+        .replace(QStringLiteral("%BG%"), ui_theme::bg())
+        .replace(QStringLiteral("%RAISED%"), ui_theme::raised())
+        .replace(QStringLiteral("%BORDER%"), ui_theme::border())
+        .replace(QStringLiteral("%HOVER%"), ui_theme::hover())
+        .replace(QStringLiteral("%TEXT%"), ui_theme::text())
+        .replace(QStringLiteral("%DIM%"), ui_theme::dim())
+        .replace(QStringLiteral("%MUTED%"), ui_theme::muted())
+        .replace(QStringLiteral("%ACCENT%"), ui_theme::accent())
+        .replace(QStringLiteral("%OK%"), ui_theme::ok())
+        .replace(QStringLiteral("%SURFACE%"), ui_theme::surface()));
 }
 
 QWidget *DashboardPanel::buildOverviewView() {
@@ -967,16 +1016,156 @@ QWidget *DashboardPanel::buildErrorsView() {
     return view;
 }
 
-QWidget *DashboardPanel::buildPlaceholderView(const QString &text) {
+QWidget *DashboardPanel::buildSettingsView() {
     auto *view = new QWidget(this);
     auto *layout = new QVBoxLayout(view);
     layout->setContentsMargins(16, 16, 16, 16);
-    auto *label = new QLabel(text + QStringLiteral("\ncoming soon"), view);
-    label->setObjectName(QStringLiteral("ddPlaceholder"));
-    label->setAlignment(Qt::AlignCenter);
-    label->setFont(monoFont(11));
-    layout->addWidget(label, 1);
+    layout->setSpacing(12);
+
+    m_settingsSoftware = new QLabel(QStringLiteral("--"), view);
+    m_settingsSoftware->setObjectName(QStringLiteral("ddSettingsInfo"));
+    m_settingsSoftware->setFont(monoFont(10));
+    m_settingsSoftware->setTextFormat(Qt::RichText);
+    layout->addWidget(makeCard(QStringLiteral("SOFTWARE"), m_settingsSoftware, view));
+
+    m_settingsGeneral = new QLabel(QStringLiteral("--"), view);
+    m_settingsGeneral->setObjectName(QStringLiteral("ddSettingsInfo"));
+    m_settingsGeneral->setFont(monoFont(10));
+    m_settingsGeneral->setTextFormat(Qt::RichText);
+    layout->addWidget(makeCard(QStringLiteral("GENERAL"), m_settingsGeneral, view));
+
+    // Diagnostics: command rows with copy buttons. Mirrors the shipped
+    // Datadog agent's local surface (status/configcheck/flare per its
+    // cmd/agent/subcommands and the embedded CLI strings in its binary;
+    // launch-gui "starts the Datadog Agent GUI") mapped onto Syspeek's
+    // dump/probe/log/service verbs.
+    auto *diagCard = new QFrame(this);
+    diagCard->setObjectName(QStringLiteral("ddCard"));
+    auto *diagLayout = new QVBoxLayout(diagCard);
+    diagLayout->setContentsMargins(14, 12, 14, 14);
+    diagLayout->setSpacing(10);
+    diagLayout->addWidget(makeTitle(QStringLiteral("DIAGNOSTICS"), diagCard));
+
+    m_settingsDiagnostics = new QLabel(QStringLiteral("--"), view);
+    m_settingsDiagnostics->setObjectName(QStringLiteral("ddSettingsPath"));
+    m_settingsDiagnostics->setFont(monoFont(9));
+    diagLayout->addWidget(m_settingsDiagnostics);
+
+    const QList<QPair<QString, QString>> commands = {
+        {QStringLiteral("machine snapshot (JSON)"),
+         QStringLiteral("syspeek --dump")},
+        {QStringLiteral("pipeline probe (headless tick log)"),
+         QStringLiteral("syspeek --probe")},
+        {QStringLiteral("tail the HUD log"),
+         QStringLiteral("syspeek logs")},
+        {QStringLiteral("instance + autostart state"),
+         QStringLiteral("syspeek status")},
+        {QStringLiteral("stop every HUD instance"),
+         QStringLiteral("syspeek stop")},
+        {QStringLiteral("restart the HUD"),
+         QStringLiteral("syspeek restart")},
+    };
+    for (const auto &pair : commands) {
+        auto *row = new QHBoxLayout();
+        row->setSpacing(8);
+        auto *what = new QLabel(pair.first, diagCard);
+        what->setObjectName(QStringLiteral("ddSettingsInfo"));
+        what->setFont(monoFont(10));
+        auto *cmd = new QLabel(pair.second, diagCard);
+        cmd->setObjectName(QStringLiteral("ddSettingsPath"));
+        cmd->setFont(monoFont(9));
+        auto *copy = new QPushButton(QStringLiteral("COPY"), diagCard);
+        copy->setObjectName(QStringLiteral("ddCopy"));
+        copy->setCursor(Qt::PointingHandCursor);
+        copy->setFocusPolicy(Qt::NoFocus);
+        copy->setToolTip(QStringLiteral("copy '%1'").arg(pair.second));
+        copy->setProperty("command", pair.second);
+        connect(copy, &QPushButton::clicked, this,
+                &DashboardPanel::copySettingCommand);
+        row->addWidget(what, 1);
+        row->addWidget(cmd);
+        row->addWidget(copy);
+        diagLayout->addLayout(row);
+    }
+    layout->addWidget(diagCard);
+    layout->addStretch(1);
+
+    applySettingsInfo();
     return view;
+}
+
+void DashboardPanel::applySettingsInfo() {
+    if (m_settingsSoftware == nullptr) {
+        return;
+    }
+    const QString version = m_settings.version.isEmpty()
+        ? QStringLiteral("--")
+        : m_settings.version;
+    const QString verbatimPlatform = m_osName;
+    const QString configStatus = m_settings.configError.isEmpty()
+        ? QStringLiteral("ok")
+        : QStringLiteral("error: %1").arg(m_settings.configError);
+    QString software;
+    software += QStringLiteral("<span style=\"color:%1;\">")
+        .arg(ui_theme::text());
+    software += QStringLiteral("version %1 on %2<br/>")
+        .arg(version, verbatimPlatform);
+    software += QStringLiteral("</span>");
+    software += QStringLiteral("config&nbsp;&nbsp;%1&nbsp;&nbsp;%2<br/>")
+        .arg(m_settings.configPath.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.configPath,
+             configStatus);
+    software += QStringLiteral("log&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%1")
+        .arg(m_settings.logPath.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.logPath);
+    m_settingsSoftware->setText(software);
+
+    QString general;
+    general += QStringLiteral("refresh&nbsp;&nbsp;&nbsp;%1 ms<br/>")
+        .arg(m_settings.sampleIntervalMs);
+    general += QStringLiteral(
+        "alerts&nbsp;&nbsp;&nbsp;&nbsp;"
+        "cpu warn %1% - high %2% - rss %3 GB<br/>")
+        .arg(QString::number(m_settings.cpuWarnPercent, 'f', 0),
+             QString::number(m_settings.cpuHighPercent, 'f', 0),
+             QString::number(m_settings.rssWarnGb, 'f', 1));
+    general += QStringLiteral("autostart&nbsp;%1<br/>")
+        .arg(m_settings.autostartLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.autostartLine);
+    general += QStringLiteral("collector&nbsp;local only - reads this "
+                              "machine's own %1 interfaces; no telemetry")
+        .arg(verbatimPlatform);
+    m_settingsGeneral->setText(general);
+
+    QString diagnostics;
+    diagnostics += QStringLiteral("log file&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.logPath.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.logPath);
+    diagnostics += QStringLiteral("verbs&nbsp;&nbsp;&nbsp;&nbsp;%1")
+        .arg(m_settings.verbsLine.isEmpty()
+                 ? QStringLiteral("start stop restart status uninstall")
+                 : m_settings.verbsLine);
+    m_settingsDiagnostics->setText(diagnostics);
+}
+
+void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
+    m_settings = info;
+    applySettingsInfo();
+}
+
+void DashboardPanel::copySettingCommand() {
+    auto *button = qobject_cast<QPushButton *>(sender());
+    if (button == nullptr) {
+        return;
+    }
+    const QString command = button->property("command").toString();
+    if (!command.isEmpty()) {
+        QApplication::clipboard()->setText(command);
+    }
 }
 
 QWidget *DashboardPanel::buildCostView() {
@@ -1733,10 +1922,19 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
         m_alerts->setText(QStringLiteral("no active alerts"));
         return;
     }
+    m_alerts->setTextFormat(Qt::RichText);
     QString text;
     for (const Alert &alert : alerts) {
-        text += QStringLiteral("[%1] %2  %3\n")
-                    .arg(alert.severity.toUpper(), alert.title, alert.detail);
+        const QString severity = alert.severity.toUpper();
+        const QRegularExpression severityWord(
+            QStringLiteral("^(HIGH|CRIT|WARN|MEDIUM|LOW)$"));
+        const bool known = severityWord.match(severity).hasMatch();
+        const QString marker = known
+            ? QStringLiteral("<span style=\"color:%1;\">[%2]</span>")
+                .arg(ui_theme::statusColor(severity), severity)
+            : QStringLiteral("[%1]").arg(severity);
+        text += QStringLiteral("%1 %2&nbsp;&nbsp;%3<br/>")
+                    .arg(marker, alert.title, alert.detail);
     }
     m_alerts->setText(text);
 }

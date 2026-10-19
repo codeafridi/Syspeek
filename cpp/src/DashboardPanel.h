@@ -27,6 +27,22 @@ class QStackedWidget;
 class QTreeWidget;
 class Sparkline;
 
+// Data for the Settings view - static shell facts the sampler does not
+// own (version, paths, thresholds from the loaded config, autostart
+// across installers). Filled by main.cpp after startup succeeds.
+struct SettingsInfo {
+    QString version;
+    QString configPath;
+    QString configError;
+    QString logPath;
+    QString autostartLine;
+    QString verbsLine;
+    int sampleIntervalMs = 1000;
+    double cpuWarnPercent = 70.0;
+    double cpuHighPercent = 90.0;
+    double rssWarnGb = 1.0;
+};
+
 // Expanded console shown inside the HUD overlay: left rail of views, each view
 // is its own grid of cards so panels never crowd each other.
 class DashboardPanel : public QWidget {
@@ -50,6 +66,8 @@ public:
     void setTlsSnapshot(const TlsSnapshot &snapshot);
     void setFimSnapshot(const FimSnapshot &snapshot);
 
+    void setSettingsInfo(const SettingsInfo &info);
+
 signals:
     void collapseRequested();
 
@@ -71,7 +89,6 @@ private:
     QWidget *buildSyntheticView();
     QWidget *buildInstrumentationView();
     QWidget *buildDatabasesView();
-    QWidget *buildPlaceholderView(const QString &text);
     QWidget *buildCostView();
     QWidget *buildDisksView();
     QWidget *buildHostView();
@@ -81,6 +98,9 @@ private:
     QWidget *buildNetworkPathView();
     QWidget *buildMetricsView();
     QWidget *buildSloView();
+    QWidget *buildSettingsView();
+    void applySettingsInfo();
+    void copySettingCommand();
 
     QString unsupportedOsText() const;
 
@@ -199,4 +219,8 @@ private:
 
     QSet<int> m_collapsedPids;
     bool m_populating = false;
+    SettingsInfo m_settings;
+    QLabel *m_settingsSoftware = nullptr;
+    QLabel *m_settingsGeneral = nullptr;
+    QLabel *m_settingsDiagnostics = nullptr;
 };

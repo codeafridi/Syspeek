@@ -3,7 +3,9 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QListWidget>
 #include <QPushButton>
+#include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 
@@ -465,6 +467,51 @@ int main(int argc, char *argv[]) {
         check(hud.isExpanded() && !panel->isHidden(),
               "MORE expands the overlay in place");
         check(moreButton2->text() == QStringLiteral("LESS"), "MORE -> LESS");
+
+        auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
+        if (rail != nullptr) {
+            constexpr int kRailCount = 27;
+            bool allPagesReachable = rail->count() == kRailCount;
+            const int settingsRow = kRailCount - 1;
+            rail->setCurrentRow(settingsRow);
+            const auto *stack =
+                hud.findChild<QStackedWidget *>(QStringLiteral("ddViews"));
+            allPagesReachable = allPagesReachable && stack != nullptr
+                && stack->currentIndex() == settingsRow;
+            auto *software =
+                hud.findChild<QLabel *>(QStringLiteral("ddSettingsInfo"));
+            allPagesReachable = allPagesReachable && software != nullptr
+                && software->text().contains(QStringLiteral("version"));
+            rail->setCurrentRow(0);
+            check(allPagesReachable,
+                  "rail switches pages and Settings view carries info");
+        } else {
+            check(false, "rail exists");
+        }
+
+        SettingsInfo info;
+        info.version = QStringLiteral("9.9.9-test");
+        info.configPath = QStringLiteral("/tmp/syspeek.conf");
+        info.configError = QStringLiteral("bad key");
+        info.logPath = QStringLiteral("/tmp/hud.log");
+        info.autostartLine = QStringLiteral("on");
+        hud.setSettingsInfo(info);
+        auto *softwareInfo =
+            hud.findChild<QLabel *>(QStringLiteral("ddSettingsInfo"));
+        check(softwareInfo != nullptr
+                  && softwareInfo->text().contains(QStringLiteral("9.9.9-test"))
+                  && softwareInfo->text().contains(QStringLiteral("bad key")),
+              "settings info applied to the SOFTWARE card");
+
+        const QList<Alert> richAlerts = {Alert{
+            QStringLiteral("id-1"), QStringLiteral("host cpu"),
+            QStringLiteral("95%"), QStringLiteral("high"), 95.0, 0}};
+        panel->setAlerts(richAlerts);
+        auto *alertsText = hud.findChild<QLabel *>(QStringLiteral("ddAlerts"));
+        check(alertsText != nullptr
+                  && alertsText->text().contains(QStringLiteral("#d1685f")),
+              "alert severity marker colorized");
+
         moreButton2->click();
         check(!hud.isExpanded() && panel->isHidden(),
               "LESS collapses the overlay in place");

@@ -17,6 +17,7 @@
 #include "DumpReport.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
+#include "DashboardPanel.h"
 #include "TlsSource.h"
 #include "FimSource.h"
 #include "platform/PlatformFactory.h"
@@ -109,6 +110,47 @@ void logLine(const QString &message) {
         file.write(message.toUtf8());
         file.write("\n");
     }
+}
+
+// Autostart state for the Settings view, expressed per installer (M52
+// verbs + M50g HKCU Run + M47 LaunchAgent). Reads only: registry value /
+// unit file presence.
+QString settingsAutostartLine() {
+#if defined(Q_OS_WIN)
+    QSettings run(
+        QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft"
+                       "\\Windows\\CurrentVersion\\Run"),
+        QSettings::NativeFormat);
+    const QString value = run.value(QStringLiteral("Syspeek")).toString();
+    return value.isEmpty()
+        ? QStringLiteral("off - syspeek --autostart=on enables it")
+        : QStringLiteral("on (HKCU Run)");
+#elif defined(Q_OS_MACOS)
+    const QString plist = QDir::homePath()
+        + QStringLiteral("/Library/LaunchAgents/dev.syspeek.hud.plist");
+    return QFile::exists(plist)
+        ? QStringLiteral("on (LaunchAgent dev.syspeek.hud)")
+        : QStringLiteral("off - install_macos.sh enable enables it");
+#else
+    const QString unit = QDir::homePath()
+        + QStringLiteral("/.config/systemd/user/syspeek.service");
+    return QFile::exists(unit)
+        ? QStringLiteral("on (systemd user unit syspeek.service)")
+        : QStringLiteral("off - install.sh enable enables it");
+#endif
+}
+
+QString settingsVerbsLine() {
+#if defined(Q_OS_WIN)
+    return QStringLiteral("syspeek start|stop|restart|status|disable"
+                          "|uninstall|logs|--dump|--probe");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("install_macos.sh run|start|stop|restart|status"
+                          "|enable|disable|update|uninstall|logs");
+#else
+    return QStringLiteral("install.sh run|start|stop|restart|status|enable"
+                          "|disable|update|uninstall|logs|vers");
+#endif
 }
 
 #if defined(Q_OS_WIN)
@@ -335,6 +377,8 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Syspeek"));
+    QApplication::setApplicationVersion(
+        QString::fromLatin1(SYSPEEK_APP_VERSION));
 
 #if defined(Q_OS_WIN)
     for (const QString &arg : app.arguments()) {
@@ -425,6 +469,22 @@ int main(int argc, char *argv[]) {
 
     HudWindow hud;
     hud.setSnapshot(DisplaySnapshot{});
+
+    {
+        SettingsInfo settingsInfo;
+        settingsInfo.version = QApplication::applicationVersion();
+        settingsInfo.configPath = defaultConfigPath();
+        settingsInfo.configError = configError;
+        settingsInfo.logPath = appLogFilePath();
+        settingsInfo.autostartLine = settingsAutostartLine();
+        settingsInfo.verbsLine = settingsVerbsLine();
+        settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
+        settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
+        settingsInfo.cpuHighPercent = config.health.cpuHighPercent;
+        settingsInfo.rssWarnGb =
+            double(config.health.rssWarnKb) / (1024.0 * 1024.0);
+        hud.setSettingsInfo(settingsInfo);
+    }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);
     logLine(QStringLiteral("focus provider=%1").arg(provider->name()));

@@ -246,6 +246,8 @@ target_compile_options(syspeek_core PRIVATE
 
 add_executable(syspeek src/main.cpp)
 target_link_libraries(syspeek PRIVATE syspeek_core)
+target_compile_definitions(syspeek PRIVATE
+    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\"")
 if(WIN32)
     target_sources(syspeek PRIVATE
         packaging/windows/syspeek.rc)

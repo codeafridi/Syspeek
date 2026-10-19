@@ -1,6 +1,7 @@
 #include "HudWindow.h"
 
 #include "DashboardPanel.h"
+#include "Theme.h"
 #include "platform/NotifierFactory.h"
 
 #ifdef Q_OS_MACOS
@@ -37,23 +38,14 @@ QFont valueFont() {
 
 QFont captionFont() {
     QFont font;
-    font.setPointSize(10);
+    font.setPointSize(9);
     font.setBold(true);
-    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.0);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.2);
     return font;
 }
 
 QString statusColor(const QString &status) {
-    if (status == QStringLiteral("HIGH CPU")) {
-        return QStringLiteral("#ff6b6b");
-    }
-    if (status == QStringLiteral("WARN")) {
-        return QStringLiteral("#ffd45d");
-    }
-    if (status == QStringLiteral("OK")) {
-        return QStringLiteral("#79ffb0");
-    }
-    return QStringLiteral("#bbcfcd");
+    return ui_theme::statusColor(status);
 }
 
 } // namespace
@@ -186,47 +178,56 @@ HudWindow::HudWindow(QWidget *parent)
 
     setStyleSheet(QStringLiteral(
         "#hudRoot {"
-        "  background-color:rgb(19, 19, 20);"
-        "  border: 2px solidrgb(13, 13, 14);"
+        "  background-color: %BG%;"
+        "  border: 1px solid %BORDER%;"
         "}"
         "#title {"
-        "  color: #f4f8ff;"
-        "  background-color:rgb(124, 128, 134);"
-        "  padding: 3px 8px;"
+        "  color: %DIM%;"
+        "  background: transparent;"
+        "  padding: 4px 6px 4px 12px;"
+        "  letter-spacing: 1.5px;"
         "}"
-        "#caption { color:rgb(200, 194, 194); }"
+        "#caption { color: %DIM%; }"
         "#dockerButton {"
-        "  color:rgb(150, 180, 220);"
+        "  color: %DIM%;"
         "  background: transparent;"
         "  border: none;"
         "  padding: 0px;"
         "  text-align: left;"
         "}"
-        "#dockerButton:hover { color:rgb(200, 220, 255); }"
-        "#dockerDetails { color:rgb(150, 180, 220); }"
+        "#dockerButton:hover { color: %TEXT%; }"
+        "#dockerDetails { color: %DIM%; }"
         "#kubeButton {"
-        "  color:rgb(190, 170, 230);"
+        "  color: %DIM%;"
         "  background: transparent;"
         "  border: none;"
         "  padding: 0px;"
         "  text-align: left;"
         "}"
-        "#kubeButton:hover { color:rgb(220, 205, 255); }"
-        "#kubeDetails { color:rgb(190, 170, 230); }"
-        "#status  { color:rgb(187, 207, 205); }"
+        "#kubeButton:hover { color: %TEXT%; }"
+        "#kubeDetails { color: %DIM%; }"
+        "#status  { font-weight: bold; }"
         "#detailsPanel {"
-        "  background-color:rgb(28, 28, 30);"
-        "  border: 1px solid rgb(70, 70, 74);"
+        "  background-color: %SURFACE%;"
+        "  border-left: 1px solid %BORDER%;"
         "}"
         "#moreButton, #showHideButton {"
-        "  color: #f4f8ff;"
-        "  background-color:rgb(70, 74, 82);"
-        "  border: 1px solid rgb(120, 124, 132);"
-        "  font-size: 10px;"
-        "  padding: 2px 8px;"
+        "  color: %MUTED%;"
+        "  background-color: transparent;"
+        "  border: 1px solid %BORDER%;"
+        "  font-size: 9px;"
+        "  padding: 3px 10px;"
         "}"
-        "#moreButton:hover, #showHideButton:hover { background-color:rgb(96, 100, 110); }"
-        "QLabel   { color:rgb(198, 205, 195); }"));
+        "#moreButton:hover, #showHideButton:hover {"
+        "  color: %TEXT%; border-color: %MUTED%;"
+        "}"
+        "QLabel   { color: %DIM%; }")
+        .replace(QStringLiteral("%BG%"), ui_theme::bg())
+        .replace(QStringLiteral("%BORDER%"), ui_theme::border())
+        .replace(QStringLiteral("%TEXT%"), ui_theme::text())
+        .replace(QStringLiteral("%DIM%"), ui_theme::dim())
+        .replace(QStringLiteral("%MUTED%"), ui_theme::muted())
+        .replace(QStringLiteral("%SURFACE%"), ui_theme::surface()));
 
     m_panel = new DashboardPanel(m_pages);
     connect(m_panel, &DashboardPanel::collapseRequested, this,
@@ -493,6 +494,12 @@ void HudWindow::setTlsSnapshot(const TlsSnapshot &snapshot) {
 void HudWindow::setFimSnapshot(const FimSnapshot &snapshot) {
     if (m_panel != nullptr) {
         m_panel->setFimSnapshot(snapshot);
+    }
+}
+
+void HudWindow::setSettingsInfo(const SettingsInfo &info) {
+    if (m_panel != nullptr) {
+        m_panel->setSettingsInfo(info);
     }
 }
 
