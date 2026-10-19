@@ -96,6 +96,36 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
 
+      - name: Probe smoke
+        if: runner.os != 'Windows'
+        run: |
+          SYSPEEK_BIN=./cpp/build/syspeek
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
+            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          fi
+          "$SYSPEEK_BIN" --probe 3 > "${RUNNER_TEMP}/syspeek-probe.txt" 2>&1 \
+            || { cat "${RUNNER_TEMP}/syspeek-probe.txt"; exit 1; }
+          cat "${RUNNER_TEMP}/syspeek-probe.txt"
+          grep -q "probe summary requested=3 received=3" \
+            "${RUNNER_TEMP}/syspeek-probe.txt"
+          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
+          ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Probe smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ./cpp/build/Release/syspeek.exe --probe 3 \
+            > "${RUNNER_TEMP}/syspeek-probe.txt" 2>&1 \
+            || { cat "${RUNNER_TEMP}/syspeek-probe.txt"; exit 1; }
+          cat "${RUNNER_TEMP}/syspeek-probe.txt"
+          grep -q "probe summary requested=3 received=3" \
+            "${RUNNER_TEMP}/syspeek-probe.txt"
+          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
+          ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+
       - name: Dump smoke (Windows)
         if: runner.os == 'Windows'
         shell: bash
