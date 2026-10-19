@@ -176,6 +176,26 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.0.0
           Get-ChildItem cpp/build/packaging
 
+      - name: VC runtime bundled (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem cpp/build/packaging/Syspeek-*-windows-portable.zip |
+            Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = $archive.Entries | ForEach-Object { $_.FullName }
+            foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+              if ($names -notcontains $dll) { throw "MSVC runtime not bundled in zip: $dll" }
+            }
+            Write-Host "vc runtime bundled ok: $($names.Count) entries"
+          } finally {
+            $archive.Dispose()
+          }
+          $wxs = Get-Content cpp/packaging/windows/payload.wxs -Raw
+          if ($wxs -notmatch 'vcruntime140\.dll') { throw 'payload.wxs missing vc runtime' }
+
       - name: Manifest smoke (windows)
         if: runner.os == 'Windows'
         shell: pwsh

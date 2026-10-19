@@ -14,8 +14,10 @@ it. Per-machine install into `C:\Program Files\Syspeek`, Start Menu
 shortcut, Add/Remove Programs entry, WiX major upgrades supported.
 
 **Portable zip** — `Syspeek-<version>-windows-portable.zip`, unzip
-anywhere, run `syspeek.exe` directly (Qt runtime is bundled next to the
-exe). No registry, no install.
+anywhere, run `syspeek.exe` directly (Qt and the MSVC runtime DLLs
+`vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll` are bundled
+next to the exe — no separate Visual C++ redistributable install
+needed, including on fresh VMs). No registry, no install.
 
 **Scripted portable install (Windows 10+):**
 
@@ -63,16 +65,29 @@ the MotW prompt. Verify the SHA256 from the release's
 `Syspeek-<version>-windows.msi.sha256` /
 `...-portable.zip.sha256` first.
 
-## Autostart
+## Autostart + verbs
 
 Run-key autostart, grounded on the same key shipped tools use
-(SystemInformer's HKCU Run key):
+(SystemInformer's HKCU Run key), plus the lifecycle verbs built into
+the exe:
 
 ```bat
-syspeek --autostart=on
-syspeek --autostart=status
-syspeek --autostart=off
+syspeek                    run the HUD
+syspeek stop               stop other syspeek instances (never itself)
+syspeek restart            stop, then relaunch
+syspeek status             autostart state + other instance count
+syspeek disable            stop + turn autostart off
+syspeek --autostart=on|off|status
+syspeek uninstall          stop + autostart off + remove shims,
+                           prints the one folder-removal step left
+syspeek --dump             JSON snapshot of the machine
 ```
+
+`uninstall` cannot delete the folder containing the exe it is running
+from (Windows file locks it), so it prints the exact
+`Remove-Item -Recurse -Force "%LOCALAPPDATA%\Syspeek"` command to
+finish the job. The PowerShell installer's `-Uninstall` path handles
+the whole removal in one step.
 
 ## Feature matrix (M49 + M50)
 

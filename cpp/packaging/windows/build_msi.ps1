@@ -36,6 +36,21 @@ Copy-Item $exe $stagedExe
 windeployqt --release --no-translations --no-system-d3d-compiler `
     --no-opengl-sw --no-compiler-runtime $stagedExe
 
+# App-local MSVC runtime: windeployqt never bundles the VC runtime,
+# and build runners have the redistributable preinstalled (which is
+# why CI smokes never caught it) - a clean Windows install (fresh VM,
+# minimal box) does not. Application-local DLLs are the FIRST place
+# the loader looks, so shipping these three next to the exe makes
+# the folder self-contained; no vc_redist.exe needed by users.
+$runtimeDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+foreach ($dll in $runtimeDlls) {
+    $src = Join-Path $env:WINDIR "System32/$dll"
+    if (-not (Test-Path $src)) {
+        throw "MSVC runtime not found on this runner: $src"
+    }
+    Copy-Item $src $stage
+}
+
 # ---- Generate payload.wxs: one Component per file, nested Directories.
 $files = Get-ChildItem -Recurse -File $stage
 $sha1 = New-Object System.Security.Cryptography.SHA1CryptoServiceProvider
