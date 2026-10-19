@@ -48,6 +48,11 @@ set -euo pipefail
   echo ">> bundling Qt and dependencies"
   rm -rf /outapp && mkdir -p /outapp/lib /outapp/plugins/platforms
   cp /w/syspeek /outapp/
+  # M58a: stamp the bundle version (install.sh logs it; `syspeek vers`
+  # prints it) straight from the CMake project version.
+  version="$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' /w/CMakeCache.txt 2>/dev/null || true)"
+  [ -n "$version" ] || version="unknown"
+  printf '%s\n' "$version" > /outapp/VERSION
   QTL="$(dirname "$(ldd /w/syspeek | awk "/libQt6Core/{print \$3}")")"
   cp -aL "$QTL"/libQt6*.so* /outapp/lib/
   for p in "$(dirname "$QTL")"/../plugins/platforms /usr/lib64/qt6/plugins/platforms; do

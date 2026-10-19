@@ -31,7 +31,15 @@ The **same one line works on all three platforms**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+# No curl? (Base systems of most distros ship wget; Lubuntu minimal does not ship curl.)
+wget -qO- https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
 ```
+
+The installer handles the rest of its own downloads with a fallback chain:
+native `curl` → `wget` → snap `curl` → `busybox wget` → one distro
+package-manager rescue (`apt/dnf/yum/zypper/pacman/apk`) → clear manual
+instructions. Snap-packaged curl (which cannot write files on some setups) is
+only tried after the native tools.
 
 - **Linux (x86-64, glibc ≥ 2.34)** — downloads a self-contained build (Qt 6
   bundled — nothing else to install), puts it in `~/.local/opt/syspeek`, adds a
@@ -118,10 +126,18 @@ It self-updates via delta (a `.zsync` file ships alongside on the release page �
 use [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate)):
 
 ```bash
-curl -fLO https://github.com/codeafridi/Syspeek/releases/latest/download/Syspeek-0.6.0-x86_64.AppImage
-chmod +x Syspeek-0.6.0-x86_64.AppImage
-./Syspeek-0.6.0-x86_64.AppImage
+# Needs curl (or wget + manual URL editing). Resolves the current versioned name:
+tag=$(curl -fsSI -o /dev/null -w '%{url_effective}' https://github.com/codeafridi/Syspeek/releases/latest | sed 's#.*/tag/##')
+curl -fLO "https://github.com/codeafridi/Syspeek/releases/download/${tag}/Syspeek-${tag#v}-x86_64.AppImage"
+chmod +x Syspeek-*-x86_64.AppImage
+./Syspeek-*-x86_64.AppImage
 ```
+
+Asset names carry the version, so there is no stable `releases/latest/download`
+URL for the AppImage — grab it from the
+[release page](https://github.com/codeafridi/Syspeek/releases/latest) if you
+don't want the short script above. The one-liner installer is the better route:
+same bundle, plus the `syspeek` command and start-at-login.
 
 The AppImage has no `syspeek` command and no start-at-login; it just runs. Use
 the one-liner above if you want those.

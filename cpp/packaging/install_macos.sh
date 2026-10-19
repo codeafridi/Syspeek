@@ -37,7 +37,7 @@ usage: syspeek.sh {run|start|stop|restart|status|logs|enable|disable|uninstall|p
   logs        tail the HUD stdout/stderr log
   enable      install the LaunchAgent plist (login autostart) + start now
   disable     remove the LaunchAgent plist
-  update      re-run the install one-liner (curl installer)
+  update      re-run the install one-liner (wget, curl, or busybox download)
   uninstall   disable + stop + remove plist
   path        print the binary path
 USAGE
