@@ -1285,6 +1285,26 @@ int main(int argc, char *argv[]) {
                   "NAME=\"Ubuntu\"\nPRETTY_NAME=\"Ubuntu 24.04 LTS\"\n"))
                   == QStringLiteral("Ubuntu 24.04 LTS"),
               "hostinfo: os pretty name");
+
+        HostFsInfo withFree;
+        withFree.mountedOn = QStringLiteral("/");
+        withFree.name = QStringLiteral("ext4");
+        withFree.kbSize = 480ULL * 1024ULL * 1024ULL;
+        withFree.kbFree = 96ULL * 1024ULL * 1024ULL;
+        withFree.hasKbFree = true;
+        HostFsInfo unknownFree;
+        unknownFree.mountedOn = QStringLiteral("/data");
+        unknownFree.name = QStringLiteral("xfs");
+        unknownFree.kbSize = 100ULL * 1024ULL * 1024ULL;
+        unknownFree.hasKbFree = false;
+        HostInfo textInfo;
+        textInfo.filesystems.append(withFree);
+        textInfo.filesystems.append(unknownFree);
+        const QString fsText = hostInfoFilesystemsText(textInfo);
+        check(fsText.contains(QStringLiteral("480.0 GB  free 96.0")),
+              "hostinfo: fs text free column");
+        check(fsText.contains(QStringLiteral("free --")),
+              "hostinfo: fs text unknown free is keyed");
     }
 
     {

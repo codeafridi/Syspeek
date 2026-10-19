@@ -332,6 +332,9 @@ HostInfo collectHostInfoMac() {
             fs.mountedOn = mountOn;
             fs.kbSize = static_cast<unsigned long long>(st.f_blocks)
                         * st.f_bsize / 1024ULL;
+            fs.kbFree = static_cast<unsigned long long>(st.f_bavail)
+                        * st.f_bsize / 1024ULL;
+            fs.hasKbFree = true;
             info.filesystems.append(fs);
         }
     }
@@ -523,6 +526,8 @@ HostInfo collectHostInfoWin() {
                 fs.name = drive;
                 fs.mountedOn = QString::fromWCharArray(fsName);
                 fs.kbSize = total.QuadPart / 1024;
+                fs.kbFree = freeBytes.QuadPart / 1024;
+                fs.hasKbFree = true;
                 info.filesystems.append(fs);
             }
         }
@@ -647,6 +652,9 @@ HostInfo collectHostInfo() {
             if (statvfs(fs.mountedOn.toUtf8().constData(), &stats) == 0) {
                 fs.kbSize = static_cast<unsigned long long>(stats.f_blocks)
                             * stats.f_frsize / 1024ULL;
+                fs.kbFree = static_cast<unsigned long long>(stats.f_bavail)
+                            * stats.f_frsize / 1024ULL;
+                fs.hasKbFree = true;
             }
         }
     }
@@ -799,10 +807,16 @@ QString hostInfoFilesystemsText(const HostInfo &info) {
             text += QStringLiteral("...\n");
             break;
         }
-        text += QStringLiteral("%1  %2  %3 GB\n")
+        const QString freePart =
+            fs.hasKbFree
+                ? QStringLiteral("free %1").arg(
+                      QString::number(fs.kbFree / (1024.0 * 1024.0), 'f', 1))
+                : QStringLiteral("free --");
+        text += QStringLiteral("%1  %2  %3 GB  %4\n")
                     .arg(fs.mountedOn.left(28).leftJustified(28, ' '),
                          fs.name.left(20).leftJustified(20, ' '),
-                         QString::number(fs.kbSize / (1024.0 * 1024.0), 'f', 1));
+                         QString::number(fs.kbSize / (1024.0 * 1024.0), 'f', 1),
+                         freePart.leftJustified(12, ' '));
     }
     return text.trimmed();
 }

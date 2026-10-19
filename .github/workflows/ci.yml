@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54]
   pull_request:
 
 jobs:
@@ -87,6 +87,11 @@ jobs:
                   print("tcp extras:", json.dumps(extra, sort_keys=True))
           else:
               print("tcp sysctl unavailable (kernel denies) - stays gated")
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert fs, "filesystems block"
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), fs[:3]
+          print("filesystems ok:", len(fs), "entries")
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -128,6 +133,11 @@ jobs:
           print("posture ok:", security.get("findings"), "findings,",
                 security.get("exposed"), "exposed,",
                 security.get("grade"))
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert fs, "filesystems block"
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), fs[:3]
+          print("filesystems ok:", len(fs), "entries")
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
@@ -191,8 +201,18 @@ jobs:
           test -x /Applications/Syspeek.app/Contents/MacOS/syspeek
           test -x /Applications/Syspeek.app/Contents/Resources/syspeek
           test -x /usr/local/bin/syspeek
-          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump |
-            python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; print("mac install dump ok:", d["processCount"], "procs")'
+          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump > /tmp/mac-smoke-dump.json 2>/dev/null
+          python3 - /tmp/mac-smoke-dump.json <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d["processCount"] > 0 and d["host"]["cores"] > 0, d
+          fs = d.get("filesystems", {}).get("entries", [])
+          assert all(e["freeG"] <= e["totalG"] + 0.01
+                     for e in fs if "freeG" in e), (
+              fs[:3] if fs else "shipped bundle pre-M54: no block yet")
+          extra = f", {len(fs)} fs" if fs else " (shipped pre-M54: no fs block)"
+          print("mac install dump ok:", d["processCount"], "procs" + extra)
+          PY
           /usr/local/bin/syspeek status
           sh install.sh --uninstall
           test ! -d /Applications/Syspeek.app

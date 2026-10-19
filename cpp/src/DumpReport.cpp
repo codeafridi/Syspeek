@@ -2,6 +2,7 @@
 
 #include "DiskStatus.h"
 #include "SbomStatus.h"
+#include "HostInfoStatus.h"
 #include "platform/PlatformFactory.h"
 
 #include <QHash>
@@ -258,6 +259,28 @@ QString dumpReportJson(int maxProcs) {
             security.insert(QStringLiteral("findings"), 0);
         }
         root.insert(QStringLiteral("security"), security);
+    }
+
+    {
+        // Per-filesystem capacity (same source the Host inventory card uses).
+        QJsonArray filesystems;
+        const HostInfo info = collectHostInfo();
+        for (const HostFsInfo &fs : info.filesystems) {
+            QJsonObject row;
+            row.insert(QStringLiteral("on"), fs.mountedOn);
+            row.insert(QStringLiteral("fs"), fs.name);
+            row.insert(QStringLiteral("totalG"),
+                       fs.kbSize / (1024.0 * 1024.0));
+            if (fs.hasKbFree) {
+                row.insert(QStringLiteral("freeG"),
+                           fs.kbFree / (1024.0 * 1024.0));
+            }
+            filesystems.append(row);
+        }
+        QJsonObject fsobj;
+        fsobj.insert(QStringLiteral("count"), filesystems.size());
+        fsobj.insert(QStringLiteral("entries"), filesystems);
+        root.insert(QStringLiteral("filesystems"), fsobj);
     }
 
 #if defined(Q_OS_WIN)
