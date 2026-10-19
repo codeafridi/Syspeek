@@ -27,16 +27,28 @@ panel that stays on top and out of your way.
 
 ## Install
 
+The **same one line works on all three platforms**:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
 ```
 
-One line. It downloads a self-contained build (Qt 6 bundled — nothing else to
-install), puts it in `~/.local/opt/syspeek`, adds a `syspeek` command,
-and starts it at login. Requires **x86-64** and **glibc ≥ 2.34** (see
-[Compatibility](#compatibility)).
+- **Linux (x86-64, glibc ≥ 2.34)** — downloads a self-contained build (Qt 6
+  bundled — nothing else to install), puts it in `~/.local/opt/syspeek`, adds a
+  `syspeek` command, starts it at login, and installs the desktop focus bridge
+  when one is needed (see [Compatibility](#compatibility)).
+- **macOS** — downloads the latest DMG, copies `Syspeek.app` into
+  `/Applications` (falls back to `~/Applications` without admin rights),
+  installs LaunchAgent autostart + the `syspeek` command in
+  `/usr/local/bin`, and reports the Gatekeeper steps for the unsigned build.
+- **Windows (run inside Git Bash)** — downloads the portable zip into
+  `%LOCALAPPDATA%\Syspeek`, adds a `syspeek` command through the WindowsApps
+  PATH directory, sets HKCU Run autostart, and starts the HUD. Or run the
+  MSI from the [releases](../../releases) page instead.
 
-Control it:
+Control it (Linux verbs below; macOS uses the launchctl verb set, Windows
+autostart/status are `--autostart=on|off|status` — run the installer with
+`-h` to print the per-OS cheat sheet):
 
 | Command | What it does |
 | --- | --- |

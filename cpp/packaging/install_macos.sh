@@ -35,8 +35,9 @@ usage: syspeek.sh {run|start|stop|restart|status|logs|enable|disable|uninstall|p
   restart     stop + start
   status      show whether the plist is loaded and the process running
   logs        tail the HUD stdout/stderr log
-  enable      install the LaunchAgent plist (login autostart)
+  enable      install the LaunchAgent plist (login autostart) + start now
   disable     remove the LaunchAgent plist
+  update      re-run the install one-liner (curl installer)
   uninstall   disable + stop + remove plist
   path        print the binary path
 USAGE
@@ -114,10 +115,18 @@ case "$cmd" in
         ensure_log_dir
         tail -n 80 -f "$LOG_FILE" "$ERR_FILE" 2>/dev/null
         ;;
+    update)
+        cat <<'UPDATE'
+update: re-run the install one-liner:
+  curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+UPDATE
+        curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+        ;;
     enable)
         write_plist
         launchctl bootstrap gui/"$(id -u)" "$PLIST" 2>/dev/null \
             || launchctl load "$PLIST" 2>/dev/null || true
+        launchctl kickstart gui/"$(id -u)"/$LABEL 2>/dev/null || true
         echo "enabled at login ($PLIST)"
         ;;
     disable)
