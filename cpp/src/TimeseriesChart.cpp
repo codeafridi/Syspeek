@@ -218,9 +218,9 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
     const double bottom = (low >= 0.0 && low < step * 0.25) ? 0.0 : low;
 
     // Horizontal gridlines + y tick labels + rotated unit title.
-    QPen gridPen(QColor(ui_theme::grid()));
+    QPen gridPen{QColor(ui_theme::grid())};
     gridPen.setWidthF(1.0);
-    QPen tickPen(QColor(ui_theme::dim()));
+    QPen tickPen{QColor(ui_theme::dim())};
     painter.setPen(tickPen);
     for (double t = bottom; t <= top + 1e-12; t += step) {
         const qreal y = plot.bottom() - (t - bottom) / (top - bottom) * plot.height();
@@ -436,7 +436,7 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
             band.lineTo(x, y);
         }
         band.closeSubpath();
-        QColor fc(QColor(ui_theme::ok()));
+        QColor fc{QColor(ui_theme::ok())};
         fc.setAlpha(46);
         painter.setPen(QPen(QColor(ui_theme::ok()), 2.0, Qt::DotLine));
         painter.setBrush(fc);
