@@ -173,13 +173,37 @@ int main(int argc, char *argv[]) {
         panel.setAlerts(alertsFor(240));
         // Alertmanager-style grouping through the real tracker (M35), so
         // the Incidents page shows grouped folds, re-fires and resolves.
+        // A real SloTracker (M27, Nobl9 model) rides the same story:
+        // critical windows count as bad availability samples.
         IncidentTracker tracker(12500, 20);
+        SloTracker sloTracker;
+        auto hasCrit = [](const QList<Alert> &list) {
+            for (const Alert &alert : list) {
+                if (alert.severity.compare(QLatin1String("critical"),
+                                           Qt::CaseInsensitive) == 0
+                    || alert.severity.compare(QLatin1String("high"),
+                                              Qt::CaseInsensitive) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
         for (int i = 0; i < 240; ++i) {
             tracker.update(alertsFor(i), baseMs + i * 2000);
+            sloTracker.record(!hasCrit(alertsFor(i)), baseMs + i * 2000);
+            DisplaySnapshot snap = demoSnapshot(i);
+            snap.slo = sloTracker.report(SloSpec{});
+            panel.setSnapshot(snap);
+            panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
         }
         tracker.update(alertsFor(240), baseMs + 240 * 2000);
+        sloTracker.record(!hasCrit(alertsFor(240)), baseMs + 240 * 2000);
+        DisplaySnapshot finalSnap = demoSnapshot(240);
+        finalSnap.slo = sloTracker.report(SloSpec{});
+        panel.setSnapshot(finalSnap);
+        panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };
     StatsdSnapshot statsd;

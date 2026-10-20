@@ -449,8 +449,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddTls { color: %MUTED%; }"
         "#ddSensitiveSummary { color: %DIM%; }"
         "#ddSensitive { color: %MUTED%; }"
-        "#ddSloSummary { color: %DIM%; }"
-        "#ddSlo { color: %MUTED%; }"
+        "#ddSloSli, #ddSloObj, #ddSloBudget { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -893,23 +892,87 @@ QWidget *DashboardPanel::buildMetricsView() {
 
 QWidget *DashboardPanel::buildSloView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(12);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
+    // --- Attainment tile row (Nobl9 model: objective/SLI/budget/burn).
+    m_sloSli = new QLabel(QStringLiteral("--"), view);
+    m_sloSli->setObjectName(QStringLiteral("ddSloSli"));
+    m_sloObj = new QLabel(QStringLiteral("--"), view);
+    m_sloObj->setObjectName(QStringLiteral("ddSloObj"));
+    m_sloBudget = new QLabel(QStringLiteral("--"), view);
+    m_sloBudget->setObjectName(QStringLiteral("ddSloBudget"));
+    m_sloBurn = new QLabel(QStringLiteral("--"), view);
+    m_sloBurn->setObjectName(QStringLiteral("ddSloBurn"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("SLI"), m_sloSli,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("OBJECTIVE"), m_sloObj,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("BUDGET LEFT"),
+                              m_sloBudget, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("BURN RATE"), m_sloBurn,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Attainment card (name + met/exhausted chip + counts).
     m_sloSummary = new QLabel(QStringLiteral("--"), view);
     m_sloSummary->setObjectName(QStringLiteral("ddSloSummary"));
-    m_sloSummary->setFont(monoFont(14, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("SERVICE LEVEL OBJECTIVE"), m_sloSummary, view));
+    m_sloSummary->setFont(monoFont(11));
+    m_sloSummary->setTextFormat(Qt::RichText);
+    m_sloSummary->setWordWrap(false);
 
+    layout->addWidget(makeBanner(QStringLiteral("SLO ATTAINMENT"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("AVAILABILITY"),
+                               m_sloSummary, view), 1);
+
+    // --- SLI/budget history (Syspeek-own rolling counters).
+    m_chartSlo = new TimeseriesChart(view);
+    m_chartSlo->setUnit(QStringLiteral("Percent"));
+    m_chartSlo->setSeriesName(QStringLiteral("syspeek.slo.sli"));
+    m_chartSlo->setSeriesNameB(QStringLiteral("syspeek.slo.budget"));
+
+    layout->addWidget(makeBanner(QStringLiteral("SLI / ERROR BUDGET"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("SLI & budget remaining"),
+                                    m_chartSlo, view));
+
+    // --- Per-window burn rates (colored by exhaustion speed).
     m_slo = new QLabel(QStringLiteral("--"), view);
     m_slo->setObjectName(QStringLiteral("ddSlo"));
-    m_slo->setFont(monoFont(11));
+    m_slo->setFont(monoFont(10));
+    m_slo->setTextFormat(Qt::RichText);
     m_slo->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("ERROR BUDGET / BURN RATE"), m_slo, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("BURN WINDOWS"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("BURN RATE BY WINDOW"),
+                               m_slo, view), 2);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_sloSummary->setMinimumWidth(1);
+    m_slo->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2291,8 +2354,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                             : (m_osDpkgSbom ? QStringLiteral("--")
                                             : unsupportedOsText()));
 
-    m_sloSummary->setText(sloSummaryText(snapshot.slo));
-    m_slo->setText(sloDetailText(snapshot.slo));
+    updateSloPanel(snapshot.slo);
 
     m_focusDetail->setText(
         QStringLiteral("threads  %1\nfds      %2\nctx sw   %3 vol / %4 invol\n"
@@ -2665,6 +2727,89 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     .arg(marker, alert.title, alert.detail);
     }
     m_alerts->setText(text);
+}
+
+void DashboardPanel::updateSloPanel(const SloReport &report) {
+    const bool live = report.available && report.total > 0;
+    if (!live) {
+        m_sloSli->setText(QStringLiteral("--"));
+        m_sloObj->setText(QStringLiteral("--"));
+        m_sloBudget->setText(QStringLiteral("--"));
+        m_sloBurn->setText(QStringLiteral("--"));
+        m_sloBurn->setStyleSheet(QStringLiteral("color: %1;")
+                                     .arg(ui_theme::text()));
+        m_sloSummary->setStyleSheet(
+            QStringLiteral("color: %1;").arg(ui_theme::dim()));
+        m_sloSummary->setText(QStringLiteral("collecting availability samples"));
+        m_slo->setStyleSheet(QStringLiteral("color: %1;")
+                                 .arg(ui_theme::dim()));
+        m_slo->setText(QStringLiteral("no burn windows yet"));
+        return;
+    }
+    const QString sliPct = QString::number(report.sli * 100.0, 'f', 3);
+    const QString objPct = QString::number(report.objective * 100.0, 'f', 3);
+    const double budgetPct = qBound<double>(
+        0.0, report.budgetRemaining * 100.0, 100.0);
+    const QString budPct = QString::number(budgetPct, 'f', 1);
+    m_sloSli->setText(sliPct + QStringLiteral("%"));
+    m_sloObj->setText(objPct + QStringLiteral("%"));
+    m_sloBudget->setText(budPct + QStringLiteral("%"));
+    m_sloBudget->setStyleSheet(
+        budgetPct <= 0.0
+            ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+            : QStringLiteral("color: %1;").arg(ui_theme::text()));
+
+    double burn = 0.0;
+    for (const SloWindow &window : report.windows) {
+        burn = qMax(burn, window.burnRate);
+    }
+    const QString burnText = burn >= 10.0
+        ? QString::number(burn, 'f', 0)
+        : QString::number(burn, 'f', 2);
+    m_sloBurn->setText(burnText + QStringLiteral("x"));
+    m_sloBurn->setStyleSheet(QStringLiteral("color: %1;").arg(
+        burn >= 1.0 ? ui_theme::crit()
+                    : (burn >= 0.25 ? ui_theme::warn()
+                                    : ui_theme::ok())));
+
+    // Attainment card (Nobl9 model vocabulary: objective / SLI / budget;
+    // chip state = budget breached or within).
+    m_sloSummary->setStyleSheet(QStringLiteral(""));
+    m_sloSummary->setText(
+        QStringLiteral(
+            "%1<br/><span style=\"color:%2;\">%3</span>&nbsp;&nbsp;%4 good "
+            "/ %5 bad of %6 samples")
+            .arg(report.name.toHtmlEscaped(),
+                 report.breached ? ui_theme::crit() : ui_theme::ok(),
+                 report.breached ? QStringLiteral("BUDGET EXHAUSTED")
+                                 : QStringLiteral("target met"))
+            .arg(report.good)
+            .arg(report.bad)
+            .arg(report.total));
+
+    // Burn-rate rows: one per rolling window, colored by consumption speed.
+    QString burnRows;
+    for (const SloWindow &window : report.windows) {
+        const QString rateColor = window.burnRate >= 1.0
+            ? ui_theme::crit()
+            : (window.burnRate >= 0.25 ? ui_theme::warn()
+                                       : ui_theme::ok());
+        burnRows += QStringLiteral(
+            "%1&nbsp;&nbsp;&nbsp;<span style=\"color:%2;\">%3x</span>")
+                        .arg(window.label,
+                             rateColor,
+                             QString::number(window.burnRate, 'f', 2))
+                    + QStringLiteral("<br/>");
+    }
+    m_slo->setStyleSheet(QStringLiteral(""));
+    m_slo->setText(burnRows.trimmed());
+
+    if (m_chartSlo != nullptr) {
+        m_chartSlo->push(qBound<double>(0.0, report.sli * 100.0, 100.0));
+        m_chartSlo->pushB(qBound<double>(0.0,
+                                         report.budgetRemaining * 100.0,
+                                         100.0));
+    }
 }
 
 void DashboardPanel::setIncidents(const QList<Incident> &incidents) {

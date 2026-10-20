@@ -75,6 +75,7 @@ signals:
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
+    void updateSloPanel(const SloReport &report);
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -290,6 +291,14 @@ private:
     QLabel *m_incWarn = nullptr;
     QLabel *m_incResolved = nullptr;
     TimeseriesChart *m_chartIncOpen = nullptr;
+
+    // Datadog-style SLO page (M61e): attainment tiles + SLI/budget
+    // history + per-window burn rates (Nobl9 REA model, M27).
+    QLabel *m_sloSli = nullptr;
+    QLabel *m_sloObj = nullptr;
+    QLabel *m_sloBudget = nullptr;
+    QLabel *m_sloBurn = nullptr;
+    TimeseriesChart *m_chartSlo = nullptr;
 
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
