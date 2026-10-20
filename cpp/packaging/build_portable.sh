@@ -49,10 +49,14 @@ set -euo pipefail
   rm -rf /outapp && mkdir -p /outapp/lib /outapp/plugins/platforms
   cp /w/syspeek /outapp/
   # M58a: stamp the bundle version (install.sh logs it; `syspeek vers`
-  # prints it) straight from the CMake project version.
-  version="$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' /w/CMakeCache.txt 2>/dev/null || true)"
+  # prints it) straight from the CMake project version. The sed
+  # expression uses double quotes: the container script travels inside
+  # an outer single-quoted docker bash -lc body and any apostrophe here
+  # would break out and mangle trailing backslashes (shipped 0.8.2
+  # bundles contained "0.8.2n" due to exactly that).
+  version="$(sed -n -e "s/^CMAKE_PROJECT_VERSION:STATIC=//p" /w/CMakeCache.txt 2>/dev/null || true)"
   [ -n "$version" ] || version="unknown"
-  printf '%s\n' "$version" > /outapp/VERSION
+  echo "$version" > /outapp/VERSION
   QTL="$(dirname "$(ldd /w/syspeek | awk "/libQt6Core/{print \$3}")")"
   cp -aL "$QTL"/libQt6*.so* /outapp/lib/
   for p in "$(dirname "$QTL")"/../plugins/platforms /usr/lib64/qt6/plugins/platforms; do
