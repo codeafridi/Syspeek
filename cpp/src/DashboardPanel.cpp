@@ -449,7 +449,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddTls { color: %MUTED%; }"
         "#ddSensitiveSummary { color: %DIM%; }"
         "#ddSensitive { color: %MUTED%; }"
-        "#ddSloSli, #ddSloObj, #ddSloBudget { color: %TEXT%; }"
+        "#ddSloSli, #ddSloObj, #ddSloBudget, #ddProcProcs, #ddProcThreads,"
+        " #ddProcFds, #ddProcLoad { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1189,8 +1190,33 @@ QWidget *DashboardPanel::buildProfilesView() {
 
 QWidget *DashboardPanel::buildProcessesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Fleet totals, one tile per resource axis.
+    m_procTileProcs = new QLabel(QStringLiteral("--"), view);
+    m_procTileProcs->setObjectName(QStringLiteral("ddProcProcs"));
+    m_procTileThreads = new QLabel(QStringLiteral("--"), view);
+    m_procTileThreads->setObjectName(QStringLiteral("ddProcThreads"));
+    m_procTileFds = new QLabel(QStringLiteral("--"), view);
+    m_procTileFds->setObjectName(QStringLiteral("ddProcFds"));
+    m_procTileLoad = new QLabel(QStringLiteral("--"), view);
+    m_procTileLoad->setObjectName(QStringLiteral("ddProcLoad"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PROCESSES"), m_procTileProcs,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("THREADS"), m_procTileThreads,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("OPEN FDS"), m_procTileFds,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LOAD 1M"), m_procTileLoad,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_procs = new QTreeWidget(view);
     m_procs->setObjectName(QStringLiteral("ddProcs"));
@@ -1217,7 +1243,21 @@ QWidget *DashboardPanel::buildProcessesView() {
                     m_collapsedPids.insert(item->data(0, Qt::UserRole).toInt());
                 }
             });
+
+    layout->addWidget(makeBanner(QStringLiteral("PROCESS TREE"),
+        ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("PROCESSES"), m_procs, view), 2);
+
+    // --- CPU / load history (Syspeek-own fleet counters).
+    m_chartProcTotals = new TimeseriesChart(view);
+    m_chartProcTotals->setUnit(QStringLiteral("Percent"));
+    m_chartProcTotals->setSeriesName(QStringLiteral("syspeek.procs.cpu"));
+    m_chartProcTotals->setSeriesNameB(QStringLiteral("syspeek.host.load1"));
+
+    layout->addWidget(makeBanner(QStringLiteral("CPU / LOAD"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("fleet CPU vs load-1m"),
+                                    m_chartProcTotals, view));
 
     auto *detailRow = new QHBoxLayout();
     detailRow->setSpacing(14);
@@ -1236,7 +1276,28 @@ QWidget *DashboardPanel::buildProcessesView() {
     detailRow->addWidget(
         makeCard(QStringLiteral("OPEN FILES"), m_openFiles, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("FOCUS DETAIL"),
+        ui_theme::warn(), view));
     layout->addLayout(detailRow);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_focusDetail->setMinimumWidth(1);
+    m_openFiles->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2020,6 +2081,27 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     m_cpuValue->setText(snapshot.cpu);
     m_memValue->setText(snapshot.memory);
     m_procCount->setText(QString::number(snapshot.processes.size()));
+
+    // Processes-page fleet totals (M62): sum the per-row resource axes
+    // and keep a CPU-vs-load history for the page chart.
+    qint64 procsThreads = 0;
+    qint64 procsFds = 0;
+    double procsCpu = 0.0;
+    for (const ProcessRow &row : snapshot.processes) {
+        procsThreads += row.threads;
+        if (row.fds >= 0) {
+            procsFds += row.fds;
+        }
+        procsCpu += qMax(0.0, row.cpuPercent);
+    }
+    m_procTileProcs->setText(QString::number(snapshot.processes.size()));
+    m_procTileThreads->setText(QString::number(procsThreads));
+    m_procTileFds->setText(QString::number(procsFds));
+    m_procTileLoad->setText(QString::number(snapshot.hostLoad1, 'f', 2));
+    if (!snapshot.processes.isEmpty() && m_chartProcTotals != nullptr) {
+        m_chartProcTotals->push(qBound<double>(0.0, procsCpu, 100000.0));
+        m_chartProcTotals->pushB(qMax(0.0, snapshot.hostLoad1));
+    }
 
     m_statusValue->setText(snapshot.status);
     if (m_statusBig != nullptr) {

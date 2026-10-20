@@ -300,6 +300,13 @@ private:
     QLabel *m_sloBurn = nullptr;
     TimeseriesChart *m_chartSlo = nullptr;
 
+    // Datadog-style Processes page (M62): fleet totals + CPU/load story.
+    QLabel *m_procTileProcs = nullptr;
+    QLabel *m_procTileThreads = nullptr;
+    QLabel *m_procTileFds = nullptr;
+    QLabel *m_procTileLoad = nullptr;
+    TimeseriesChart *m_chartProcTotals = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
