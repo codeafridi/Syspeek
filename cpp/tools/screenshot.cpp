@@ -3,11 +3,13 @@
 
 #include <QApplication>
 #include <QListWidget>
+#include <QLabel>
 #include <QPixmap>
 #include <QDateTime>
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -137,6 +139,72 @@ int main(int argc, char *argv[]) {
             app.processEvents();
         }
         panel.setSnapshot(demoSnapshot(240));
+    }
+
+    // Synthetic DogStatsD receiver history: cumulative counters + a few
+    // series so the Metrics page renders tiles, rate charts and the
+    // explorer table populated. Two parse bursts exercise the red tile.
+    StatsdSnapshot statsd;
+    statsd.available = true;
+    auto appendSeries = [&statsd](const char *name, const char *type,
+                                  const char *tags, double last, double sum,
+                                  double avg, double max, quint64 count,
+                                  quint64 unique = 0) {
+        StatsdSeries s;
+        s.name = QString::fromUtf8(name);
+        s.type = QString::fromUtf8(type);
+        s.tags = QString::fromUtf8(tags);
+        s.last = last;
+        s.sum = sum;
+        s.min = 0.0;
+        s.max = max;
+        s.avg = avg;
+        s.count = count;
+        s.unique = unique;
+        statsd.series.append(s);
+    };
+    appendSeries("app.checkout.count", "counter", "env:dev,service:web",
+                 0.0, 1422.0, 0.0, 0.0, 237);
+    appendSeries("app.reply_ms", "timer", "endpoint:checkout",
+                 4.0, 0.0, 33.5, 210.7, 196);
+    appendSeries("cache.hit", "gauge", "pool:main", 0.87, 0.0,
+                 0.83, 0.95, 203);
+    appendSeries("session.users", "set", "env:dev", 0.0, 0.0, 0.0, 0.0,
+                 31, 71);
+    appendSeries("shopist.page.views", "counter", "page:home", 0.0,
+                 9821.0, 0.0, 0.0, 989);
+    appendSeries("request.errors", "counter", "code:503", 0.0,
+                 14.0, 0.0, 0.0, 14);
+    appendSeries("cart.abandoned", "histogram", "env:dev", 0.0, 0.0,
+                 0.031, 0.2, 85);
+    {
+        quint64 metrics = 0;
+        quint64 events = 0;
+        quint64 checks = 0;
+        quint64 errors = 0;
+        std::srand(7);
+        for (int i = 0; i < 241; ++i) {
+            const int burst = (i > 150 && i < 175) ? (i % 5 == 0 ? 2 : 0)
+                                                   : 0;
+            const quint64 perTick = 9 + std::rand() % 7;
+            metrics += perTick;
+            if (i % 19 == 0) {
+                events += 1;
+            }
+            if (i % 27 == 0) {
+                checks += 1;
+            }
+            errors += perTick % 17 == 0 ? quint64(1) : quint64(0);
+            errors += quint64(burst);
+            statsd.datagrams += perTick;
+            statsd.metrics = metrics;
+            statsd.events = events;
+            statsd.serviceChecks = checks;
+            statsd.parseErrors = errors;
+            statsd.sampledAtMs = 0;
+            panel.setStatsdSnapshot(statsd);
+            app.processEvents();
+        }
     }
 
     DockerSnapshot docker;

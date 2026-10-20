@@ -69,6 +69,12 @@ void TimeseriesChart::setSeriesNameB(const QString &nameB) {
     update();
 }
 
+void TimeseriesChart::setSeriesColors(const QColor &a, const QColor &b) {
+    m_colorA = a;
+    m_colorB = b;
+    update();
+}
+
 void TimeseriesChart::setCapacity(int capacity) {
     while (m_valuesA.size() > capacity) {
         m_valuesA.removeFirst();
@@ -298,10 +304,10 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
         }
     };
     if (hasLegend) {
-        legendRow(m_nameA, QColor(ui_theme::seriesA()), m_valuesA, legendTop);
+        legendRow(m_nameA, m_colorA, m_valuesA, legendTop);
     }
     if (!m_nameB.isEmpty()) {
-        legendRow(m_nameB, QColor(ui_theme::seriesB()), m_valuesB,
+        legendRow(m_nameB, m_colorB, m_valuesB,
                   legendTop + static_cast<qreal>(legendH));
     }
 
@@ -309,9 +315,10 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
         return;
     }
 
-    // Series lines (area-filled): purple + cyan per the DD reference.
-    const QColor colorA = QColor(ui_theme::seriesA());
-    const QColor colorB = QColor(ui_theme::seriesB());
+    // Series lines (area-filled): the panel's palette (purple/cyan per
+    // the DD reference unless overridden).
+    const QColor colorA = m_colorA;
+    const QColor colorB = m_colorB;
     auto seriesPath = [&](const QList<double> &values, const QRectF &rect,
                           double lo, double hi, bool fill) {
         QPainterPath path;

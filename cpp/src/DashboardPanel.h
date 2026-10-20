@@ -192,6 +192,7 @@ private:
     QTreeWidget *m_pathHops = nullptr;
     QLabel *m_statsdSummary = nullptr;
     QLabel *m_statsd = nullptr;
+    StatsdSnapshot m_lastStatsd;
     QLabel *m_sloSummary = nullptr;
     QLabel *m_slo = nullptr;
     QLabel *m_services = nullptr;
@@ -243,6 +244,31 @@ private:
     bool m_chartsPaused = false;
     qint64 m_lastTickMs = 0;
     double m_cadenceMs = 2000.0;
+
+    // Datadog-style Metrics page (M61b): tiles + telemetry charts +
+    // series-explorer table. Counters are cumulative in StatsdSnapshot;
+    // the panel tracks per-tick deltas for the rate charts.
+    TimeseriesChart *m_chartStatRate = nullptr;
+    TimeseriesChart *m_chartStatEvents = nullptr;
+    TimeseriesChart *m_chartStatErrors = nullptr;
+    MetricStore m_statMetricsStore{1800};
+    MetricStore m_statEventsStore{1800};
+    MetricStore m_statSvcStore{1800};
+    MetricStore m_statErrStore{1800};
+    quint64 m_lastStatMetrics = 0;
+    quint64 m_lastStatEvents = 0;
+    quint64 m_lastStatSvc = 0;
+    quint64 m_lastStatErr = 0;
+    bool m_firstStatsdTick = true;
+    QLabel *m_statMetrics = nullptr;
+    QLabel *m_statEvents = nullptr;
+    QLabel *m_statSvc = nullptr;
+    QLabel *m_statErrors = nullptr;
+    QLabel *m_deltaMetrics = nullptr;
+    QLabel *m_deltaEvents = nullptr;
+    QLabel *m_deltaSvc = nullptr;
+    QLabel *m_deltaErr = nullptr;
+    QTreeWidget *m_statsdSeriesTree = nullptr;
 
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;

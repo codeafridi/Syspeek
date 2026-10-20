@@ -21,6 +21,7 @@ public:
     void setUnit(const QString &unit);
     void setSeriesName(const QString &name);
     void setSeriesNameB(const QString &nameB);
+    void setSeriesColors(const QColor &a, const QColor &b);
     void setCapacity(int capacity);
     void setPaused(bool paused);
     bool paused() const { return m_paused; }
@@ -50,6 +51,8 @@ private:
     QString m_unit;
     QString m_nameA;
     QString m_nameB;
+    QColor m_colorA{127, 92, 255};
+    QColor m_colorB{60, 202, 170};
     QDateTime m_lastPush;
     double m_lastPushedA = 0.0;
     double m_lastPushedB = 0.0;

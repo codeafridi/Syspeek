@@ -158,6 +158,34 @@ QFrame *makeChartCard(const QString &title, QWidget *plot, QWidget *parent) {
 
 // Section banner (img4): centered white label on a full-width color
 // strip with a chevron at the left edge.
+// Tile delta line (Datadog style "▲ 18.6% vs window"): colored by
+// direction; upIsBad selects red-on-up (throughput/utilization style)
+// vs amber-on-up.
+void setDeltaLabel(QLabel *label, const MetricStore &store,
+                   double cadenceMs, bool upIsBad) {
+    if (label == nullptr) {
+        return;
+    }
+    if (store.size() < 2 || qFuzzyIsNull(store.values().constFirst())) {
+        label->setText(QStringLiteral("--"));
+        return;
+    }
+    const double first = store.values().constFirst();
+    const double last = store.values().constLast();
+    const double pct = (last - first) / qAbs(first) * 100.0;
+    const int minutes = std::max(1, static_cast<int>(std::lround(
+        (store.size() - 1) * cadenceMs / 60000.0)));
+    const QChar arrow = pct >= 0 ? u'\u2191' : u'\u2193';
+    const QColor color = pct >= 0
+        ? (upIsBad ? QColor(ui_theme::crit()) : QColor(ui_theme::warn()))
+        : QColor(ui_theme::ok());
+    label->setStyleSheet(QStringLiteral("color: %1;").arg(color.name()));
+    label->setText(QStringLiteral("%1 %2%  vs %3 min")
+                       .arg(arrow)
+                       .arg(qAbs(pct), 0, 'f', 1)
+                       .arg(minutes));
+}
+
 QWidget *makeBanner(const QString &title, const QString &color,
                     QWidget *parent) {
     auto *strip = new QFrame(parent);
@@ -665,12 +693,12 @@ QWidget *DashboardPanel::buildOverviewView() {
         makeCard(QStringLiteral("WATCHDOG INSIGHTS"), m_insights, view), 1, 1);
     layout->addLayout(insightGrid, 2);
 
-    // The overview must fit the viewport width: explicit minimums let
-    // long mono lines clip instead of widening the scroll content.
+    // Fit the viewport width: width-minimum clamps let long mono lines
+    // clip instead of widening the page (heights stay natural).
     for (QLabel *label : {m_hostCpu, m_hostMem, m_hostDisk, m_hostNet,
                           m_hostLoad, m_watchdog, m_runtime, m_forecast,
                           m_insights}) {
-        label->setMinimumSize(1, 1);
+        label->setMinimumWidth(1);
     }
 
     layout->addStretch(1);
@@ -694,32 +722,9 @@ QWidget *DashboardPanel::buildOverviewView() {
 }
 
 void DashboardPanel::updateOverviewText(const DisplaySnapshot &snapshot) {
-    auto delta = [this](QLabel *label, const MetricStore &store,
-                        bool upIsBad) {
-        if (label == nullptr) {
-            return;
-        }
-        if (store.size() < 2 || qFuzzyIsNull(store.values().constFirst())) {
-            label->setText(QStringLiteral("--"));
-            return;
-        }
-        const double first = store.values().constFirst();
-        const double last = store.values().constLast();
-        const double pct = (last - first) / qAbs(first) * 100.0;
-        const int minutes = std::max(1, static_cast<int>(std::lround(
-            (store.size() - 1) * m_cadenceMs / 60000.0)));        const QChar arrow = pct >= 0 ? u'\u2191' : u'\u2193';
-        const QColor color = pct >= 0
-            ? (upIsBad ? QColor(ui_theme::crit()) : QColor(ui_theme::warn()))
-            : QColor(ui_theme::ok());
-        label->setStyleSheet(QStringLiteral("color: %1;").arg(color.name()));
-        label->setText(QStringLiteral("%1 %2%  vs %3 min")
-                           .arg(arrow)
-                           .arg(qAbs(pct), 0, 'f', 1)
-                           .arg(minutes));
-    };
-    delta(m_deltaCpu, m_cpuStore, true);
-    delta(m_deltaMem, m_memStore, false);
-    delta(m_deltaProc, m_procStore, false);
+    setDeltaLabel(m_deltaCpu, m_cpuStore, m_cadenceMs, true);
+    setDeltaLabel(m_deltaMem, m_memStore, m_cadenceMs, false);
+    setDeltaLabel(m_deltaProc, m_procStore, m_cadenceMs, false);
 
     if (m_cpuValue != nullptr && snapshot.cpuValid) {
         const QString c =
@@ -762,23 +767,126 @@ void DashboardPanel::updateOverviewText(const DisplaySnapshot &snapshot) {
     }
 }
 
-QWidget *DashboardPanel::buildMetricsView() {    auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(12);
+QWidget *DashboardPanel::buildMetricsView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
+    // --- KPI tile row (img3 style, receiver telemetry vocabulary).
+    m_statMetrics = new QLabel(QStringLiteral("0"), view);
+    m_statMetrics->setObjectName(QStringLiteral("ddStatMetrics"));
+    m_statEvents = new QLabel(QStringLiteral("0"), view);
+    m_statEvents->setObjectName(QStringLiteral("ddStatEvents"));
+    m_statSvc = new QLabel(QStringLiteral("0"), view);
+    m_statSvc->setObjectName(QStringLiteral("ddStatSvc"));
+    m_statErrors = new QLabel(QStringLiteral("0"), view);
+    m_statErrors->setObjectName(QStringLiteral("ddStatErrors"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("METRICS RECEIVED"),
+                              m_statMetrics, &m_deltaMetrics, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("EVENTS"), m_statEvents,
+                              &m_deltaEvents, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SERVICE CHECKS"), m_statSvc,
+                              &m_deltaSvc, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PARSE ERRORS"), m_statErrors,
+                              &m_deltaErr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- RECEIVER line (kept label; DD status-section vocabulary).
     m_statsdSummary = new QLabel(QStringLiteral("--"), view);
     m_statsdSummary->setObjectName(QStringLiteral("ddStatsdSummary"));
     m_statsdSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("DOGSTATSD (127.0.0.1:8125)"), m_statsdSummary, view));
+    layout->addWidget(makeBanner(QStringLiteral("DOGSTATSD RECEIVER"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(
+        QStringLiteral("receiver (127.0.0.1:8125)"), m_statsdSummary, view));
+
+    // --- Telemetry chart rows (per-tick ingest rates, img2 panels).
+    m_chartStatRate = new TimeseriesChart(view);
+    m_chartStatRate->setUnit(QStringLiteral("Metrics/second"));
+    m_chartStatRate->setSeriesName(QStringLiteral("dogstatsd.metrics"));
+    m_chartStatRate->setBarMode(true);
+    m_chartStatEvents = new TimeseriesChart(view);
+    m_chartStatEvents->setUnit(QStringLiteral("Events/second"));
+    m_chartStatEvents->setSeriesName(
+        QStringLiteral("dogstatsd.events_received"));
+    m_chartStatEvents->setSeriesNameB(
+        QStringLiteral("dogstatsd.checks_received"));
+    m_chartStatErrors = new TimeseriesChart(view);
+    m_chartStatErrors->setUnit(QStringLiteral("Errors"));
+    m_chartStatErrors->setSeriesName(
+        QStringLiteral("dogstatsd.parse_errors"));
+    m_chartStatErrors->setSeriesColors(QColor(ui_theme::crit()),
+                                       QColor(ui_theme::seriesB()));
+
+    layout->addWidget(makeBanner(QStringLiteral("TELEMETRY"),
+        ui_theme::banner(), view));
+    auto *teleRow = new QHBoxLayout();
+    teleRow->setSpacing(10);
+    teleRow->addWidget(makeChartCard(QStringLiteral("Metrics ingested"),
+                                     m_chartStatRate, view), 1);
+    teleRow->addWidget(makeChartCard(QStringLiteral("Events & service checks"),
+                                     m_chartStatEvents, view), 1);
+    teleRow->addWidget(makeChartCard(QStringLiteral("Parse errors"),
+                                     m_chartStatErrors, view), 1);
+    layout->addLayout(teleRow);
+
+    // --- Series table (Metrics-Explorer style, img2 naming).
+    m_statsdSeriesTree = new QTreeWidget(view);
+    m_statsdSeriesTree->setObjectName(QStringLiteral("ddStatTree"));
+    m_statsdSeriesTree->setColumnCount(5);
+    m_statsdSeriesTree->setHeaderLabels({QStringLiteral("Metric"),
+                                         QStringLiteral("Type"),
+                                         QStringLiteral("Tags"),
+                                         QStringLiteral("Value"),
+                                         QStringLiteral("Count")});
+    m_statsdSeriesTree->setRootIsDecorated(false);
+    m_statsdSeriesTree->setSelectionMode(QAbstractItemView::NoSelection);
+    m_statsdSeriesTree->setFocusPolicy(Qt::NoFocus);
+    m_statsdSeriesTree->header()->setSectionResizeMode(
+        0, QHeaderView::Stretch);
+    m_statsdSeriesTree->header()->setSectionResizeMode(
+        2, QHeaderView::Stretch);
+    for (int i : {1, 3, 4}) {
+        m_statsdSeriesTree->header()->setSectionResizeMode(
+            i, QHeaderView::ResizeToContents);
+    }
 
     m_statsd = new QLabel(QStringLiteral("--"), view);
     m_statsd->setObjectName(QStringLiteral("ddStatsd"));
     m_statsd->setFont(monoFont(10));
     m_statsd->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("METRICS"), m_statsd, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("SERIES"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("SERIES EXPLORER"),
+                               m_statsdSeriesTree, view), 2);
+    layout->addWidget(makeCard(QStringLiteral("DETAIL"), m_statsd, view), 1);
+
+    // Fit the viewport width: width-only clamps (heights stay natural;
+    // min 1x1 collapses labels to zero height, M61 triage).
+    m_statsdSummary->setMinimumWidth(1);
+    m_statsd->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2360,6 +2468,96 @@ void DashboardPanel::setStatsdSnapshot(const StatsdSnapshot &snapshot) {
     m_statsdSummary->setText(statsdSummaryText(snapshot));
     m_statsd->setText(snapshot.available ? statsdDetailText(snapshot)
                                          : QStringLiteral("--"));
+
+    m_statMetrics->setText(QString::number(snapshot.metrics));
+    m_statEvents->setText(QString::number(snapshot.events));
+    m_statSvc->setText(QString::number(snapshot.serviceChecks));
+    m_statErrors->setText(QString::number(snapshot.parseErrors));
+    m_statErrors->setStyleSheet(
+        snapshot.parseErrors > 0
+            ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+            : QStringLiteral("color: %1;").arg(ui_theme::text()));
+
+    // Per-tick ingest rates from cumulative counters (reset-aware).
+    const quint64 dMetrics =
+        snapshot.metrics >= m_lastStatMetrics
+            ? snapshot.metrics - m_lastStatMetrics
+            : snapshot.metrics;
+    const quint64 dEvents =
+        snapshot.events >= m_lastStatEvents
+            ? snapshot.events - m_lastStatEvents
+            : snapshot.events;
+    const quint64 dSvc =
+        snapshot.serviceChecks >= m_lastStatSvc
+            ? snapshot.serviceChecks - m_lastStatSvc
+            : snapshot.serviceChecks;
+    const quint64 dErr =
+        snapshot.parseErrors >= m_lastStatErr
+            ? snapshot.parseErrors - m_lastStatErr
+            : snapshot.parseErrors;
+    const bool counts =
+        snapshot.datagrams > 0 && !m_firstStatsdTick;
+    m_lastStatMetrics = snapshot.metrics;
+    m_lastStatEvents = snapshot.events;
+    m_lastStatSvc = snapshot.serviceChecks;
+    m_lastStatErr = snapshot.parseErrors;
+    m_firstStatsdTick = false;
+
+    if (counts) {
+        m_statMetricsStore.push(static_cast<double>(dMetrics));
+        m_statEventsStore.push(static_cast<double>(dEvents));
+        m_statSvcStore.push(static_cast<double>(dSvc));
+        m_statErrStore.push(static_cast<double>(dErr));
+        if (m_chartStatRate != nullptr) {
+            m_chartStatRate->push(static_cast<double>(dMetrics));
+        }
+        if (m_chartStatEvents != nullptr) {
+            m_chartStatEvents->push(static_cast<double>(dEvents));
+            m_chartStatEvents->pushB(static_cast<double>(dSvc));
+        }
+        if (m_chartStatErrors != nullptr) {
+            m_chartStatErrors->push(static_cast<double>(dErr));
+        }
+    }
+    setDeltaLabel(m_deltaMetrics, m_statMetricsStore, 2.0, true);
+    setDeltaLabel(m_deltaEvents, m_statEventsStore, 2.0, true);
+    setDeltaLabel(m_deltaSvc, m_statSvcStore, 2.0, true);
+    setDeltaLabel(m_deltaErr, m_statErrStore, 2.0, true);
+
+    // Series explorer: top rows by name (snapshot already sorted).
+    if (m_statsdSeriesTree != nullptr) {
+        m_statsdSeriesTree->clear();
+        int shown = 0;
+        for (const StatsdSeries &series : snapshot.series) {
+            if (shown++ >= 80) {
+                auto *more = new QTreeWidgetItem(m_statsdSeriesTree);
+                more->setText(0, QStringLiteral("... %1 more")
+                                     .arg(snapshot.series.size() - 80));
+                more->setForeground(0, QColor(ui_theme::muted()));
+                break;
+            }
+            auto *item = new QTreeWidgetItem(m_statsdSeriesTree);
+            item->setText(0, series.name);
+            item->setText(1, series.type);
+            item->setText(2, series.tags);
+            QString value;
+            if (series.type == QStringLiteral("counter")) {
+                value = QStringLiteral("sum %1")
+                            .arg(QString::number(series.sum, 'f', 2));
+            } else if (series.type == QStringLiteral("set")) {
+                value = QStringLiteral("unique %1").arg(series.unique);
+            } else if (series.type == QStringLiteral("gauge")) {
+                value = QStringLiteral("last %1")
+                            .arg(QString::number(series.last, 'f', 2));
+            } else {
+                value = QStringLiteral("avg %1")
+                            .arg(QString::number(series.avg, 'f', 2));
+            }
+            item->setText(3, value);
+            item->setText(4, QString::number(series.count));
+        }
+    }
+    m_lastStatsd = snapshot;
 }
 
 void DashboardPanel::setDbmSnapshot(const DbmSnapshot &snapshot) {
