@@ -451,7 +451,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddSensitive { color: %MUTED%; }"
         "#ddSloSli, #ddSloObj, #ddSloBudget, #ddProcProcs, #ddProcThreads,"
         " #ddProcFds, #ddProcLoad { color: %TEXT%; }"
-        "#ddDockRun, #ddDockTotal, #ddDockCgMem { color: %TEXT%; }"
+        "#ddDockRun, #ddDockTotal, #ddDockCgMem, #ddKubeTilePods,"
+        " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1518,17 +1519,33 @@ QWidget *DashboardPanel::buildContainersView() {
 
 QWidget *DashboardPanel::buildKubernetesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
-    m_kubeSummary = new QLabel(QStringLiteral("--"), view);
-    m_kubeSummary->setObjectName(QStringLiteral("ddKubeSummary"));
-    m_kubeSummary->setFont(monoFont(12, true));
-    layout->addWidget(makeCard(QStringLiteral("KUBERNETES"), m_kubeSummary, view));
+    // --- Cluster tiles; cost per month rides the OpenCost model (M17).
+    m_kubeTilePods = new QLabel(QStringLiteral("--"), view);
+    m_kubeTilePods->setObjectName(QStringLiteral("ddKubeTilePods"));
+    m_kubeTileIssues = new QLabel(QStringLiteral("--"), view);
+    m_kubeTileIssues->setObjectName(QStringLiteral("ddKubeTileIssues"));
+    m_kubeTileDeploys = new QLabel(QStringLiteral("--"), view);
+    m_kubeTileDeploys->setObjectName(QStringLiteral("ddKubeTileDeploys"));
+    m_kubeTileCost = new QLabel(QStringLiteral("--"), view);
+    m_kubeTileCost->setObjectName(QStringLiteral("ddKubeTileCost"));
 
-    auto *tables = new QHBoxLayout();
-    tables->setSpacing(14);
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PODS"), m_kubeTilePods,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ISSUES"), m_kubeTileIssues,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DEPLOYMENTS"),
+                              m_kubeTileDeploys, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("COST / MONTH"), m_kubeTileCost,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_kubePods = new QTreeWidget(view);
     m_kubePods->setObjectName(QStringLiteral("ddKubePods"));
@@ -1542,7 +1559,6 @@ QWidget *DashboardPanel::buildKubernetesView() {
     for (int i = 1; i < 4; ++i) {
         m_kubePods->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
-    tables->addWidget(makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
 
     m_kubeDeploys = new QTreeWidget(view);
     m_kubeDeploys->setObjectName(QStringLiteral("ddKubeDeploys"));
@@ -1557,36 +1573,69 @@ QWidget *DashboardPanel::buildKubernetesView() {
     for (int i = 1; i < 3; ++i) {
         m_kubeDeploys->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
-    tables->addWidget(makeCard(QStringLiteral("DEPLOYMENTS"), m_kubeDeploys, view), 1);
-    layout->addLayout(tables, 1);
+
+    m_kubeSummary = new QLabel(QStringLiteral("--"), view);
+    m_kubeSummary->setObjectName(QStringLiteral("ddKubeSummary"));
+    m_kubeSummary->setFont(monoFont(12, true));
+
+    layout->addWidget(makeBanner(QStringLiteral("WORKLOADS"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("CLUSTER"), m_kubeSummary, view));
+
+    auto *tables = new QHBoxLayout();
+    tables->setSpacing(14);
+    tables->addWidget(makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
+    tables->addWidget(
+        makeCard(QStringLiteral("DEPLOYMENTS"), m_kubeDeploys, view), 1);
+    layout->addLayout(tables, 2);
+
+    // --- Rail-count history (Syspeek-own counter).
+    m_chartKube = new TimeseriesChart(view);
+    m_chartKube->setUnit(QStringLiteral("Count"));
+    m_chartKube->setSeriesName(QStringLiteral("syspeek.kube.pods"));
+
+    layout->addWidget(makeBanner(QStringLiteral("PODS OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("pods on cluster"),
+                                    m_chartKube, view));
 
     m_nodes = new QLabel(QStringLiteral("--"), view);
     m_nodes->setObjectName(QStringLiteral("ddNodes"));
     m_nodes->setFont(monoFont(10));
     m_nodes->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("NODES"), m_nodes, view), 1);
 
     m_kubeEvents = new QLabel(QStringLiteral("--"), view);
     m_kubeEvents->setObjectName(QStringLiteral("ddKubeEvents"));
     m_kubeEvents->setFont(monoFont(10));
     m_kubeEvents->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("EVENTS (warnings)"), m_kubeEvents, view), 1);
 
-    auto *insight = new QHBoxLayout();
-    insight->setSpacing(14);
+    layout->addWidget(makeBanner(QStringLiteral("CLUSTER HEALTH"),
+        ui_theme::warn(), view));
+    auto *healthRow = new QHBoxLayout();
+    healthRow->setSpacing(14);
+    healthRow->addWidget(makeCard(QStringLiteral("NODES"), m_nodes, view), 1);
+    healthRow->addWidget(
+        makeCard(QStringLiteral("EVENTS (warnings)"), m_kubeEvents, view), 1);
+    layout->addLayout(healthRow, 1);
+
     m_kubeDiagnosis = new QLabel(QStringLiteral("--"), view);
     m_kubeDiagnosis->setObjectName(QStringLiteral("ddKubeDiagnosis"));
     m_kubeDiagnosis->setFont(monoFont(10));
     m_kubeDiagnosis->setWordWrap(false);
-    insight->addWidget(
-        makeCard(QStringLiteral("DIAGNOSIS (why broken)"), m_kubeDiagnosis, view), 1);
 
     m_kubeTimeline = new QLabel(QStringLiteral("--"), view);
     m_kubeTimeline->setObjectName(QStringLiteral("ddKubeTimeline"));
     m_kubeTimeline->setFont(monoFont(10));
     m_kubeTimeline->setWordWrap(false);
+
+    auto *insight = new QHBoxLayout();
+    insight->setSpacing(14);
+    insight->addWidget(
+        makeCard(QStringLiteral("DIAGNOSIS (why broken)"), m_kubeDiagnosis, view), 1);
     insight->addWidget(
         makeCard(QStringLiteral("CHANGE TIMELINE"), m_kubeTimeline, view), 1);
+    layout->addLayout(insight, 1);
 
     m_deprecations = new QLabel(QStringLiteral("--"), view);
     m_deprecations->setObjectName(QStringLiteral("ddDeprecations"));
@@ -1594,7 +1643,26 @@ QWidget *DashboardPanel::buildKubernetesView() {
     m_deprecations->setWordWrap(false);
     layout->addWidget(
         makeCard(QStringLiteral("DEPRECATED / REMOVED APIs"), m_deprecations, view), 1);
-    layout->addLayout(insight, 1);
+
+    for (QLabel *label : {m_nodes, m_kubeEvents, m_kubeDiagnosis,
+                          m_kubeTimeline, m_deprecations}) {
+        label->setMinimumWidth(1);
+    }
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2647,6 +2715,21 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
     const QString summary = kubeSummaryText(snapshot);
     m_kubeSummary->setText(summary.isEmpty() ? QStringLiteral("--") : summary);
 
+    // Cluster-page tiles (M64); issues colored red while nonzero.
+    m_kubeTilePods->setText(QString::number(snapshot.totalPods));
+    m_kubeTileIssues->setText(QString::number(snapshot.issueCount));
+    m_kubeTileIssues->setStyleSheet(
+        snapshot.issueCount > 0
+            ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+            : QStringLiteral("color: %1;").arg(ui_theme::text()));
+    m_kubeTileDeploys->setText(QString::number(snapshot.deployments.size()));
+    if (snapshot.costPods > 0) {
+        m_kubeTileCost->setText(
+            QStringLiteral("$%1").arg(snapshot.costMonthly, 0, 'f', 1));
+    } else {
+        m_kubeTileCost->setText(QStringLiteral("--"));
+    }
+
     m_kubePods->clear();
     for (const KubePod &pod : snapshot.pods) {
         auto *item = new QTreeWidgetItem();
@@ -2678,6 +2761,9 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
 
     const bool haveData =
         snapshot.state == KubeState::Ok || snapshot.stale;
+    if (haveData && m_chartKube != nullptr) {
+        m_chartKube->push(static_cast<double>(snapshot.totalPods));
+    }
     const QString events =
         haveData ? kubeEventsText(snapshot) : kubeSummaryText(snapshot);
     m_kubeEvents->setText(events.isEmpty() ? QStringLiteral("--") : events);

@@ -315,6 +315,13 @@ private:
     QTreeWidget *m_dockerTable = nullptr;
     TimeseriesChart *m_chartDocker = nullptr;
 
+    // Datadog-style Kubernetes page (M64): cluster tiles + workloads.
+    QLabel *m_kubeTilePods = nullptr;
+    QLabel *m_kubeTileIssues = nullptr;
+    QLabel *m_kubeTileDeploys = nullptr;
+    QLabel *m_kubeTileCost = nullptr;
+    TimeseriesChart *m_chartKube = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
