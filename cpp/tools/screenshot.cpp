@@ -6,27 +6,40 @@
 #include <QPixmap>
 #include <QDateTime>
 
+#include <cmath>
 #include <cstdio>
 
 namespace {
 
-DisplaySnapshot demoSnapshot() {
+DisplaySnapshot demoSnapshot(int tick) {
+    const double w1 = std::sin(tick / 18.0);
+    const double w2 = std::sin(tick / 30.0 + 1.2);
+    const double w3 = std::sin(tick / 40.0 + 2.4);
+    const double w4 = std::sin(tick / 9.0 + 0.7);
+    const double cpuPct = std::clamp(30.0 + 42.0 * w1 + 6.0 * w4, 2.0, 97.0);
+    const double rssMb = 612.0 + 55.0 * w2 + 12.0 * w4;
+    const double hostCpuPct = std::clamp(26.0 + 34.0 * w2 + 7.0 * w4, 3.0, 95.0);
+    const double memAvailGb = 13.1 + 1.8 * w3;
+    const double load1 = std::clamp(1.1 + 1.3 * w3 + 0.3 * w4, 0.1, 6.0);
+    const double rx = 412000.0 * (0.4 + 0.85 * std::abs(w2) + 0.5 * std::abs(w4));
+    const double tx = 118000.0 * (0.5 + 0.9 * std::abs(w1));
+
     DisplaySnapshot s;
     s.appName = QStringLiteral("cursor");
     s.pid = QStringLiteral("2092707");
-    s.cpu = QStringLiteral("12.4%");
-    s.memory = QStringLiteral("612 MB");
+    s.cpu = QStringLiteral("%1%").arg(cpuPct, 0, 'f', 1);
+    s.memory = QStringLiteral("%1 MB").arg(rssMb, 0, 'f', 0);
     s.status = QStringLiteral("OK");
-    s.cpuPercent = 12.4;
+    s.cpuPercent = cpuPct;
     s.cpuValid = true;
-    s.rssKb = 612 * 1024ULL;
+    s.rssKb = static_cast<qulonglong>(rssMb * 1024.0);
     s.hostAvailable = true;
-    s.hostCpuPercent = 34.7;
+    s.hostCpuPercent = hostCpuPct;
     s.hostMemTotalKb = 16777216;
-    s.hostMemAvailableKb = 13148160;
-    s.hostLoad1 = 1.45;
-    s.hostNetRxPerSec = 412000.0;
-    s.hostNetTxPerSec = 118000.0;
+    s.hostMemAvailableKb = static_cast<qulonglong>(memAvailGb * 1024.0 * 1024.0);
+    s.hostLoad1 = load1;
+    s.hostNetRxPerSec = rx;
+    s.hostNetTxPerSec = tx;
     s.hostDiskTotalBytes = 512ULL * 1024ULL * 1024ULL * 1024ULL;
     s.hostDiskFreeBytes = 214ULL * 1024ULL * 1024ULL * 1024ULL;
 
@@ -82,12 +95,12 @@ DisplaySnapshot demoSnapshot() {
     disk.name = QStringLiteral("nvme0n1");
     disk.readPerSec = 12.0;
     disk.writePerSec = 45.0;
-    disk.readKbPerSec = 480.0;
-    disk.writeKbPerSec = 1200.0;
+    disk.readKbPerSec = 480.0 * (0.5 + 0.9 * std::abs(w3));
+    disk.writeKbPerSec = 1200.0 * (0.4 + 0.95 * std::abs(w1));
     disk.readAwaitMs = 1.4;
     disk.writeAwaitMs = 2.1;
     disk.aquSz = 0.3;
-    disk.utilPercent = 18.0;
+    disk.utilPercent = std::clamp(18.0 + 55.0 * std::abs(w1), 0.0, 99.0);
     s.disks = {disk};
     s.disksAvailable = true;
 
@@ -104,7 +117,7 @@ int main(int argc, char *argv[]) {
 
     if (!panelMode) {
         HudWindow hud;
-        hud.setSnapshot(demoSnapshot());
+        hud.setSnapshot(demoSnapshot(0));
         hud.show();
         app.processEvents();
         const QString out = argc > 1 ? QString::fromUtf8(argv[1])
@@ -116,8 +129,15 @@ int main(int argc, char *argv[]) {
     }
 
     DashboardPanel panel;
-    const DisplaySnapshot snap = demoSnapshot();
-    panel.setSnapshot(snap);
+    {
+        // 240 synthetic ticks: fills the chart rings so the panels show
+        // plausible series instead of two-point stubs.
+        for (int i = 0; i < 240; ++i) {
+            panel.setSnapshot(demoSnapshot(i));
+            app.processEvents();
+        }
+        panel.setSnapshot(demoSnapshot(240));
+    }
 
     DockerSnapshot docker;
     docker.state = DockerState::Ok;

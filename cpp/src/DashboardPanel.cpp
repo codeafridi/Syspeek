@@ -7,10 +7,12 @@
 #include "MemoryFormat.h"
 #include "SensitiveStatus.h"
 #include "Sparkline.h"
+#include "TimeseriesChart.h"
 
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
+#include <QDateTime>
 #include <QFont>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -19,10 +21,13 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace {
 
@@ -106,6 +111,74 @@ QFrame *makeStatCard(const QString &caption, QWidget *content, QWidget *parent) 
     return card;
 }
 
+// Datadog KPI tile (img3/img4): small caption, huge bold value, delta
+// line under the value. Value keeps its existing objectName so external
+// assertions keep working.
+QFrame *makeTile(const QString &caption, QLabel *value,
+                 QLabel **deltaOut, QWidget *parent) {
+    auto *card = new QFrame(parent);
+    card->setObjectName(QStringLiteral("ddTile"));
+    value->setObjectName(value->objectName().isEmpty()
+                             ? QStringLiteral("ddTileValue")
+                             : value->objectName());
+    value->setFont(monoFont(30, true));
+    value->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    auto *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(16, 10, 16, 10);
+    layout->setSpacing(4);
+    auto *captionLabel = makeTitle(caption, card);
+    captionLabel->setFixedHeight(13);
+    layout->addWidget(captionLabel);
+    layout->addWidget(value, 1);
+    if (deltaOut != nullptr) {
+        auto *delta = new QLabel(QStringLiteral("--"), card);
+        delta->setObjectName(QStringLiteral("ddDelta"));
+        delta->setFont(monoFont(9));
+        layout->addWidget(delta);
+        *deltaOut = delta;
+    }
+    return card;
+}
+
+// Chart panel (img1/img2): bold white title row + expanding plot area.
+QFrame *makeChartCard(const QString &title, QWidget *plot, QWidget *parent) {
+    auto *card = new QFrame(parent);
+    card->setObjectName(QStringLiteral("ddCard"));
+    card->setMinimumHeight(168);
+    auto *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(14, 10, 10, 6);
+    layout->setSpacing(2);
+    auto *titleLabel = new QLabel(title, card);
+    titleLabel->setObjectName(QStringLiteral("ddChartTitle"));
+    titleLabel->setFont(monoFont(12, true));
+    layout->addWidget(titleLabel);
+    layout->addWidget(plot, 1);
+    return card;
+}
+
+// Section banner (img4): centered white label on a full-width color
+// strip with a chevron at the left edge.
+QWidget *makeBanner(const QString &title, const QString &color,
+                    QWidget *parent) {
+    auto *strip = new QFrame(parent);
+    strip->setObjectName(QStringLiteral("ddBanner"));
+    strip->setStyleSheet(
+        QStringLiteral("#ddBanner { background-color: %1; border-radius: 0;"
+                       " }")
+            .arg(color));
+    auto *layout = new QHBoxLayout(strip);
+    layout->setContentsMargins(10, 0, 10, 0);
+    auto *label = new QLabel(title, strip);
+    label->setFont(monoFont(11, true));
+    label->setStyleSheet(QStringLiteral("color: #ffffff;"));
+    label->setAlignment(Qt::AlignCenter);
+    layout->addStretch(1);
+    layout->addWidget(label);
+    layout->addStretch(1);
+    strip->setFixedHeight(26);
+    return strip;
+}
+
 } // namespace
 
 QString DashboardPanel::unsupportedOsText() const {
@@ -159,13 +232,40 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     connect(collapse, &QPushButton::clicked, this,
             &DashboardPanel::collapseRequested);
 
+    m_timeChip = new QLabel(QStringLiteral("Past 2 s"), topbar);
+    m_timeChip->setObjectName(QStringLiteral("ddTimechip"));
+    m_timeChip->setFont(monoFont(9));
+
+    m_pause = new QPushButton(QStringLiteral("PAUSE"), topbar);
+    m_pause->setObjectName(QStringLiteral("ddPause"));
+    m_pause->setCursor(Qt::PointingHandCursor);
+    m_pause->setFocusPolicy(Qt::NoFocus);
+    connect(m_pause, &QPushButton::clicked, this, [this] {
+        m_chartsPaused = !m_chartsPaused;
+        if (m_pause != nullptr) {
+            m_pause->setText(m_chartsPaused ? QStringLiteral("RESUME")
+                                            : QStringLiteral("PAUSE"));
+        }
+        for (TimeseriesChart *chart : {m_chartCpu, m_chartMem, m_chartProc,
+                                       m_chartHostCpu, m_chartHostMem,
+                                       m_chartLoad, m_chartNet, m_chartDisk,
+                                       m_chartDiskUtil}) {
+            if (chart != nullptr) {
+                chart->setPaused(m_chartsPaused);
+            }
+        }
+    });
+
     topLayout->addWidget(chip);
     topLayout->addSpacing(4);
     topLayout->addWidget(m_appValue);
     topLayout->addWidget(m_pidValue);
     topLayout->addStretch(1);
-    topLayout->addWidget(m_statusValue);
+    topLayout->addWidget(m_timeChip);
+    topLayout->addSpacing(4);
+    topLayout->addWidget(m_pause);
     topLayout->addWidget(collapse);
+    topLayout->addWidget(m_statusValue);
     root->addWidget(topbar);
 
     auto *body = new QWidget(this);
@@ -232,6 +332,20 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     bodyLayout->addWidget(m_views, 1);
     root->addWidget(body, 1);
 
+    auto *footer = new QFrame(this);
+    footer->setObjectName(QStringLiteral("ddFooter"));
+    auto *footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(16, 3, 16, 3);
+    m_footer = new QLabel(
+        QStringLiteral("syspeek · local collection only · no telemetry · "
+                       "◦ All Systems Operational"),
+        footer);
+    m_footer->setObjectName(QStringLiteral("ddFooterText"));
+    m_footer->setFont(monoFont(9));
+    m_footer->setAlignment(Qt::AlignCenter);
+    footerLayout->addWidget(m_footer, 1);
+    root->addWidget(footer);
+
     setStyleSheet(QStringLiteral(
         "#ddRoot { background-color: %BG%; }"
         "#ddTopbar { background-color: %RAISED%; border-bottom: 1px solid %BORDER%; }"
@@ -245,7 +359,19 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "  border: 1px solid %BORDER%; border-radius: 2px; padding: 4px 12px;"
         "  font-size: 9px; }"
         "#ddCollapse:hover { color: %TEXT%; border-color: %MUTED%; }"
-        "#ddRail { background-color: %BG%; border: none;"
+        "#ddPause { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 4px 12px;"
+        "  font-size: 9px; }"
+        "#ddPause:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddTimechip { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 4px 10px; }"
+        "#ddTile { background-color: %SURFACE%; border-radius: 3px; }"
+        "#ddDelta { color: %DIM%; }"
+        "#ddChartTitle { color: %TEXT%; font-size: 12px; font-weight: 600; }"
+        "#ddBanner { border-radius: 0; }"
+        "#ddFooter { background-color: %BG%;"
+        "  border-top: 1px solid %BORDER%; }"
+        "#ddRail { background-color: %RAIL%; border: none;"
         "  border-right: 1px solid %BORDER%; color: %DIM%; outline: none;"
         "  font-size: 11px; }"
         "#ddRail::item { padding: 7px 14px; border-left: 3px solid transparent; }"
@@ -338,6 +464,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " { width: 0; }"
         "QPushButton { background-color: transparent; }")
         .replace(QStringLiteral("%BG%"), ui_theme::bg())
+        .replace(QStringLiteral("%RAIL%"), ui_theme::rail())
         .replace(QStringLiteral("%RAISED%"), ui_theme::raised())
         .replace(QStringLiteral("%BORDER%"), ui_theme::border())
         .replace(QStringLiteral("%HOVER%"), ui_theme::hover())
@@ -351,50 +478,117 @@ DashboardPanel::DashboardPanel(QWidget *parent)
 
 QWidget *DashboardPanel::buildOverviewView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
+    // --- KPI tile row (img3/img4 style): caption, huge value, delta.
     m_cpuValue = new QLabel(QStringLiteral("--"), view);
     m_cpuValue->setObjectName(QStringLiteral("ddCpu"));
-    m_cpuValue->setFont(monoFont(18, true));
     m_memValue = new QLabel(QStringLiteral("--"), view);
     m_memValue->setObjectName(QStringLiteral("ddMem"));
-    m_memValue->setFont(monoFont(18, true));
     m_procCount = new QLabel(QStringLiteral("0"), view);
     m_procCount->setObjectName(QStringLiteral("ddProcCount"));
-    m_procCount->setFont(monoFont(18, true));
     m_statusBig = new QLabel(QStringLiteral("IDLE"), view);
     m_statusBig->setObjectName(QStringLiteral("ddStatusBig"));
-    m_statusBig->setFont(monoFont(18, true));
 
-    m_cpuSpark = new Sparkline(view);
-    m_cpuSpark->setObjectName(QStringLiteral("ddCpuSpark"));
-    m_memSpark = new Sparkline(view);
-    m_memSpark->setObjectName(QStringLiteral("ddMemSpark"));
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    auto *cpuTile = makeTile(QStringLiteral("CPU"), m_cpuValue,
+                             &m_deltaCpu, view);
+    auto *memTile = makeTile(QStringLiteral("MEMORY (RSS)"), m_memValue,
+                             &m_deltaMem, view);
+    auto *procTile = makeTile(QStringLiteral("PROCESSES"), m_procCount,
+                              &m_deltaProc, view);
+    auto *statusTile = makeTile(QStringLiteral("STATUS"), m_statusBig,
+                                nullptr, view);
+    tiles->addWidget(cpuTile, 1);
+    tiles->addWidget(memTile, 1);
+    tiles->addWidget(procTile, 1);
+    tiles->addWidget(statusTile, 1);
+    layout->addLayout(tiles);
 
-    auto *cpuContent = new QWidget(view);
-    auto *cpuLayout = new QVBoxLayout(cpuContent);
-    cpuLayout->setContentsMargins(0, 0, 0, 0);
-    cpuLayout->setSpacing(4);
-    cpuLayout->addWidget(m_cpuValue);
-    cpuLayout->addWidget(m_cpuSpark);
+    // --- Chart panels in the DD three-across grid (img1/img2).
+    m_chartCpu = new TimeseriesChart(view);
+    m_chartCpu->setUnit(QStringLiteral("Percent"));
+    m_chartCpu->setSeriesName(QStringLiteral("syspeek.cpu.percent"));
+    m_chartMem = new TimeseriesChart(view);
+    m_chartMem->setUnit(QStringLiteral("Megabytes"));
+    m_chartMem->setSeriesName(QStringLiteral("syspeek.mem.rss"));
+    m_chartProc = new TimeseriesChart(view);
+    m_chartProc->setUnit(QStringLiteral("Processes"));
+    m_chartProc->setSeriesName(QStringLiteral("syspeek.process.count"));
+    m_chartProc->setBarMode(true);
 
-    auto *memContent = new QWidget(view);
-    auto *memLayout = new QVBoxLayout(memContent);
-    memLayout->setContentsMargins(0, 0, 0, 0);
-    memLayout->setSpacing(4);
-    memLayout->addWidget(m_memValue);
-    memLayout->addWidget(m_memSpark);
+    layout->addWidget(makeBanner(QStringLiteral("FOCUSED APP"),
+        ui_theme::accent(), view));
+    auto *focusRow = new QHBoxLayout();
+    focusRow->setSpacing(10);
+    focusRow->addWidget(
+        makeChartCard(QStringLiteral("CPU (%)"), m_chartCpu, view), 1);
+    focusRow->addWidget(
+        makeChartCard(QStringLiteral("Memory (RSS, MB)"), m_chartMem, view), 1);
+    focusRow->addWidget(
+        makeChartCard(QStringLiteral("Process count"), m_chartProc, view), 1);
+    layout->addLayout(focusRow);
 
-    auto *stats = new QHBoxLayout();
-    stats->setSpacing(14);
-    stats->addWidget(makeStatCard(QStringLiteral("CPU"), cpuContent, view), 1);
-    stats->addWidget(makeStatCard(QStringLiteral("MEMORY (RSS)"), memContent, view), 1);
-    stats->addWidget(makeStatCard(QStringLiteral("PROCESSES"), m_procCount, view), 1);
-    stats->addWidget(makeStatCard(QStringLiteral("STATUS"), m_statusBig, view), 1);
-    layout->addLayout(stats);
+    m_chartHostCpu = new TimeseriesChart(view);
+    m_chartHostCpu->setUnit(QStringLiteral("Percent"));
+    m_chartHostCpu->setSeriesName(QStringLiteral("system.cpu.idle(*)"));
+    m_chartHostMem = new TimeseriesChart(view);
+    m_chartHostMem->setUnit(QStringLiteral("Gigabytes"));
+    m_chartHostMem->setSeriesName(QStringLiteral("system.mem.available"));
+    m_chartLoad = new TimeseriesChart(view);
+    m_chartLoad->setUnit(QStringLiteral("Load"));
+    m_chartLoad->setSeriesName(QStringLiteral("system.load.1"));
+    m_chartLoad->setBarMode(true);
 
+    layout->addWidget(makeBanner(QStringLiteral("HOST"),
+        ui_theme::banner(), view));
+    auto *hostRow = new QHBoxLayout();
+    hostRow->setSpacing(10);
+    hostRow->addWidget(
+        makeChartCard(QStringLiteral("Host CPU (%)"), m_chartHostCpu, view),
+        1);
+    hostRow->addWidget(
+        makeChartCard(QStringLiteral("Memory available (GB)"),
+                      m_chartHostMem, view),
+        1);
+    hostRow->addWidget(
+        makeChartCard(QStringLiteral("Load (1m)"), m_chartLoad, view), 1);
+    layout->addLayout(hostRow);
+
+    m_chartNet = new TimeseriesChart(view);
+    m_chartNet->setUnit(QStringLiteral("Kilobytes/second"));
+    m_chartNet->setSeriesName(QStringLiteral("system.net.rx"));
+    m_chartNet->setSeriesNameB(QStringLiteral("system.net.tx"));
+    m_chartDisk = new TimeseriesChart(view);
+    m_chartDisk->setUnit(QStringLiteral("Kilobytes/second"));
+    m_chartDisk->setSeriesName(QStringLiteral("system.disk.read"));
+    m_chartDisk->setSeriesNameB(QStringLiteral("system.disk.write"));
+    m_chartDiskUtil = new TimeseriesChart(view);
+    m_chartDiskUtil->setUnit(QStringLiteral("Percent"));
+    m_chartDiskUtil->setSeriesName(QStringLiteral("system.disk.util"));
+
+    layout->addWidget(makeBanner(QStringLiteral("I/O & NETWORK"),
+        ui_theme::warn(), view));
+    auto *ioRow = new QHBoxLayout();
+    ioRow->setSpacing(10);
+    ioRow->addWidget(
+        makeChartCard(QStringLiteral("Network (kB/s)"), m_chartNet, view), 1);
+    ioRow->addWidget(
+        makeChartCard(QStringLiteral("Disk read/write (kB/s)"), m_chartDisk,
+                      view),
+        1);
+    ioRow->addWidget(
+        makeChartCard(QStringLiteral("Disk utilization (%)"),
+                      m_chartDiskUtil, view),
+        1);
+    layout->addLayout(ioRow);
+
+    // --- Text insight cards carried over (Datadog text panels).
     m_hostCpu = new QLabel(QStringLiteral("--"), view);
     m_hostCpu->setObjectName(QStringLiteral("ddHostCpu"));
     m_hostCpu->setFont(monoFont(14, true));
@@ -420,48 +614,155 @@ QWidget *DashboardPanel::buildOverviewView() {
     hostCpuLayout->addWidget(m_hostCpu);
     hostCpuLayout->addWidget(m_hostCpuSpark);
 
-    auto *hostRow = new QHBoxLayout();
-    hostRow->setSpacing(14);
-    hostRow->addWidget(makeStatCard(QStringLiteral("HOST CPU"), hostCpuContent, view), 1);
-    hostRow->addWidget(makeStatCard(QStringLiteral("MEM AVAILABLE"), m_hostMem, view), 1);
-    hostRow->addWidget(makeStatCard(QStringLiteral("DISK FREE"), m_hostDisk, view), 1);
-    hostRow->addWidget(makeStatCard(QStringLiteral("NET rx / tx"), m_hostNet, view), 1);
-    hostRow->addWidget(makeStatCard(QStringLiteral("LOAD 1m"), m_hostLoad, view), 1);
-    layout->addLayout(hostRow);
+    // Compact KPI line row (values the tests pin by objectName).
+    auto *kpiRow = new QHBoxLayout();
+    kpiRow->setSpacing(10);
+    kpiRow->addWidget(makeStatCard(QStringLiteral("HOST CPU"),
+                                   hostCpuContent, view), 1);
+    kpiRow->addWidget(makeStatCard(QStringLiteral("MEM AVAILABLE"),
+                                   m_hostMem, view), 1);
+    kpiRow->addWidget(makeStatCard(QStringLiteral("DISK FREE"), m_hostDisk,
+                                   view),
+                      1);
+    kpiRow->addWidget(makeStatCard(QStringLiteral("NET rx / tx"), m_hostNet,
+                                   view),
+                      1);
+    kpiRow->addWidget(makeStatCard(QStringLiteral("LOAD 1m"), m_hostLoad,
+                                   view),
+                      1);
+    layout->addLayout(kpiRow);
 
+    // Watchdog analytic section: two-across grid + insights card.
     m_watchdog = new QLabel(QStringLiteral("--"), view);
     m_watchdog->setObjectName(QStringLiteral("ddWatchdog"));
     m_watchdog->setFont(monoFont(10));
     m_watchdog->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("WATCHDOG (anomaly detection)"), m_watchdog, view), 1);
-
     m_runtime = new QLabel(QStringLiteral("--"), view);
     m_runtime->setObjectName(QStringLiteral("ddRuntime"));
     m_runtime->setFont(monoFont(10));
     m_runtime->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("RUNTIME (SSI)"), m_runtime, view), 1);
-
     m_forecast = new QLabel(QStringLiteral("--"), view);
     m_forecast->setObjectName(QStringLiteral("ddForecast"));
     m_forecast->setFont(monoFont(10));
     m_forecast->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("FORECAST (predictive)"), m_forecast, view), 1);
-
     m_insights = new QLabel(QStringLiteral("--"), view);
     m_insights->setObjectName(QStringLiteral("ddInsights"));
     m_insights->setFont(monoFont(10));
     m_insights->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("WATCHDOG INSIGHTS"), m_insights, view), 1);
+
+    auto *insightGrid = new QGridLayout();
+    insightGrid->setSpacing(10);
+    insightGrid->addWidget(
+        makeCard(QStringLiteral("WATCHDOG (anomaly detection)"), m_watchdog,
+                 view),
+        0, 0);
+    insightGrid->addWidget(
+        makeCard(QStringLiteral("RUNTIME (SSI)"), m_runtime, view), 0, 1);
+    insightGrid->addWidget(
+        makeCard(QStringLiteral("FORECAST (predictive)"), m_forecast, view),
+        1, 0);
+    insightGrid->addWidget(
+        makeCard(QStringLiteral("WATCHDOG INSIGHTS"), m_insights, view), 1, 1);
+    layout->addLayout(insightGrid, 2);
+
+    // The overview must fit the viewport width: explicit minimums let
+    // long mono lines clip instead of widening the scroll content.
+    for (QLabel *label : {m_hostCpu, m_hostMem, m_hostDisk, m_hostNet,
+                          m_hostLoad, m_watchdog, m_runtime, m_forecast,
+                          m_insights}) {
+        label->setMinimumSize(1, 1);
+    }
+
     layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral("#ddScrollContent { background-color: %1; }")
+        .arg(ui_theme::bg()));
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
-QWidget *DashboardPanel::buildMetricsView() {
-    auto *view = new QWidget(this);
+void DashboardPanel::updateOverviewText(const DisplaySnapshot &snapshot) {
+    auto delta = [this](QLabel *label, const MetricStore &store,
+                        bool upIsBad) {
+        if (label == nullptr) {
+            return;
+        }
+        if (store.size() < 2 || qFuzzyIsNull(store.values().constFirst())) {
+            label->setText(QStringLiteral("--"));
+            return;
+        }
+        const double first = store.values().constFirst();
+        const double last = store.values().constLast();
+        const double pct = (last - first) / qAbs(first) * 100.0;
+        const int minutes = std::max(1, static_cast<int>(std::lround(
+            (store.size() - 1) * m_cadenceMs / 60000.0)));        const QChar arrow = pct >= 0 ? u'\u2191' : u'\u2193';
+        const QColor color = pct >= 0
+            ? (upIsBad ? QColor(ui_theme::crit()) : QColor(ui_theme::warn()))
+            : QColor(ui_theme::ok());
+        label->setStyleSheet(QStringLiteral("color: %1;").arg(color.name()));
+        label->setText(QStringLiteral("%1 %2%  vs %3 min")
+                           .arg(arrow)
+                           .arg(qAbs(pct), 0, 'f', 1)
+                           .arg(minutes));
+    };
+    delta(m_deltaCpu, m_cpuStore, true);
+    delta(m_deltaMem, m_memStore, false);
+    delta(m_deltaProc, m_procStore, false);
+
+    if (m_cpuValue != nullptr && snapshot.cpuValid) {
+        const QString c =
+            snapshot.cpuPercent >= 90.0
+                ? ui_theme::crit()
+                : (snapshot.cpuPercent >= 78.0 ? ui_theme::warn()
+                                               : ui_theme::text());
+        m_cpuValue->setStyleSheet(
+            QStringLiteral("color: %1;").arg(c));
+    }
+    if (m_statusBig != nullptr) {
+        m_statusBig->setStyleSheet(
+            QStringLiteral("color: %1;").arg(statusColor(snapshot.status)));
+    }
+
+    if (m_timeChip != nullptr && m_cadenceMs > 0.0) {
+        const int samples = static_cast<int>(m_procStore.size());
+        const int minutes = std::max(1, static_cast<int>(std::lround(
+            samples * m_cadenceMs / 60000.0)));
+        m_timeChip->setText(minutes >= 55
+            ? QStringLiteral("Past 1 Hour")
+            : QStringLiteral("Past %1 Min").arg(minutes));
+    }
+
+    if (m_footer != nullptr) {
+        const QString green = QStringLiteral("<span style=\"color:%1\">●</span>")
+            .arg(ui_theme::ok());
+        const QString amber = QStringLiteral("<span style=\"color:%1\">●</span>")
+            .arg(ui_theme::warn());
+        const QString tail = snapshot.hostAvailable
+            ? QStringLiteral("%1 All Systems Operational").arg(green)
+            : (snapshot.hostWarming
+                ? QStringLiteral("%1 Collector warming up").arg(amber)
+                : QStringLiteral("%1 Host data unavailable").arg(amber));
+        m_footer->setText(QStringLiteral(
+                              "syspeek %1 · local collection only · "
+                              "no telemetry · %2")
+                              .arg(QCoreApplication::applicationVersion())
+                              .arg(tail));
+    }
+}
+
+QWidget *DashboardPanel::buildMetricsView() {    auto *view = new QWidget(this);
     auto *layout = new QVBoxLayout(view);
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(12);
@@ -1421,12 +1722,81 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 
     if (snapshot.cpuValid) {
         m_cpuStore.push(snapshot.cpuPercent);
-        m_cpuSpark->setValues(m_cpuStore.values());
+        if (m_cpuSpark != nullptr) {
+            m_cpuSpark->setValues(m_cpuStore.values());
+        }
     }
     if (snapshot.rssKb > 0) {
         m_memStore.push(static_cast<double>(snapshot.rssKb));
-        m_memSpark->setValues(m_memStore.values());
+        if (m_memSpark != nullptr) {
+            m_memSpark->setValues(m_memStore.values());
+        }
     }
+
+    // Datadog-console chart feeds: one ring per metric; the widgets
+    // gate paused pushes themselves. Cadence EWMA drives the time chip
+    // and the delta labels.
+    const qint64 tickMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastTickMs > 0) {
+        const double gap = static_cast<double>(tickMs - m_lastTickMs);
+        if (gap > 10.0 && gap < 60000.0) {
+            m_cadenceMs = (m_cadenceMs <= 0.0)
+                ? gap
+                : (1.0 - 0.15) * m_cadenceMs + 0.15 * gap;
+        }
+    }
+    m_lastTickMs = tickMs;
+
+    m_procStore.push(static_cast<double>(snapshot.processes.size()));
+    if (m_chartProc != nullptr) {
+        m_chartProc->push(static_cast<double>(snapshot.processes.size()));
+    }
+    if (snapshot.cpuValid && m_chartCpu != nullptr) {
+        m_chartCpu->push(snapshot.cpuPercent);
+    }
+    if (snapshot.rssKb > 0 && m_chartMem != nullptr) {
+        m_chartMem->push(snapshot.rssKb / 1024.0);
+    }
+    if (snapshot.disksAvailable) {
+        double readKb = 0.0;
+        double writeKb = 0.0;
+        double utilMax = 0.0;
+        for (const DiskRow &disk : snapshot.disks) {
+            readKb += disk.readKbPerSec;
+            writeKb += disk.writeKbPerSec;
+            utilMax = std::max(utilMax, disk.utilPercent);
+        }
+        m_diskReadStore.push(readKb);
+        m_diskWriteStore.push(writeKb);
+        m_diskUtilStore.push(utilMax);
+        if (m_chartDisk != nullptr) {
+            m_chartDisk->push(readKb);
+            m_chartDisk->pushB(writeKb);
+        }
+        if (m_chartDiskUtil != nullptr) {
+            m_chartDiskUtil->push(utilMax);
+        }
+    }
+    if (snapshot.hostAvailable && !snapshot.hostWarming
+            && m_chartHostCpu != nullptr) {
+        m_chartHostCpu->push(snapshot.hostCpuPercent);
+    }
+    if (snapshot.hostAvailable && m_chartHostMem != nullptr) {
+        m_hostMemStore.push(
+            static_cast<double>(snapshot.hostMemAvailableKb) / (1024.0 * 1024.0));
+        m_chartHostMem->push(
+            static_cast<double>(snapshot.hostMemAvailableKb) / (1024.0 * 1024.0));
+    }
+    if (snapshot.hostAvailable && m_chartLoad != nullptr) {
+        m_loadStore.push(snapshot.hostLoad1);
+        m_chartLoad->push(snapshot.hostLoad1);
+        m_netRxStore.push(snapshot.hostNetRxPerSec / 1024.0);
+        m_netTxStore.push(snapshot.hostNetTxPerSec / 1024.0);
+        m_chartNet->push(snapshot.hostNetRxPerSec / 1024.0);
+        m_chartNet->pushB(snapshot.hostNetTxPerSec / 1024.0);
+    }
+
+    updateOverviewText(snapshot);
 
     m_memDetail->setText(QStringLiteral("RSS      %1\nVirtual  %2\nSwap     %3\nShared   %4")
                              .arg(formatMemoryKb(snapshot.rssKb),
@@ -1563,7 +1933,9 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_hostLoad->setText(QString::number(snapshot.hostLoad1, 'f', 2));
         if (!snapshot.hostWarming) {
             m_hostCpuStore.push(snapshot.hostCpuPercent);
-            m_hostCpuSpark->setValues(m_hostCpuStore.values());
+            if (m_hostCpuSpark != nullptr) {
+                m_hostCpuSpark->setValues(m_hostCpuStore.values());
+            }
         }
     } else {
         for (QLabel *label :

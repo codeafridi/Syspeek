@@ -25,7 +25,9 @@ class QLabel;
 class QListWidget;
 class QStackedWidget;
 class QTreeWidget;
+class QPushButton;
 class Sparkline;
+class TimeseriesChart;
 
 // Data for the Settings view - static shell facts the sampler does not
 // own (version, paths, thresholds from the loaded config, autostart
@@ -72,6 +74,7 @@ signals:
     void collapseRequested();
 
 private:
+    void updateOverviewText(const DisplaySnapshot &snapshot);
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -213,6 +216,33 @@ private:
     MetricStore m_cpuStore{120};
     MetricStore m_memStore{120};
     MetricStore m_hostCpuStore{120};
+
+    TimeseriesChart *m_chartCpu = nullptr;
+    TimeseriesChart *m_chartMem = nullptr;
+    TimeseriesChart *m_chartProc = nullptr;
+    TimeseriesChart *m_chartHostCpu = nullptr;
+    TimeseriesChart *m_chartHostMem = nullptr;
+    TimeseriesChart *m_chartLoad = nullptr;
+    TimeseriesChart *m_chartNet = nullptr;
+    TimeseriesChart *m_chartDisk = nullptr;
+    TimeseriesChart *m_chartDiskUtil = nullptr;
+    MetricStore m_procStore{1800};
+    MetricStore m_hostMemStore{1800};
+    MetricStore m_netRxStore{1800};
+    MetricStore m_netTxStore{1800};
+    MetricStore m_loadStore{1800};
+    MetricStore m_diskReadStore{1800};
+    MetricStore m_diskWriteStore{1800};
+    MetricStore m_diskUtilStore{1800};
+    QLabel *m_deltaCpu = nullptr;
+    QLabel *m_deltaMem = nullptr;
+    QLabel *m_deltaProc = nullptr;
+    QPushButton *m_pause = nullptr;
+    QLabel *m_timeChip = nullptr;
+    QLabel *m_footer = nullptr;
+    bool m_chartsPaused = false;
+    qint64 m_lastTickMs = 0;
+    double m_cadenceMs = 2000.0;
 
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;

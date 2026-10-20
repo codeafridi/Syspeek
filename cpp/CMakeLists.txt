@@ -65,6 +65,7 @@ add_library(syspeek_core STATIC
     src/MetricStore.cpp
     src/MetricStore.h
     src/Sparkline.cpp
+    src/TimeseriesChart.cpp
     src/Sparkline.h
     src/ProcessGrouper.cpp
     src/ProcessGrouper.h
