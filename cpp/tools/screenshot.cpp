@@ -131,8 +131,7 @@ int main(int argc, char *argv[]) {
     }
 
     DashboardPanel panel;
-    {
-        // Synthetic alert lifecycle: quiet -> warning -> +critical ->
+    auto driveHistory = [&app, &panel]() {        // Synthetic alert lifecycle: quiet -> warning -> +critical ->
         // resolve -> clear -> refire, so tiles/chart/timeline all move.
         const qint64 baseMs = QDateTime::currentMSecsSinceEpoch()
                               - 241 * 2000;
@@ -172,13 +171,24 @@ int main(int argc, char *argv[]) {
         }
         panel.setSnapshot(demoSnapshot(240));
         panel.setAlerts(alertsFor(240));
-    }
-
-    // Synthetic DogStatsD receiver history: cumulative counters + a few
-    // series so the Metrics page renders tiles, rate charts and the
-    // explorer table populated. Two parse bursts exercise the red tile.
+        // Alertmanager-style grouping through the real tracker (M35), so
+        // the Incidents page shows grouped folds, re-fires and resolves.
+        IncidentTracker tracker(12500, 20);
+        for (int i = 0; i < 240; ++i) {
+            tracker.update(alertsFor(i), baseMs + i * 2000);
+            panel.setIncidents(tracker.incidents());
+            app.processEvents();
+        }
+        tracker.update(alertsFor(240), baseMs + 240 * 2000);
+        panel.setIncidents(tracker.incidents());
+    };
     StatsdSnapshot statsd;
-    statsd.available = true;
+    auto driveStatsd = [&app, &panel, &statsd]() -> void {
+        // Synthetic DogStatsD receiver history: cumulative counters + a
+        // few series so the Metrics page renders tiles, rate charts and
+        // the explorer table populated. Two parse bursts exercise the
+        // red tile.
+        statsd.available = true;
     auto appendSeries = [&statsd](const char *name, const char *type,
                                   const char *tags, double last, double sum,
                                   double avg, double max, quint64 count,
@@ -239,6 +249,7 @@ int main(int argc, char *argv[]) {
             app.processEvents();
         }
     }
+};
 
     DockerSnapshot docker;
     docker.state = DockerState::Ok;
@@ -325,6 +336,8 @@ int main(int argc, char *argv[]) {
     }
     const QString out = argc > 1 ? QString::fromUtf8(argv[1])
                                  : QStringLiteral("panel.png");
+    driveHistory();
+    driveStatsd();
     const bool ok = panel.grab().save(out);
     std::printf("%s: %s\n", ok ? "saved" : "failed",
                 out.toUtf8().constData());

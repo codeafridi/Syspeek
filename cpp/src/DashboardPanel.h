@@ -283,6 +283,14 @@ private:
     quint64 m_alertsFired = 0;
     quint64 m_alertsResolved = 0;
 
+    // Datadog-style Incidents page (M61d): Alertmanager-grouped tracker
+    // snapshots -> status tiles + grouped list + open-over-time chart.
+    QLabel *m_incOpen = nullptr;
+    QLabel *m_incCrit = nullptr;
+    QLabel *m_incWarn = nullptr;
+    QLabel *m_incResolved = nullptr;
+    TimeseriesChart *m_chartIncOpen = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

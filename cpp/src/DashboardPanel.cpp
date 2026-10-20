@@ -416,7 +416,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCpu, #ddMem, #ddProcCount, #ddStatusBig, #ddHostCpu, #ddHostMem,"
         " #ddHostDisk, #ddHostNet, #ddHostLoad { color: %TEXT%; }"
         "#ddStatMetrics, #ddStatEvents, #ddStatSvc, #ddAlOpen,"
-        " #ddAlResolved { color: %TEXT%; }"
+        " #ddAlResolved, #ddIncOpen, #ddIncResolved { color: %TEXT%; }"
         "#ddMemDetail { color: %DIM%; }"
         "#ddFocusDetail, #ddOpenFiles { color: %DIM%; }"
         "#ddCgroup { color: %DIM%; }"
@@ -444,7 +444,6 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddInsights { color: %MUTED%; }"
         "#ddProfileSummary { color: %DIM%; }"
         "#ddProfileThreads, #ddProfileOffCpu, #ddProfileMemory { color: %MUTED%; }"
-        "#ddIncidentsSummary { color: %DIM%; }"
         "#ddIncidents { color: %MUTED%; }"
         "#ddTlsSummary { color: %DIM%; }"
         "#ddTls { color: %MUTED%; }"
@@ -1005,22 +1004,85 @@ QWidget *DashboardPanel::buildAlertsView() {
 
 QWidget *DashboardPanel::buildIncidentsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
+    // --- Incident-status tile row (Alertmanager-style grouping, M35;
+    // severity vocabulary per the agent strings).
+    m_incOpen = new QLabel(QStringLiteral("0"), view);
+    m_incOpen->setObjectName(QStringLiteral("ddIncOpen"));
+    m_incCrit = new QLabel(QStringLiteral("0"), view);
+    m_incCrit->setObjectName(QStringLiteral("ddIncCrit"));
+    m_incWarn = new QLabel(QStringLiteral("0"), view);
+    m_incWarn->setObjectName(QStringLiteral("ddIncWarn"));
+    m_incResolved = new QLabel(QStringLiteral("0"), view);
+    m_incResolved->setObjectName(QStringLiteral("ddIncResolved"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("OPEN INCIDENTS"),
+                              m_incOpen, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CRITICAL"),
+                              m_incCrit, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WARNINGS"),
+                              m_incWarn, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RESOLVED"),
+                              m_incResolved, nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Active incident list (grouped Alertmanager-style rows).
     m_incidentsSummary = new QLabel(QStringLiteral("--"), view);
     m_incidentsSummary->setObjectName(QStringLiteral("ddIncidentsSummary"));
-    m_incidentsSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("INCIDENTS"), m_incidentsSummary, view));
+    m_incidentsSummary->setFont(monoFont(11));
+    m_incidentsSummary->setTextFormat(Qt::RichText);
+    m_incidentsSummary->setWordWrap(false);
+
+    layout->addWidget(makeBanner(QStringLiteral("OPEN INCIDENTS"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("GROUPED BY ALERT"),
+                               m_incidentsSummary, view), 2);
+
+    // --- Open-incident count per tick (Syspeek-own history counter).
+    m_chartIncOpen = new TimeseriesChart(view);
+    m_chartIncOpen->setUnit(QStringLiteral("Incidents"));
+    m_chartIncOpen->setSeriesName(QStringLiteral("syspeek.incidents.open"));
+
+    layout->addWidget(makeBanner(QStringLiteral("OPEN OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("Open incidents"),
+                                    m_chartIncOpen, view));
 
     m_incidents = new QLabel(QStringLiteral("no incidents"), view);
     m_incidents->setObjectName(QStringLiteral("ddIncidents"));
     m_incidents->setFont(monoFont(10));
     m_incidents->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("TIMELINE"), m_incidents, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("HISTORY"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("TRACKER SNAPSHOTS"),
+                               m_incidents, view), 1);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_incidentsSummary->setMinimumWidth(1);
+    m_incidents->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2606,7 +2668,83 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
 }
 
 void DashboardPanel::setIncidents(const QList<Incident> &incidents) {
-    m_incidentsSummary->setText(incidentsSummaryText(incidents));
+    // Tile counts off the grouped tracker snapshot.
+    int open = 0;
+    int crit = 0;
+    int warn = 0;
+    int resolved = 0;
+    for (const Incident &incident : incidents) {
+        if (incident.status != QStringLiteral("open")) {
+            ++resolved;
+            continue;
+        }
+        ++open;
+        if (incident.severity.compare(QLatin1String("critical"),
+                                      Qt::CaseInsensitive) == 0
+            || incident.severity.compare(QLatin1String("high"),
+                                         Qt::CaseInsensitive) == 0) {
+            ++crit;
+        } else {
+            ++warn;
+        }
+    }
+    m_incOpen->setText(QString::number(open));
+    m_incCrit->setText(QString::number(crit));
+    m_incWarn->setText(QString::number(warn));
+    m_incResolved->setText(QString::number(resolved));
+    m_incCrit->setStyleSheet(
+        crit > 0 ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                 : QStringLiteral("color: %1;").arg(ui_theme::text()));
+    m_incWarn->setStyleSheet(
+        warn > 0 ? QStringLiteral("color: %1;").arg(ui_theme::warn())
+                 : QStringLiteral("color: %1;").arg(ui_theme::text()));
+
+    if (m_chartIncOpen != nullptr) {
+        m_chartIncOpen->push(static_cast<double>(open));
+    }
+
+    // Grouped active list (Alertmanager-style fold-by-key rows).
+    if (open == 0) {
+        m_incidentsSummary->setStyleSheet(
+            QStringLiteral("color: %1;").arg(ui_theme::dim()));
+        m_incidentsSummary->setText(QStringLiteral("no open incidents"));
+        m_incidents->setText(incidentsDetailText(incidents));
+        return;
+    }
+    m_incidentsSummary->setStyleSheet(QStringLiteral(""));
+    QString text;
+    int rows = 0;
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    for (const Incident &incident : incidents) {
+        if (incident.status != QStringLiteral("open") || rows++ >= 14) {
+            continue;
+        }
+        const QString sev = incident.severity.toUpper();
+        const qint64 ageMs = incident.openedAt > 0
+            ? qMax<qint64>(0, nowMs - incident.openedAt)
+            : -1;
+        const QString age = ageMs < 0
+            ? QString()
+            : (ageMs >= 3600000
+                ? QStringLiteral("%1h").arg(ageMs / 3600000)
+                : QStringLiteral("%1m").arg(ageMs / 60000));
+        text += QStringLiteral(
+            "<span style=\"color:%1;\">[OPEN]</span>"
+            "&nbsp;&nbsp;<span style=\"color:%2;\">[%3]</span>"
+            "&nbsp;%4&nbsp;&nbsp;x%5")
+            .arg(ui_theme::accent(),
+                 ui_theme::statusColor(sev),
+                 sev,
+                 incident.title)
+            .arg(incident.count)
+            + (age.isEmpty()
+                   ? QString()
+                   : QStringLiteral("&nbsp;&middot;&nbsp;&nbsp;%1").arg(age))
+            + QStringLiteral("<br/>");
+    }
+    m_incidentsSummary->setText(text.trimmed());
+    // Bounded history (grouped rows incl. resolved snapshots) keeps the
+    // Alertmanager-grid formatting from M35.
     m_incidents->setText(incidentsDetailText(incidents));
 }
 
