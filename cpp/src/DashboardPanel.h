@@ -270,6 +270,19 @@ private:
     QLabel *m_deltaErr = nullptr;
     QTreeWidget *m_statsdSeriesTree = nullptr;
 
+    // Datadog-style Alerts page (M61c): monitor-status tiles + fired/
+    // resolved transition chart + panel-side event timeline. A seen-id
+    // diff produces real transitions from the per-tick active list.
+    QLabel *m_alOpen = nullptr;
+    QLabel *m_alCrit = nullptr;
+    QLabel *m_alWarn = nullptr;
+    QLabel *m_alResolved = nullptr;
+    TimeseriesChart *m_chartAlertTrans = nullptr;
+    QLabel *m_alertTimeline = nullptr;
+    QSet<QString> m_alertSeen;
+    quint64 m_alertsFired = 0;
+    quint64 m_alertsResolved = 0;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

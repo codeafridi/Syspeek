@@ -132,13 +132,46 @@ int main(int argc, char *argv[]) {
 
     DashboardPanel panel;
     {
+        // Synthetic alert lifecycle: quiet -> warning -> +critical ->
+        // resolve -> clear -> refire, so tiles/chart/timeline all move.
+        const qint64 baseMs = QDateTime::currentMSecsSinceEpoch()
+                              - 241 * 2000;
+        auto alertsFor = [baseMs](int tick) {
+            QList<Alert> list;
+            auto add = [&](const QString &id, const QString &title,
+                           const QString &detail, const QString &sev,
+                           double value) {
+                Alert alert;
+                alert.id = id;
+                alert.title = title;
+                alert.detail = detail;
+                alert.severity = sev;
+                alert.value = value;
+                alert.atMs = baseMs + tick * 2000;
+                list.append(alert);
+            };
+            if (tick >= 30 && !(tick >= 170 && tick < 190)) {
+                add(QStringLiteral("a-mem"),
+                    QStringLiteral("app memory"),
+                    QStringLiteral("rss 612 MB (limit 512)"),
+                    QStringLiteral("warn"), 612.0);
+            }
+            if (tick >= 100 && !(tick >= 140 && tick < 190)) {
+                add(QStringLiteral("a-cpu"), QStringLiteral("host cpu"),
+                    QStringLiteral("94.2% (threshold 90)"),
+                    QStringLiteral("high"), 94.2);
+            }
+            return list;
+        };
         // 240 synthetic ticks: fills the chart rings so the panels show
         // plausible series instead of two-point stubs.
         for (int i = 0; i < 240; ++i) {
             panel.setSnapshot(demoSnapshot(i));
+            panel.setAlerts(alertsFor(i));
             app.processEvents();
         }
         panel.setSnapshot(demoSnapshot(240));
+        panel.setAlerts(alertsFor(240));
     }
 
     // Synthetic DogStatsD receiver history: cumulative counters + a few

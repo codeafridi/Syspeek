@@ -415,6 +415,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCardTitle { color: %MUTED%; font-size: 9px; }"
         "#ddCpu, #ddMem, #ddProcCount, #ddStatusBig, #ddHostCpu, #ddHostMem,"
         " #ddHostDisk, #ddHostNet, #ddHostLoad { color: %TEXT%; }"
+        "#ddStatMetrics, #ddStatEvents, #ddStatSvc, #ddAlOpen,"
+        " #ddAlResolved { color: %TEXT%; }"
         "#ddMemDetail { color: %DIM%; }"
         "#ddFocusDetail, #ddOpenFiles { color: %DIM%; }"
         "#ddCgroup { color: %DIM%; }"
@@ -914,13 +916,90 @@ QWidget *DashboardPanel::buildSloView() {
 
 QWidget *DashboardPanel::buildAlertsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Monitor-status tile row (status:critical / status:warning
+    // vocabulary from the Datadog agent monitor telemetry).
+    m_alOpen = new QLabel(QStringLiteral("0"), view);
+    m_alOpen->setObjectName(QStringLiteral("ddAlOpen"));
+    m_alCrit = new QLabel(QStringLiteral("0"), view);
+    m_alCrit->setObjectName(QStringLiteral("ddAlCrit"));
+    m_alWarn = new QLabel(QStringLiteral("0"), view);
+    m_alWarn->setObjectName(QStringLiteral("ddAlWarn"));
+    m_alResolved = new QLabel(QStringLiteral("0"), view);
+    m_alResolved->setObjectName(QStringLiteral("ddAlResolved"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("OPEN ALERTS"),
+                              m_alOpen, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CRITICAL"),
+                              m_alCrit, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WARNINGS"),
+                              m_alWarn, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RESOLVED"),
+                              m_alResolved, nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Active monitor list (severity chips stay rich-text colored;
+    // the M60 #ddAlerts QSS rule removal keeps spans colorized).
     m_alerts = new QLabel(QStringLiteral("no active alerts"), view);
     m_alerts->setObjectName(QStringLiteral("ddAlerts"));
     m_alerts->setFont(monoFont(11));
     m_alerts->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("ACTIVE ALERTS"), m_alerts, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("ACTIVE ALERTS"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("MONITOR STATUS"),
+                               m_alerts, view), 2);
+
+    // --- Transition telemetry (ours; counter names in the agent family
+    // monitor_id / datadogmonitors / notifications_sent).
+    m_chartAlertTrans = new TimeseriesChart(view);
+    m_chartAlertTrans->setUnit(QStringLiteral("Transitions"));
+    m_chartAlertTrans->setSeriesName(QStringLiteral("syspeek.alerts.fired"));
+    m_chartAlertTrans->setSeriesNameB(QStringLiteral("syspeek.alerts.resolved"));
+    m_chartAlertTrans->setBarMode(true);
+
+    layout->addWidget(makeBanner(QStringLiteral("TRANSITIONS"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("Alerts fired & resolved"),
+                                    m_chartAlertTrans, view));
+
+    // --- Panel-side event timeline (fired/resolved marks with timestamps).
+    m_alertTimeline = new QLabel(QStringLiteral("--"), view);
+    m_alertTimeline->setObjectName(QStringLiteral("ddAlertTimeline"));
+    m_alertTimeline->setFont(monoFont(10));
+    m_alertTimeline->setTextFormat(Qt::RichText);
+    m_alertTimeline->setWordWrap(false);
+
+    layout->addWidget(makeBanner(QStringLiteral("TIMELINE"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("EVENT HISTORY"),
+                               m_alertTimeline, view), 1);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_alerts->setMinimumWidth(1);
+    m_alertTimeline->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2398,10 +2477,117 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
 }
 
 void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
+    // Monitor-status tile counts (gridded per DD status vocabulary:
+    // status:critical / status:warning / status:ok live in the agent).
+    int crit = 0;
+    int warn = 0;
+    QSet<QString> nowSeen;
+    for (const Alert &alert : alerts) {
+        const QString key = alert.id.isEmpty()
+            ? QStringLiteral("%1/%2").arg(alert.title, alert.severity)
+            : alert.id;
+        nowSeen.insert(key);
+        if (alert.severity.compare(QLatin1String("critical"),
+                                   Qt::CaseInsensitive) == 0
+            || alert.severity.compare(QLatin1String("high"),
+                                      Qt::CaseInsensitive) == 0) {
+            ++crit;
+        } else {
+            ++warn;
+        }
+    }
+    m_alOpen->setText(QString::number(alerts.size()));
+    m_alCrit->setText(QString::number(crit));
+    m_alWarn->setText(QString::number(warn));
+    m_alCrit->setStyleSheet(
+        crit > 0 ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                 : QStringLiteral("color: %1;").arg(ui_theme::text()));
+    m_alWarn->setStyleSheet(
+        warn > 0 ? QStringLiteral("color: %1;").arg(ui_theme::warn())
+                 : QStringLiteral("color: %1;").arg(ui_theme::text()));
+
+    // Seen-id diff -> transitions. Appeared alerts count as fired; ids
+    // that dropped from the active list count as resolved (AlertEngine
+    // maintains active; each call here is one cadence tick).
+    const QSet<QString> appeared = nowSeen - m_alertSeen;
+    const QSet<QString> vanished = m_alertSeen - nowSeen;
+    m_alertSeen = nowSeen;
+    const int fired = appeared.size();
+    const int resolved = vanished.size();
+    m_alertsFired += static_cast<quint64>(fired);
+    m_alertsResolved += static_cast<quint64>(resolved);
+    m_alResolved->setText(QString::number(m_alertsResolved));
+
+    if (m_chartAlertTrans != nullptr) {
+        m_chartAlertTrans->push(static_cast<double>(fired));
+        m_chartAlertTrans->pushB(static_cast<double>(resolved));
+    }
+
+    // Event timeline: newest first, colored severity, bounded rows.
+    QString timeline = m_alertTimeline->text();
+    if (timeline == QStringLiteral("--")) {
+        timeline.clear();
+    }
+    const QString stamp =
+        QDateTime::fromMSecsSinceEpoch(
+            QDateTime::currentMSecsSinceEpoch()).time().toString(
+            QStringLiteral("HH:mm"));
+    if (!timeline.isEmpty()) {
+        timeline.prepend(QStringLiteral("<br/>"));
+    }
+    if (fired > 0 || resolved > 0) {
+        QSet<QString> firedKeys = appeared;
+        for (const Alert &alert : alerts) {
+            const QString key = alert.id.isEmpty()
+                ? QStringLiteral("%1/%2").arg(alert.title, alert.severity)
+                : alert.id;
+            if (!firedKeys.contains(key) || alert.severity.isEmpty()) {
+                continue;
+            }
+            firedKeys.remove(key);
+            const QString sev = alert.severity.toUpper();
+            timeline.prepend(
+                QStringLiteral(
+                    "%1&nbsp;&nbsp;<span style=\"color:%2;\">fired</span>"
+                    "&nbsp;&nbsp;<span style=\"color:%3;\">[%4]</span>"
+                    "&nbsp;%5&nbsp;%6")
+                    .arg(stamp,
+                         QStringLiteral("#3ccaaa"),
+                         ui_theme::statusColor(sev),
+                         sev,
+                         alert.title,
+                         alert.detail));
+            timeline.prepend(QStringLiteral("<br/>"));
+        }
+        for (const QString &key : vanished) {
+            timeline.prepend(
+                QStringLiteral(
+                    "%1&nbsp;&nbsp;<span style=\"color:%2;\">resolved</span> "
+                    "&nbsp;%3")
+                    .arg(stamp,
+                         QStringLiteral("#4d9fd6"),
+                         key));
+            timeline.prepend(QStringLiteral("<br/>"));
+        }
+    }
+    const QStringList rows = timeline.split(QStringLiteral("<br/>"),
+                                            Qt::SkipEmptyParts);
+    m_alertTimeline->setText(
+        rows.isEmpty()
+            ? QStringLiteral("no alert activity yet")
+            : rows.mid(0, 14).join(QStringLiteral("<br/>")));
+
+    // Active monitor list (behavior + rich-text spans unchanged; the
+    // test pins #d1685f severity coloring here). The empty state needs
+    // an inline dim color: the #ddAlerts QSS rule was removed in the
+    // M60 restyle so severity spans stay colorized.
     if (alerts.isEmpty()) {
+        m_alerts->setStyleSheet(
+            QStringLiteral("color: %1;").arg(ui_theme::dim()));
         m_alerts->setText(QStringLiteral("no active alerts"));
         return;
     }
+    m_alerts->setStyleSheet(QStringLiteral(""));
     m_alerts->setTextFormat(Qt::RichText);
     QString text;
     for (const Alert &alert : alerts) {
