@@ -307,6 +307,14 @@ private:
     QLabel *m_procTileLoad = nullptr;
     TimeseriesChart *m_chartProcTotals = nullptr;
 
+    // Datadog-style Containers page (M63): docker tiles/tables + cgroup.
+    QLabel *m_dockTileRun = nullptr;
+    QLabel *m_dockTileIssues = nullptr;
+    QLabel *m_dockTileTotal = nullptr;
+    QLabel *m_dockTileCgMem = nullptr;
+    QTreeWidget *m_dockerTable = nullptr;
+    TimeseriesChart *m_chartDocker = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

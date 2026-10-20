@@ -177,6 +177,30 @@ int main(int argc, char *argv[]) {
         // critical windows count as bad availability samples.
         IncidentTracker tracker(12500, 20);
         SloTracker sloTracker;
+        DockerSnapshot docker;
+        docker.state = DockerState::Ok;
+        DockerContainer db;
+        db.id = QStringLiteral("c1");
+        db.name = QStringLiteral("postgres");
+        db.state = QStringLiteral("running");
+        db.status = QStringLiteral("Up 5 minutes (unhealthy)");
+        db.health = QStringLiteral("unhealthy");
+        DockerContainer web;
+        web.id = QStringLiteral("c2");
+        web.name = QStringLiteral("web");
+        web.state = QStringLiteral("running");
+        web.status = QStringLiteral("Up 2 days (healthy)");
+        web.health = QStringLiteral("healthy");
+        docker.containers = {db, web};
+        KubeSnapshot kube;
+        kube.state = KubeState::Ok;
+        KubePod pod;
+        pod.ns = QStringLiteral("default");
+        pod.name = QStringLiteral("api-7f9c");
+        pod.phase = QStringLiteral("Running");
+        pod.reason = QStringLiteral("CrashLoopBackOff");
+        pod.restarts = 7;
+        kube.pods = {pod};
         auto hasCrit = [](const QList<Alert> &list) {
             for (const Alert &alert : list) {
                 if (alert.severity.compare(QLatin1String("critical"),
@@ -191,18 +215,32 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < 240; ++i) {
             tracker.update(alertsFor(i), baseMs + i * 2000);
             sloTracker.record(!hasCrit(alertsFor(i)), baseMs + i * 2000);
+            // Container fleet drifts: one cadence bump + flapping issues;
+            // Kubernetes pod count creeps upward with the story.
+            docker.runningCount = 2 + (i % 13 <= 1 ? 1 : 0);
+            docker.issueCount = 1 + (i % 31 < 8 ? 1 : 0);
+            kube.totalPods = 12 + i / 40;
+            kube.issueCount = 2 + (i > 150 ? 2 : 0);
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
+            panel.setDockerSnapshot(docker);
+            panel.setKubeSnapshot(kube);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
         }
         tracker.update(alertsFor(240), baseMs + 240 * 2000);
         sloTracker.record(!hasCrit(alertsFor(240)), baseMs + 240 * 2000);
+        docker.runningCount = 3;
+        docker.issueCount = 2;
+        kube.totalPods = 18;
+        kube.issueCount = 4;
         DisplaySnapshot finalSnap = demoSnapshot(240);
         finalSnap.slo = sloTracker.report(SloSpec{});
         panel.setSnapshot(finalSnap);
+        panel.setDockerSnapshot(docker);
+        panel.setKubeSnapshot(kube);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };

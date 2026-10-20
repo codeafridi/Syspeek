@@ -451,6 +451,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddSensitive { color: %MUTED%; }"
         "#ddSloSli, #ddSloObj, #ddSloBudget, #ddProcProcs, #ddProcThreads,"
         " #ddProcFds, #ddProcLoad { color: %TEXT%; }"
+        "#ddDockRun, #ddDockTotal, #ddDockCgMem { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1417,22 +1418,101 @@ QWidget *DashboardPanel::buildNetworkPathView() {
 
 QWidget *DashboardPanel::buildContainersView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
-    m_cgroup = new QLabel(QStringLiteral("--"), view);
-    m_cgroup->setObjectName(QStringLiteral("ddCgroup"));
-    m_cgroup->setFont(monoFont(11));
-    m_cgroup->setWordWrap(true);
-    layout->addWidget(makeCard(QStringLiteral("CGROUP"), m_cgroup, view));
+    // --- Container-fleet tiles; CGROUP MEM is the focused app's cgroup.
+    m_dockTileRun = new QLabel(QStringLiteral("--"), view);
+    m_dockTileRun->setObjectName(QStringLiteral("ddDockRun"));
+    m_dockTileIssues = new QLabel(QStringLiteral("--"), view);
+    m_dockTileIssues->setObjectName(QStringLiteral("ddDockIssues"));
+    m_dockTileTotal = new QLabel(QStringLiteral("--"), view);
+    m_dockTileTotal->setObjectName(QStringLiteral("ddDockTotal"));
+    m_dockTileCgMem = new QLabel(QStringLiteral("--"), view);
+    m_dockTileCgMem->setObjectName(QStringLiteral("ddDockCgMem"));
 
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("RUNNING"), m_dockTileRun,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ISSUES"), m_dockTileIssues,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CONTAINERS"), m_dockTileTotal,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CGROUP MEM"), m_dockTileCgMem,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_dockerTable = new QTreeWidget(view);
+    m_dockerTable->setObjectName(QStringLiteral("ddDockerTable"));
+    m_dockerTable->setColumnCount(3);
+    m_dockerTable->setHeaderLabels({QStringLiteral("Container"),
+                                    QStringLiteral("State"),
+                                    QStringLiteral("Status")});
+    m_dockerTable->setRootIsDecorated(false);
+    m_dockerTable->setSelectionMode(QAbstractItemView::NoSelection);
+    m_dockerTable->setFocusPolicy(Qt::NoFocus);
+    m_dockerTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int i = 1; i < 3; ++i) {
+        m_dockerTable->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
+    }
+
+    // --- Docker inventory + running-count history.
+    layout->addWidget(makeBanner(QStringLiteral("DOCKER"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("CONTAINERS"), m_dockerTable, view), 2);
+
+    // --- Running-count history (Syspeek-own counter).
+    m_chartDocker = new TimeseriesChart(view);
+    m_chartDocker->setUnit(QStringLiteral("Count"));
+    m_chartDocker->setSeriesName(QStringLiteral("syspeek.docker.running"));
+
+    layout->addWidget(makeBanner(QStringLiteral("RUNNING OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("running containers"),
+                                    m_chartDocker, view));
+
+    // --- Docker diagnosis (state text already carries the summary).
     m_docker = new QLabel(QStringLiteral("--"), view);
     m_docker->setObjectName(QStringLiteral("ddDocker"));
     m_docker->setFont(monoFont(11));
     m_docker->setWordWrap(true);
-    layout->addWidget(makeCard(QStringLiteral("DOCKER"), m_docker, view));
-    layout->addStretch(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("DIAGNOSIS"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("ISSUES"), m_docker, view), 1);
+
+    // --- Focused-app cgroup memory limits (kept card from the old page).
+    m_cgroup = new QLabel(QStringLiteral("--"), view);
+    m_cgroup->setObjectName(QStringLiteral("ddCgroup"));
+    m_cgroup->setFont(monoFont(11));
+    m_cgroup->setWordWrap(true);
+
+    layout->addWidget(makeBanner(QStringLiteral("CGROUP"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("CGROUP"), m_cgroup, view), 1);
+
+    m_docker->setMinimumWidth(1);
+    m_cgroup->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2308,10 +2388,14 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                     .arg(snapshot.cgroupThrottled)
                     .arg(snapshot.cgroupPeriods);
         m_cgroup->setText(text);
+        m_dockTileCgMem->setText(
+            formatMemoryKb(snapshot.cgroupMemUsage / 1024));
     } else if (!m_osCgroups) {
         m_cgroup->setText(unsupportedOsText());
+        m_dockTileCgMem->setText(QStringLiteral("n/a"));
     } else {
         m_cgroup->setText(QStringLiteral("no cgroup stats"));
+        m_dockTileCgMem->setText(QStringLiteral("--"));
     }
 
     if (snapshot.hostAvailable) {
@@ -2519,6 +2603,31 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 }
 
 void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
+    // Container-page tiles (M63): running/issues/total; issues colored
+    // red while nonzero, back to the palette text when clear.
+    m_dockTileRun->setText(QString::number(snapshot.runningCount));
+    m_dockTileIssues->setText(QString::number(snapshot.issueCount));
+    m_dockTileIssues->setStyleSheet(
+        snapshot.issueCount > 0
+            ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+            : QStringLiteral("color: %1;").arg(ui_theme::text()));
+    m_dockTileTotal->setText(QString::number(snapshot.containers.size()));
+
+    m_dockerTable->clear();
+    for (const DockerContainer &container : snapshot.containers) {
+        auto *item = new QTreeWidgetItem(m_dockerTable);
+        item->setText(0, container.name.isEmpty() ? container.id
+                                                  : container.name);
+        item->setText(1, container.state);
+        item->setText(2, container.status);
+        const bool bad = container.crashed
+            || container.health == QLatin1String("unhealthy")
+            || (container.state != QLatin1String("running")
+                && container.state != QLatin1String("healthy"));
+        item->setForeground(1, QBrush(QColor(
+            bad ? ui_theme::crit() : ui_theme::ok())));
+    }
+
     const QString summary = dockerSummaryText(snapshot);
     const QString details = dockerDetailText(snapshot);
     QString text = summary;
@@ -2526,6 +2635,12 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
         text += QStringLiteral("\n") + details;
     }
     m_docker->setText(text.isEmpty() ? QStringLiteral("--") : text);
+
+    if (m_chartDocker != nullptr
+        && (snapshot.state == DockerState::Ok
+            || snapshot.state == DockerState::Stale)) {
+        m_chartDocker->push(static_cast<double>(snapshot.runningCount));
+    }
 }
 
 void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
