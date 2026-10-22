@@ -201,6 +201,39 @@ int main(int argc, char *argv[]) {
         pod.reason = QStringLiteral("CrashLoopBackOff");
         pod.restarts = 7;
         kube.pods = {pod};
+        // Network-path story rides the same loop (M61m): two mtr
+        // targets; the primary's RTT drifts and one hop flaps loss.
+        PathSnapshot path;
+        path.available = true;
+        auto mkRoute = [](const QString &dst, int hops) {
+            PathReport report;
+            report.dst = dst;
+            report.src = QStringLiteral("wlp0s20f3");
+            report.tests = 10;
+            report.ok = true;
+            const QList<const char *> hosts = {
+                QStringLiteral("gateway.local").toUtf8().constData(),
+                QStringLiteral("core1-rtr.isp").toUtf8().constData(),
+                QStringLiteral("edge1.isp").toUtf8().constData(),
+                QStringLiteral("peer TransitNet").toUtf8().constData(),
+                dst.toUtf8().constData()};
+            for (int h = 0; h < hops; ++h) {
+                PathHop hop;
+                hop.index = h + 1;
+                hop.host = QString::fromUtf8(hosts.at(h));
+                hop.sent = 10;
+                hop.bestMs = 2.0 + h * 1.5;
+                hop.worstMs = 8.0 + h * 2.0;
+                hop.stdevMs = 0.4 + h * 0.2;
+                hop.avgMs = (hop.bestMs + hop.worstMs) / 2.0;
+                hop.lastMs = hop.avgMs;
+                hop.lossPercent = 0.0;
+                report.hops.append(hop);
+            }
+            return report;
+        };
+        path.reports.append(mkRoute(QStringLiteral("1.1.1.1"), 5));
+        path.reports.append(mkRoute(QStringLiteral("example.test"), 3));
         auto hasCrit = [](const QList<Alert> &list) {
             for (const Alert &alert : list) {
                 if (alert.severity.compare(QLatin1String("critical"),
@@ -221,11 +254,15 @@ int main(int argc, char *argv[]) {
             docker.issueCount = 1 + (i % 31 < 8 ? 1 : 0);
             kube.totalPods = 12 + i / 40;
             kube.issueCount = 2 + (i > 150 ? 2 : 0);
+            path.reports.first().hops[2].lossPercent = (i % 29 < 6) ? 2.5 : 0.0;
+            path.reports.first().hops[4].avgMs = 12.0 + (i % 17) * 2.0;
+            path.reports.first().hops[4].lastMs = path.reports.first().hops[4].avgMs;
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
             panel.setDockerSnapshot(docker);
             panel.setKubeSnapshot(kube);
+            panel.setPathSnapshot(path);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
@@ -241,6 +278,7 @@ int main(int argc, char *argv[]) {
         panel.setSnapshot(finalSnap);
         panel.setDockerSnapshot(docker);
         panel.setKubeSnapshot(kube);
+        panel.setPathSnapshot(path);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };

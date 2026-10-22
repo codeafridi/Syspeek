@@ -351,6 +351,13 @@ private:
     QLabel *m_netTileTx = nullptr;
     TimeseriesChart *m_chartNetPage = nullptr;
 
+    // Datadog-style Network Path page (M61m): probe tiles + RTT history.
+    QLabel *m_pathTileTargets = nullptr;
+    QLabel *m_pathTileHops = nullptr;
+    QLabel *m_pathTileLoss = nullptr;
+    QLabel *m_pathTileRtt = nullptr;
+    TimeseriesChart *m_chartPath = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

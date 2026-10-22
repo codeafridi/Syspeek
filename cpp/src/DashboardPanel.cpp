@@ -457,7 +457,9 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " { color: %TEXT%; }"
         "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
         " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
-        " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx { color: %TEXT%; }"
+        " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx,"
+        " #ddPathTileTargets, #ddPathTileHops, #ddPathTileLoss,"
+        " #ddPathTileRtt { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1508,21 +1510,42 @@ QWidget *DashboardPanel::buildNetworkView() {
 
 QWidget *DashboardPanel::buildNetworkPathView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Probe tiles; loss colored red when any hop drops.
+    m_pathTileTargets = new QLabel(QStringLiteral("--"), view);
+    m_pathTileTargets->setObjectName(QStringLiteral("ddPathTileTargets"));
+    m_pathTileHops = new QLabel(QStringLiteral("--"), view);
+    m_pathTileHops->setObjectName(QStringLiteral("ddPathTileHops"));
+    m_pathTileLoss = new QLabel(QStringLiteral("--"), view);
+    m_pathTileLoss->setObjectName(QStringLiteral("ddPathTileLoss"));
+    m_pathTileRtt = new QLabel(QStringLiteral("--"), view);
+    m_pathTileRtt->setObjectName(QStringLiteral("ddPathTileRtt"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("TARGETS"), m_pathTileTargets,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("HOPS"), m_pathTileHops,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LOSS MAX"), m_pathTileLoss,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RTT AVG"), m_pathTileRtt,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_pathSummary = new QLabel(QStringLiteral("--"), view);
     m_pathSummary->setObjectName(QStringLiteral("ddPathSummary"));
     m_pathSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("NETWORK PATH (mtr)"), m_pathSummary, view));
 
     m_pathTargets = new QLabel(QStringLiteral("--"), view);
     m_pathTargets->setObjectName(QStringLiteral("ddPathTargets"));
     m_pathTargets->setFont(monoFont(10));
     m_pathTargets->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("TARGETS"), m_pathTargets, view), 1);
 
     m_pathHops = new QTreeWidget(view);
     m_pathHops->setObjectName(QStringLiteral("ddPathHops"));
@@ -1541,7 +1564,46 @@ QWidget *DashboardPanel::buildNetworkPathView() {
                                                        QHeaderView::ResizeToContents);
         }
     }
-    layout->addWidget(makeCard(QStringLiteral("HOPS"), m_pathHops, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("NETWORK PATH"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("NETWORK PATH (mtr)"), m_pathSummary, view), 1);
+    layout->addWidget(
+        makeCard(QStringLiteral("TARGETS"), m_pathTargets, view), 1);
+
+    // --- End-to-end latency history (mtr final-hop avg; Syspeek-own
+    // counter - the runner is local mtr, the agent ships no equivalent).
+    m_chartPath = new TimeseriesChart(view);
+    m_chartPath->setUnit(QStringLiteral("ms"));
+    m_chartPath->setSeriesName(QStringLiteral("syspeek.path.rtt"));
+
+    layout->addWidget(makeBanner(QStringLiteral("LATENCY OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("end-to-end avg RTT"),
+                                    m_chartPath, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("HOP TABLE"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("HOPS"), m_pathHops, view), 2);
+
+    m_pathSummary->setMinimumWidth(1);
+    m_pathTargets->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3536,6 +3598,39 @@ void DashboardPanel::setTraceSnapshot(const TraceSnapshot &snapshot) {
 }
 
 void DashboardPanel::setPathSnapshot(const PathSnapshot &snapshot) {
+    // Path-page tiles (M61m): honest "--" until mtr reports arrive.
+    if (!snapshot.available || snapshot.reports.isEmpty()) {
+        m_pathTileTargets->setText(QStringLiteral("--"));
+        m_pathTileHops->setText(QStringLiteral("--"));
+        m_pathTileLoss->setText(QString());
+        m_pathTileLoss->setStyleSheet(QStringLiteral("color: %1;")
+                                          .arg(ui_theme::text()));
+        m_pathTileLoss->setText(QStringLiteral("--"));
+        m_pathTileRtt->setText(QStringLiteral("--"));
+    } else {
+        int hopCount = 0;
+        double worstLoss = 0.0;
+        for (const PathReport &report : snapshot.reports) {
+            hopCount = qMax(hopCount, report.hops.size());
+            worstLoss = qMax(worstLoss, report.worstLoss());
+        }
+        const double rtt = snapshot.reports.first().avgRttMs();
+        m_pathTileTargets->setText(
+            QString::number(snapshot.reports.size()));
+        m_pathTileHops->setText(QString::number(hopCount));
+        m_pathTileLoss->setText(
+            QStringLiteral("%1%").arg(worstLoss, 0, 'f', 1));
+        m_pathTileLoss->setStyleSheet(
+            QStringLiteral("color: %1;").arg(
+                worstLoss >= 1.0 ? ui_theme::crit()
+                                 : ui_theme::text()));
+        m_pathTileRtt->setText(
+            QStringLiteral("%1ms").arg(rtt, 0, 'f', 1));
+        if (m_chartPath != nullptr) {
+            m_chartPath->push(qMax(0.0, rtt));
+        }
+    }
+
     m_pathSummary->setText(pathSummaryText(snapshot));
     m_pathTargets->setText(pathTargetsText(snapshot));
     m_pathHops->clear();
