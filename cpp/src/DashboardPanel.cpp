@@ -455,7 +455,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
-        "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi"
+        "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
+        " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk"
         " { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
@@ -2210,15 +2211,53 @@ QWidget *DashboardPanel::buildDisksView() {
 
 QWidget *DashboardPanel::buildHostView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Live vitals tiles (the inventory cards stay below).
+    m_hostTileCpu = new QLabel(QStringLiteral("--"), view);
+    m_hostTileCpu->setObjectName(QStringLiteral("ddHostTileCpu"));
+    m_hostTileLoad = new QLabel(QStringLiteral("--"), view);
+    m_hostTileLoad->setObjectName(QStringLiteral("ddHostTileLoad"));
+    m_hostTileAvail = new QLabel(QStringLiteral("--"), view);
+    m_hostTileAvail->setObjectName(QStringLiteral("ddHostTileAvail"));
+    m_hostTileDisk = new QLabel(QStringLiteral("--"), view);
+    m_hostTileDisk->setObjectName(QStringLiteral("ddHostTileDisk"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("HOST CPU"), m_hostTileCpu,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LOAD 1M"), m_hostTileLoad,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("MEM AVAIL"), m_hostTileAvail,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DISK FREE"), m_hostTileDisk,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_hostInfoSummary = new QLabel(QStringLiteral("--"), view);
     m_hostInfoSummary->setObjectName(QStringLiteral("ddHostInfoSummary"));
     m_hostInfoSummary->setFont(monoFont(13, true));
+
+    layout->addWidget(makeBanner(QStringLiteral("HOST INVENTORY"),
+        ui_theme::accent(), view));
     layout->addWidget(
-        makeCard(QStringLiteral("HOST INVENTORY"), m_hostInfoSummary, view));
+        makeCard(QStringLiteral("HOST INVENTORY"), m_hostInfoSummary, view), 1);
+
+    // --- Load history (Syspeek-own counter; no honest hostLoad analogue
+    // exists beyond it on Windows, which stays "--").
+    m_chartHostPage = new TimeseriesChart(view);
+    m_chartHostPage->setUnit(QStringLiteral("Load"));
+    m_chartHostPage->setSeriesName(QStringLiteral("syspeek.host.load1"));
+
+    layout->addWidget(makeBanner(QStringLiteral("LOAD OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("load average (1m)"),
+                                    m_chartHostPage, view));
 
     auto *row1 = new QHBoxLayout;
     row1->setSpacing(10);
@@ -2248,6 +2287,26 @@ QWidget *DashboardPanel::buildHostView() {
     m_hostNetwork->setWordWrap(false);
     row2->addWidget(makeCard(QStringLiteral("NETWORK"), m_hostNetwork, view), 1);
     layout->addLayout(row2, 1);
+
+    for (QLabel *label : {m_hostPlatform, m_hostCpuInfo, m_hostFilesystems,
+                          m_hostNetwork}) {
+        label->setMinimumWidth(1);
+    }
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2479,6 +2538,25 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             static_cast<double>(snapshot.hostMemAvailableKb) / (1024.0 * 1024.0));
         m_chartHostMem->push(
             static_cast<double>(snapshot.hostMemAvailableKb) / (1024.0 * 1024.0));
+    }
+    // Host-page tiles + load history (M61k).
+    if (snapshot.hostAvailable) {
+        m_hostTileCpu->setText(
+            QStringLiteral("%1%").arg(snapshot.hostCpuPercent, 0, 'f', 1));
+        m_hostTileLoad->setText(QString::number(snapshot.hostLoad1, 'f', 2));
+        m_hostTileAvail->setText(
+            formatMemoryKb(snapshot.hostMemAvailableKb));
+        const double diskTotal =
+            static_cast<double>(snapshot.hostDiskTotalBytes);
+        m_hostTileDisk->setText(
+            diskTotal > 0.0
+                ? QStringLiteral("%1%").arg(
+                    100.0 * static_cast<double>(snapshot.hostDiskFreeBytes)
+                    / diskTotal, 0, 'f', 0)
+                : QStringLiteral("--"));
+        if (m_chartHostPage != nullptr) {
+            m_chartHostPage->push(snapshot.hostLoad1);
+        }
     }
     if (snapshot.hostAvailable && m_chartLoad != nullptr) {
         m_loadStore.push(snapshot.hostLoad1);

@@ -337,6 +337,13 @@ private:
     TimeseriesChart *m_chartIoRw = nullptr;
     TimeseriesChart *m_chartIoUtil = nullptr;
 
+    // Datadog-style Host page (M61k): live-vitals tiles + inventory cards.
+    QLabel *m_hostTileCpu = nullptr;
+    QLabel *m_hostTileLoad = nullptr;
+    QLabel *m_hostTileAvail = nullptr;
+    QLabel *m_hostTileDisk = nullptr;
+    TimeseriesChart *m_chartHostPage = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
