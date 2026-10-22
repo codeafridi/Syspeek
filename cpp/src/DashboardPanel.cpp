@@ -465,7 +465,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddLogTilePipeline, #ddErrTileGroups, #ddErrTileCount,"
         " #ddErrTileWorst, #ddErrTileRate, #ddDepTileLibs, #ddDepTilePkg,"
         " #ddDepTileUnmapped, #ddDepTileRatio, #ddSweTilePkgs,"
-        " #ddSweTileLibs, #ddSweTileResolved, #ddSweTileFams"
+        " #ddSweTileLibs, #ddSweTileResolved, #ddSweTileFams,"
+        " #ddEpTileTotal, #ddEpTilePublic, #ddEpTileLocal, #ddEpTileDb,"
+        " #ddSynTileChecks, #ddSynTileUp, #ddSynTileDown, #ddSynTileAvg,"
+        " #ddInsTileAgents, #ddInsTileDd, #ddInsTileOtel, #ddInsTileOther"
         " { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
@@ -2001,45 +2004,198 @@ QWidget *DashboardPanel::buildDependenciesView() {
 
 QWidget *DashboardPanel::buildEndpointsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Exposure tiles (M12 model: local vs public + db detection).
+    m_epTileTotal = new QLabel(QStringLiteral("--"), view);
+    m_epTileTotal->setObjectName(QStringLiteral("ddEpTileTotal"));
+    m_epTilePublic = new QLabel(QStringLiteral("--"), view);
+    m_epTilePublic->setObjectName(QStringLiteral("ddEpTilePublic"));
+    m_epTileLocal = new QLabel(QStringLiteral("--"), view);
+    m_epTileLocal->setObjectName(QStringLiteral("ddEpTileLocal"));
+    m_epTileDb = new QLabel(QStringLiteral("--"), view);
+    m_epTileDb->setObjectName(QStringLiteral("ddEpTileDb"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("ENDPOINTS"), m_epTileTotal,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PUBLIC"), m_epTilePublic,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LOCAL"), m_epTileLocal,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DATABASES"), m_epTileDb,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
     m_endpoints = new QLabel(QStringLiteral("--"), view);
     m_endpoints->setObjectName(QStringLiteral("ddEndpoints"));
     m_endpoints->setFont(monoFont(10));
     m_endpoints->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("LISTENING ENDPOINTS (host)"), m_endpoints, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("LISTENING ENDPOINTS"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("LISTENING ENDPOINTS (host)"), m_endpoints, view),
+        1);
+
+    m_endpoints->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
 QWidget *DashboardPanel::buildSyntheticView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Probe tiles; down count red while > 0.
+    m_synTileChecks = new QLabel(QStringLiteral("--"), view);
+    m_synTileChecks->setObjectName(QStringLiteral("ddSynTileChecks"));
+    m_synTileUp = new QLabel(QStringLiteral("--"), view);
+    m_synTileUp->setObjectName(QStringLiteral("ddSynTileUp"));
+    m_synTileDown = new QLabel(QStringLiteral("--"), view);
+    m_synTileDown->setObjectName(QStringLiteral("ddSynTileDown"));
+    m_synTileAvg = new QLabel(QStringLiteral("--"), view);
+    m_synTileAvg->setObjectName(QStringLiteral("ddSynTileAvg"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("CHECKS"), m_synTileChecks,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("UP"), m_synTileUp,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DOWN"), m_synTileDown,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("AVG MS"), m_synTileAvg,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_syntheticSummary = new QLabel(QStringLiteral("--"), view);
     m_syntheticSummary->setObjectName(QStringLiteral("ddSyntheticSummary"));
     m_syntheticSummary->setFont(monoFont(12, true));
-    layout->addWidget(makeCard(QStringLiteral("SYNTHETIC"), m_syntheticSummary, view));
 
     m_synthetic = new QLabel(QStringLiteral("--"), view);
     m_synthetic->setObjectName(QStringLiteral("ddSynthetic"));
     m_synthetic->setFont(monoFont(10));
     m_synthetic->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("HTTP CHECKS"), m_synthetic, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("SYNTHETIC CHECKS"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SYNTHETIC"), m_syntheticSummary, view));
+
+    // --- Latency history (probe avg; Syspeek-own series - the agent's
+    // synthetic tests are SaaS-scheduled, no shipped metric name).
+    m_chartSynthetic = new TimeseriesChart(view);
+    m_chartSynthetic->setUnit(QStringLiteral("Milliseconds"));
+    m_chartSynthetic->setSeriesName(QStringLiteral("syspeek.synthetic.duration"));
+
+    layout->addWidget(makeBanner(QStringLiteral("LATENCY"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("probe avg duration"),
+                                    m_chartSynthetic, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("HTTP CHECKS"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("HTTP CHECKS"), m_synthetic, view), 2);
+
+    m_synthetic->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
 QWidget *DashboardPanel::buildInstrumentationView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Agent detection tiles (M12/M33 model): dd / otel / other.
+    m_insTileAgents = new QLabel(QStringLiteral("--"), view);
+    m_insTileAgents->setObjectName(QStringLiteral("ddInsTileAgents"));
+    m_insTileDd = new QLabel(QStringLiteral("--"), view);
+    m_insTileDd->setObjectName(QStringLiteral("ddInsTileDd"));
+    m_insTileOtel = new QLabel(QStringLiteral("--"), view);
+    m_insTileOtel->setObjectName(QStringLiteral("ddInsTileOtel"));
+    m_insTileOther = new QLabel(QStringLiteral("--"), view);
+    m_insTileOther->setObjectName(QStringLiteral("ddInsTileOther"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("AGENTS"), m_insTileAgents,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DATADOG"), m_insTileDd,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("OTEL"), m_insTileOtel,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("OTHER"), m_insTileOther,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
     m_instrumentation = new QLabel(QStringLiteral("--"), view);
     m_instrumentation->setObjectName(QStringLiteral("ddInstrumentation"));
     m_instrumentation->setFont(monoFont(11));
+
+    layout->addWidget(makeBanner(QStringLiteral("INSTRUMENTATION"),
+        ui_theme::accent(), view));
     layout->addWidget(
-        makeCard(QStringLiteral("INSTRUMENTATION (focused app)"), m_instrumentation,
-                 view),
-        1);
+        makeCard(QStringLiteral("INSTRUMENTATION (focused app)"),
+                 m_instrumentation, view), 1);
+
+    m_instrumentation->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3020,10 +3176,69 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     m_endpoints->setText(endpointText.isEmpty() ? QStringLiteral("none")
                                                 : endpointText);
 
+    // Endpoints-page tiles (M61s): exposure split + db detection.
+    {
+        int publicCount = 0;
+        int localCount = 0;
+        int dbCount = 0;
+        for (const EndpointRow &entry : snapshot.endpoints) {
+            if (entry.exposure == QStringLiteral("public")) {
+                ++publicCount;
+            } else if (entry.exposure == QStringLiteral("local")) {
+                ++localCount;
+            }
+            if (entry.database) {
+                ++dbCount;
+            }
+        }
+        m_epTileTotal->setText(QString::number(snapshot.endpoints.size()));
+        m_epTilePublic->setText(QString::number(publicCount));
+        m_epTilePublic->setStyleSheet(
+            publicCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::warn())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_epTileLocal->setText(QString::number(localCount));
+        m_epTileDb->setText(QString::number(dbCount));
+    }
+
     m_instrumentation->setText(
         snapshot.instrumentation.isEmpty()
             ? QStringLiteral("no agent detected")
             : snapshot.instrumentation.join(QStringLiteral(", ")));
+
+    // Instrumentation-page tiles (M61u): agent presence by family.
+    if (snapshot.instrumentation.isEmpty()) {
+        m_insTileAgents->setText(QStringLiteral("0"));
+        m_insTileDd->setText(QStringLiteral("—"));
+        m_insTileOtel->setText(QStringLiteral("—"));
+        m_insTileOther->setText(QStringLiteral("0"));
+    } else {
+        int other = 0;
+        bool hasDd = false;
+        bool hasOtel = false;
+        for (const QString &agent : snapshot.instrumentation) {
+            if (agent == QStringLiteral("datadog")) {
+                hasDd = true;
+            } else if (agent == QStringLiteral("opentelemetry")) {
+                hasOtel = true;
+            } else {
+                ++other;
+            }
+        }
+        m_insTileAgents->setText(
+            QString::number(snapshot.instrumentation.size()));
+        m_insTileDd->setText(hasDd ? QStringLiteral("yes")
+                                   : QStringLiteral("—"));
+        m_insTileDd->setStyleSheet(
+            QStringLiteral("color: %1;").arg(
+                hasDd ? ui_theme::ok() : ui_theme::text()));
+        m_insTileOtel->setText(hasOtel ? QStringLiteral("yes")
+                                       : QStringLiteral("—"));
+        m_insTileOtel->setStyleSheet(
+            QStringLiteral("color: %1;").arg(
+                hasOtel ? ui_theme::ok() : ui_theme::text()));
+        m_insTileOther->setText(QString::number(other));
+    }
 
     QString dbText;
     for (const EndpointRow &entry : snapshot.endpoints) {
@@ -3949,6 +4164,39 @@ void DashboardPanel::setIncidents(const QList<Incident> &incidents) {
 void DashboardPanel::setSyntheticSnapshot(const SyntheticSnapshot &snapshot) {
     m_syntheticSummary->setText(syntheticSummaryText(snapshot));
     m_synthetic->setText(syntheticDetailText(snapshot));
+
+    // Synthetic-page tiles + latency history (M61t); the agent ships
+    // no synthetic metric (SaaS-scheduled tests), so the rate series
+    // name is Syspeek-own.
+    if (snapshot.available && !snapshot.results.isEmpty()) {
+        double totalMs = 0.0;
+        int measured = 0;
+        for (const ProbeResult &probe : snapshot.results) {
+            if (probe.success && probe.totalMs > 0.0) {
+                totalMs += probe.totalMs;
+                ++measured;
+            }
+        }
+        m_synTileChecks->setText(QString::number(snapshot.results.size()));
+        m_synTileUp->setText(QString::number(snapshot.upCount));
+        m_synTileDown->setText(QString::number(snapshot.downCount));
+        m_synTileDown->setStyleSheet(
+            snapshot.downCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_synTileAvg->setText(
+            measured > 0
+                ? QStringLiteral("%1").arg(totalMs / measured, 0, 'f', 0)
+                : QStringLiteral("--"));
+        if (m_chartSynthetic != nullptr && measured > 0) {
+            m_chartSynthetic->push(totalMs / measured);
+        }
+    } else {
+        m_synTileChecks->setText(QStringLiteral("--"));
+        m_synTileUp->setText(QStringLiteral("--"));
+        m_synTileDown->setText(QStringLiteral("--"));
+        m_synTileAvg->setText(QStringLiteral("--"));
+    }
 }
 
 void DashboardPanel::setTraceSnapshot(const TraceSnapshot &snapshot) {

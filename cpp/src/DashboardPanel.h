@@ -389,6 +389,21 @@ private:
     QLabel *m_sweTileResolved = nullptr;
     QLabel *m_sweTileFams = nullptr;
 
+    // Datadog-style Endpoints/Synthetic/Instrumentation pages (M61s-u).
+    QLabel *m_epTileTotal = nullptr;
+    QLabel *m_epTilePublic = nullptr;
+    QLabel *m_epTileLocal = nullptr;
+    QLabel *m_epTileDb = nullptr;
+    QLabel *m_synTileChecks = nullptr;
+    QLabel *m_synTileUp = nullptr;
+    QLabel *m_synTileDown = nullptr;
+    QLabel *m_synTileAvg = nullptr;
+    TimeseriesChart *m_chartSynthetic = nullptr;
+    QLabel *m_insTileAgents = nullptr;
+    QLabel *m_insTileDd = nullptr;
+    QLabel *m_insTileOtel = nullptr;
+    QLabel *m_insTileOther = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

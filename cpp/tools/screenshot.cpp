@@ -106,13 +106,28 @@ DisplaySnapshot demoSnapshot(int tick) {
     iface.txPerSec = 118000.0;
     s.interfaces = {iface};
 
-    EndpointRow endpoint;
-    endpoint.proto = QStringLiteral("tcp");
-    endpoint.addr = QStringLiteral("127.0.0.1");
-    endpoint.port = 4318;
-    endpoint.exposure = QStringLiteral("localhost");
-    endpoint.service = QStringLiteral("syspeek");
-    s.endpoints = {endpoint};
+    // Endpoint fixture (M61s): real exposure vocabulary from
+    // portcatalog::endpointExposure ("local" / "public"), one db port.
+    auto mkEndpoint = [](const char *proto, const char *addr, quint16 port,
+                         const char *exposure, const char *service,
+                         bool database) {
+        EndpointRow row;
+        row.proto = QString::fromUtf8(proto);
+        row.addr = QString::fromUtf8(addr);
+        row.port = port;
+        row.exposure = QString::fromUtf8(exposure);
+        row.service = QString::fromUtf8(service);
+        row.database = database;
+        return row;
+    };
+    s.endpoints = {
+        mkEndpoint("tcp", "127.0.0.1", 4318, "local", "syspeek", false),
+        mkEndpoint("tcp", "0.0.0.0", 5432, "public", "postgres", true),
+        mkEndpoint("tcp", "10.0.0.5", 8080, "public", "nginx", false),
+        mkEndpoint("tcp", "[::1]", 6379, "local", "redis", false),
+    };
+    s.instrumentation = {QStringLiteral("datadog"),
+                         QStringLiteral("opentelemetry")};
     s.listeningPorts = {QStringLiteral("127.0.0.1:4318")};
 
     DiskRow disk;
@@ -242,6 +257,9 @@ int main(int argc, char *argv[]) {
         svc.units.append(mkUnit("nginx.service", "active", "running"));
         svc.runningCount = 2;
         svc.failedCount = 1;
+        // Synthetic fixture declared beside the other riding stories.
+        SyntheticSnapshot synthetic;
+        synthetic.available = true;
         ServiceChange svcChange;
         svcChange.unit = QStringLiteral("nginx.service");
         svcChange.summary = QStringLiteral("restart (worker reset)");
@@ -332,6 +350,29 @@ int main(int argc, char *argv[]) {
             dbGroup.count = 1 + (i % 11);
             journal.errorGroups.clear();
             journal.errorGroups.append(dbGroup);
+            // Synthetic story (M61t): two probes, latency drifts and
+            // one probe fails on a 53-tick cycle so DOWN flaps 0<->1.
+            synthetic.available = true;
+            ProbeResult probeUp;
+            probeUp.url = QStringLiteral("https://local-app/status");
+            probeUp.success = true;
+            probeUp.status = 200;
+            probeUp.totalMs = 120.0 + (i % 23) * 6.0;
+            probeUp.connectMs = 14.0;
+            probeUp.tlsMs = 22.0;
+            synthetic.results = {probeUp};
+            synthetic.upCount = 1;
+            synthetic.downCount = 0;
+            if (i % 53 < 7) {
+                ProbeResult probeDown;
+                probeDown.url = QStringLiteral("https://backup/status");
+                probeDown.success = false;
+                probeDown.error = QStringLiteral("connection timeout");
+                probeDown.totalMs = 5000.0;
+                synthetic.results.append(probeDown);
+                synthetic.downCount = 1;
+                synthetic.upCount = 0;
+            }
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
@@ -340,6 +381,7 @@ int main(int argc, char *argv[]) {
             panel.setPathSnapshot(path);
             panel.setServicesSnapshot(svc);
             panel.setJournalSnapshot(journal);
+            panel.setSyntheticSnapshot(synthetic);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
@@ -358,6 +400,7 @@ int main(int argc, char *argv[]) {
         panel.setPathSnapshot(path);
         panel.setServicesSnapshot(svc);
         panel.setJournalSnapshot(journal);
+        panel.setSyntheticSnapshot(synthetic);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };
