@@ -453,6 +453,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddProcFds, #ddProcLoad { color: %TEXT%; }"
         "#ddDockRun, #ddDockTotal, #ddDockCgMem, #ddKubeTilePods,"
         " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
+        "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
+        " { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1305,14 +1307,71 @@ QWidget *DashboardPanel::buildProcessesView() {
 
 QWidget *DashboardPanel::buildMemoryView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Host-fleet tiles + the focused app's RSS anchor; "used" is
+    // honest arithmetic (total - available, cache not split yet).
+    m_memTileTotal = new QLabel(QStringLiteral("--"), view);
+    m_memTileTotal->setObjectName(QStringLiteral("ddMemTileTotal"));
+    m_memTileUsed = new QLabel(QStringLiteral("--"), view);
+    m_memTileUsed->setObjectName(QStringLiteral("ddMemTileUsed"));
+    m_memTileAvail = new QLabel(QStringLiteral("--"), view);
+    m_memTileAvail->setObjectName(QStringLiteral("ddMemTileAvail"));
+    m_memTileRss = new QLabel(QStringLiteral("--"), view);
+    m_memTileRss->setObjectName(QStringLiteral("ddMemTileRss"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("HOST TOTAL"), m_memTileTotal,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("HOST USED"), m_memTileUsed,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("HOST AVAIL"), m_memTileAvail,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("APP RSS"), m_memTileRss,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_memDetail = new QLabel(QStringLiteral("--"), view);
     m_memDetail->setObjectName(QStringLiteral("ddMemDetail"));
     m_memDetail->setFont(monoFont(12));
-    layout->addWidget(makeCard(QStringLiteral("MEMORY BREAKDOWN"), m_memDetail, view));
-    layout->addStretch(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("APP MEMORY"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("MEMORY BREAKDOWN"), m_memDetail, view), 1);
+
+    // --- Used vs available history (Syspeek-own counters).
+    m_chartMemPage = new TimeseriesChart(view);
+    m_chartMemPage->setUnit(QStringLiteral("GB"));
+    m_chartMemPage->setSeriesName(QStringLiteral("syspeek.mem.used"));
+    m_chartMemPage->setSeriesNameB(QStringLiteral("syspeek.mem.available"));
+
+    layout->addWidget(makeBanner(QStringLiteral("HOST USED / AVAILABLE"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("host memory in use vs "
+        "available"), m_chartMemPage, view));
+
+    m_memDetail->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2345,6 +2404,26 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                                   formatMemoryKb(snapshot.vmsKb),
                                   formatMemoryKb(snapshot.swapKb),
                                   formatMemoryKb(snapshot.sharedKb)));
+    // Memory-page tiles + used/available history (M61i); used is
+    // total - available (the snapshot does not split cache yet).
+    m_memTileTotal->setText(formatMemoryKb(snapshot.hostMemTotalKb));
+    m_memTileAvail->setText(formatMemoryKb(snapshot.hostMemAvailableKb));
+    m_memTileUsed->setText(
+        formatMemoryKb(snapshot.hostMemTotalKb > snapshot.hostMemAvailableKb
+                           ? snapshot.hostMemTotalKb
+                                 - snapshot.hostMemAvailableKb
+                           : 0));
+    m_memTileRss->setText(formatMemoryKb(snapshot.rssKb));
+    if (m_chartMemPage != nullptr && snapshot.hostMemTotalKb > 0
+        && snapshot.hostMemAvailableKb > 0) {
+        m_chartMemPage->push(
+            static_cast<double>(snapshot.hostMemTotalKb
+                                - snapshot.hostMemAvailableKb)
+            / (1024.0 * 1024.0));
+        m_chartMemPage->pushB(
+            static_cast<double>(snapshot.hostMemAvailableKb)
+            / (1024.0 * 1024.0));
+    }
 
     QString net;
     int shown = 0;

@@ -322,6 +322,13 @@ private:
     QLabel *m_kubeTileCost = nullptr;
     TimeseriesChart *m_chartKube = nullptr;
 
+    // Datadog-style Memory page (M61i): host tiles + used/avail history.
+    QLabel *m_memTileTotal = nullptr;
+    QLabel *m_memTileUsed = nullptr;
+    QLabel *m_memTileAvail = nullptr;
+    QLabel *m_memTileRss = nullptr;
+    TimeseriesChart *m_chartMemPage = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
