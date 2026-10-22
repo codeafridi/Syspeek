@@ -456,8 +456,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
         "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
-        " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk"
-        " { color: %TEXT%; }"
+        " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
+        " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1380,15 +1380,53 @@ QWidget *DashboardPanel::buildMemoryView() {
 
 QWidget *DashboardPanel::buildNetworkView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Socket-fleet tiles; retrans carries the TCP-health gate.
+    m_netTileConns = new QLabel(QStringLiteral("--"), view);
+    m_netTileConns->setObjectName(QStringLiteral("ddNetTileConns"));
+    m_netTileEstab = new QLabel(QStringLiteral("--"), view);
+    m_netTileEstab->setObjectName(QStringLiteral("ddNetTileEstab"));
+    m_netTileRetrans = new QLabel(QStringLiteral("--"), view);
+    m_netTileRetrans->setObjectName(QStringLiteral("ddNetTileRetrans"));
+    m_netTileTx = new QLabel(QStringLiteral("--"), view);
+    m_netTileTx->setObjectName(QStringLiteral("ddNetTileTx"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("CONNS"), m_netTileConns,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ESTABLISHED"), m_netTileEstab,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RETRANS %"), m_netTileRetrans,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("TX KB/S"), m_netTileTx,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_net = new QLabel(QStringLiteral("--"), view);
     m_net->setObjectName(QStringLiteral("ddNet"));
     m_net->setFont(monoFont(11));
+
+    layout->addWidget(makeBanner(QStringLiteral("CONNECTIONS (focused app)"),
+        ui_theme::accent(), view));
     layout->addWidget(
-        makeCard(QStringLiteral("CONNECTIONS (focused app)"), m_net, view), 2);
+        makeCard(QStringLiteral("CONNECTIONS"), m_net, view), 2);
+
+    // --- Host throughput (agent-grounded series vocabulary).
+    m_chartNetPage = new TimeseriesChart(view);
+    m_chartNetPage->setUnit(QStringLiteral("kB/s"));
+    m_chartNetPage->setSeriesName(QStringLiteral("system.net.bytes_rcvd"));
+    m_chartNetPage->setSeriesNameB(QStringLiteral("system.net.bytes_sent"));
+
+    layout->addWidget(makeBanner(QStringLiteral("THROUGHPUT"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("host rx + tx"),
+                                    m_chartNetPage, view));
 
     auto *row = new QHBoxLayout();
     row->setSpacing(14);
@@ -1403,10 +1441,13 @@ QWidget *DashboardPanel::buildNetworkView() {
     row->addWidget(makeCard(QStringLiteral("SOCKET STATES"), m_states, view), 1);
     layout->addLayout(row, 1);
 
+    auto *healthRow = new QHBoxLayout();
+    healthRow->setSpacing(14);
     m_ifaces = new QLabel(QStringLiteral("--"), view);
     m_ifaces->setObjectName(QStringLiteral("ddIfaces"));
     m_ifaces->setFont(monoFont(10));
-    layout->addWidget(makeCard(QStringLiteral("INTERFACES"), m_ifaces, view), 1);
+    healthRow->addWidget(
+        makeCard(QStringLiteral("INTERFACES"), m_ifaces, view), 1);
 
     auto *tcpBox = new QWidget(view);
     auto *tcpLayout = new QVBoxLayout(tcpBox);
@@ -1421,7 +1462,9 @@ QWidget *DashboardPanel::buildNetworkView() {
     m_tcp->setWordWrap(false);
     tcpLayout->addWidget(m_tcpSummary);
     tcpLayout->addWidget(m_tcp);
-    layout->addWidget(makeCard(QStringLiteral("TCP HEALTH"), tcpBox, view), 1);
+    healthRow->addWidget(
+        makeCard(QStringLiteral("TCP HEALTH"), tcpBox, view), 1);
+    layout->addLayout(healthRow, 1);
 
     auto *tlsBox = new QWidget(view);
     auto *tlsLayout = new QVBoxLayout(tlsBox);
@@ -1436,7 +1479,30 @@ QWidget *DashboardPanel::buildNetworkView() {
     m_tls->setWordWrap(false);
     tlsLayout->addWidget(m_tlsSummary);
     tlsLayout->addWidget(m_tls);
-    layout->addWidget(makeCard(QStringLiteral("TLS CERTIFICATES"), tlsBox, view), 1);
+    layout->addWidget(
+        makeCard(QStringLiteral("TLS CERTIFICATES"), tlsBox, view), 1);
+
+    m_net->setMinimumWidth(1);
+    m_listen->setMinimumWidth(1);
+    m_states->setMinimumWidth(1);
+    m_ifaces->setMinimumWidth(1);
+    m_tcp->setMinimumWidth(1);
+    m_tls->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2565,6 +2631,38 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_netTxStore.push(snapshot.hostNetTxPerSec / 1024.0);
         m_chartNet->push(snapshot.hostNetRxPerSec / 1024.0);
         m_chartNet->pushB(snapshot.hostNetTxPerSec / 1024.0);
+    }
+    // Network-page tiles + throughput history (M61l).
+    int netEstablished = 0;
+    for (const ConnectionRow &conn : snapshot.connections) {
+        if (conn.state.contains(QLatin1String("ESTABLISHED"))) {
+            ++netEstablished;
+        }
+    }
+    m_netTileConns->setText(QString::number(snapshot.connections.size()));
+    m_netTileEstab->setText(QString::number(netEstablished));
+    if (snapshot.tcpHealthAvailable) {
+        m_netTileRetrans->setText(
+            QStringLiteral("%1%").arg(snapshot.tcpHealth.retransPercent,
+                                      0, 'f', 2));
+        m_netTileRetrans->setStyleSheet(
+            QStringLiteral("color: %1;").arg(
+                snapshot.tcpHealth.retransPercent >= 1.0
+                    ? ui_theme::crit()
+                    : (snapshot.tcpHealth.retransPercent >= 0.5
+                        ? ui_theme::warn()
+                        : ui_theme::text())));
+    } else {
+        m_netTileRetrans->setText(m_osTcpCounters ? QStringLiteral("--")
+                                                  : QStringLiteral("n/a"));
+    }
+    if (snapshot.hostAvailable) {
+        m_netTileTx->setText(
+            QStringLiteral("%1").arg(snapshot.hostNetTxPerSec / 1024.0, 0, 'f', 1));
+        if (m_chartNetPage != nullptr) {
+            m_chartNetPage->push(snapshot.hostNetRxPerSec / 1024.0);
+            m_chartNetPage->pushB(snapshot.hostNetTxPerSec / 1024.0);
+        }
     }
 
     updateOverviewText(snapshot);

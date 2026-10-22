@@ -344,6 +344,13 @@ private:
     QLabel *m_hostTileDisk = nullptr;
     TimeseriesChart *m_chartHostPage = nullptr;
 
+    // Datadog-style Network page (M61l): socket tiles + throughput.
+    QLabel *m_netTileConns = nullptr;
+    QLabel *m_netTileEstab = nullptr;
+    QLabel *m_netTileRetrans = nullptr;
+    QLabel *m_netTileTx = nullptr;
+    TimeseriesChart *m_chartNetPage = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
