@@ -459,7 +459,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
         " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx,"
         " #ddPathTileTargets, #ddPathTileHops, #ddPathTileLoss,"
-        " #ddPathTileRtt { color: %TEXT%; }"
+        " #ddPathTileRtt, #ddSvcTileRunning, #ddSvcTileFailed,"
+        " #ddSvcTileUnits, #ddSvcTileChanges { color: %TEXT%; }"
+        "#ddLogTileEntries, #ddLogTileErrors, #ddLogTileLevels,"
+        " #ddLogTilePipeline { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1858,26 +1861,77 @@ QWidget *DashboardPanel::buildKubernetesView() {
 
 QWidget *DashboardPanel::buildServicesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Unit health tiles; failed counts colored red while > 0.
+    m_svcTileRunning = new QLabel(QStringLiteral("--"), view);
+    m_svcTileRunning->setObjectName(QStringLiteral("ddSvcTileRunning"));
+    m_svcTileFailed = new QLabel(QStringLiteral("--"), view);
+    m_svcTileFailed->setObjectName(QStringLiteral("ddSvcTileFailed"));
+    m_svcTileUnits = new QLabel(QStringLiteral("--"), view);
+    m_svcTileUnits->setObjectName(QStringLiteral("ddSvcTileUnits"));
+    m_svcTileChanges = new QLabel(QStringLiteral("--"), view);
+    m_svcTileChanges->setObjectName(QStringLiteral("ddSvcTileChanges"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("RUNNING"), m_svcTileRunning,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("FAILED"), m_svcTileFailed,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("UNITS"), m_svcTileUnits,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CHANGES"), m_svcTileChanges,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_servicesSummary = new QLabel(QStringLiteral("--"), view);
     m_servicesSummary->setObjectName(QStringLiteral("ddServicesSummary"));
     m_servicesSummary->setFont(monoFont(12, true));
-    layout->addWidget(makeCard(QStringLiteral("SYSTEMD"), m_servicesSummary, view));
 
     m_services = new QLabel(QStringLiteral("--"), view);
     m_services->setObjectName(QStringLiteral("ddServices"));
     m_services->setFont(monoFont(10));
     m_services->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("SERVICES"), m_services, view), 1);
 
     m_servicesChanges = new QLabel(QStringLiteral("--"), view);
     m_servicesChanges->setObjectName(QStringLiteral("ddServicesChanges"));
     m_servicesChanges->setFont(monoFont(10));
     m_servicesChanges->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("CHANGES (restarts)"), m_servicesChanges, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("SYSTEM SERVICES"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SYSTEMD"), m_servicesSummary, view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SERVICES"), m_services, view), 2);
+
+    layout->addWidget(makeBanner(QStringLiteral("CHANGE TIMELINE"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("CHANGES (restarts)"), m_servicesChanges, view), 1);
+
+    m_services->setMinimumWidth(1);
+    m_servicesChanges->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -1975,14 +2029,45 @@ QWidget *DashboardPanel::buildDatabasesView() {
 
 QWidget *DashboardPanel::buildLogsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(14);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Journal-flow tiles (per-window counts from the sample).
+    m_logTileEntries = new QLabel(QStringLiteral("--"), view);
+    m_logTileEntries->setObjectName(QStringLiteral("ddLogTileEntries"));
+    m_logTileErrors = new QLabel(QStringLiteral("--"), view);
+    m_logTileErrors->setObjectName(QStringLiteral("ddLogTileErrors"));
+    m_logTileLevels = new QLabel(QStringLiteral("--"), view);
+    m_logTileLevels->setObjectName(QStringLiteral("ddLogTileLevels"));
+    m_logTilePipeline = new QLabel(QStringLiteral("--"), view);
+    m_logTilePipeline->setObjectName(QStringLiteral("ddLogTilePipeline"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("LOG LINES"), m_logTileEntries,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ERRORS"), m_logTileErrors,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LEVELS"), m_logTileLevels,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RATE /S"), m_logTilePipeline,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_logsSummary = new QLabel(QStringLiteral("--"), view);
     m_logsSummary->setObjectName(QStringLiteral("ddLogsSummary"));
     m_logsSummary->setFont(monoFont(12, true));
-    layout->addWidget(makeCard(QStringLiteral("JOURNALD"), m_logsSummary, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("JOURNAL"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("JOURNALD"), m_logsSummary, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("LOG PIPELINE"),
+        ui_theme::warn(), view));
 
     m_logPipeline = new QLabel(QStringLiteral("--"), view);
     m_logPipeline->setObjectName(QStringLiteral("ddLogPipeline"));
@@ -1990,6 +2075,16 @@ QWidget *DashboardPanel::buildLogsView() {
     m_logPipeline->setWordWrap(false);
     layout->addWidget(
         makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline, view), 1);
+
+    // --- Per-tick line volume (Syspeek-own counter).
+    m_chartLog = new TimeseriesChart(view);
+    m_chartLog->setUnit(QStringLiteral("Count"));
+    m_chartLog->setSeriesName(QStringLiteral("syspeek.journal.lines"));
+
+    layout->addWidget(makeBanner(QStringLiteral("LOG VOLUME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("lines per journal sample"),
+                                    m_chartLog, view));
 
     auto *sensBox = new QWidget(view);
     auto *sensLayout = new QVBoxLayout(sensBox);
@@ -3224,6 +3319,24 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
 }
 
 void DashboardPanel::setServicesSnapshot(const ServicesSnapshot &snapshot) {
+    // Services-page tiles (M61n): running/failed/units/changes; failed
+    // red while > 0, honest "--" until the SCM/systemd sample lands.
+    if (snapshot.available) {
+        m_svcTileRunning->setText(QString::number(snapshot.runningCount));
+        m_svcTileFailed->setText(QString::number(snapshot.failedCount));
+        m_svcTileFailed->setStyleSheet(
+            snapshot.failedCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_svcTileUnits->setText(QString::number(snapshot.units.size()));
+        m_svcTileChanges->setText(QString::number(snapshot.changes.size()));
+    } else {
+        m_svcTileRunning->setText(QStringLiteral("--"));
+        m_svcTileFailed->setText(QStringLiteral("--"));
+        m_svcTileUnits->setText(QStringLiteral("--"));
+        m_svcTileChanges->setText(QStringLiteral("--"));
+    }
+
     m_servicesSummary->setText(servicesSummaryText(snapshot));
 
     QString text;
@@ -3256,6 +3369,26 @@ void DashboardPanel::setServicesSnapshot(const ServicesSnapshot &snapshot) {
 }
 
 void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
+    // Logs-page tiles + volume history (M61o); honest "--" until the
+    // journal sample lands, "n/a" on OSes without a journal.
+    if (snapshot.available) {
+        const int lines = snapshot.entries.size();
+        m_logTileEntries->setText(QString::number(lines));
+        m_logTileErrors->setText(QString::number(snapshot.errorCount));
+        m_logTileErrors->setStyleSheet(
+            snapshot.errorCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        if (m_chartLog != nullptr) {
+            m_chartLog->push(static_cast<double>(lines));
+        }
+    } else {
+        m_logTileEntries->setText(m_osJournal ? QStringLiteral("--")
+                                              : QStringLiteral("n/a"));
+        m_logTileErrors->setText(m_osJournal ? QStringLiteral("--")
+                                             : QStringLiteral("n/a"));
+    }
+
     m_logsSummary->setText(journalSummaryText(snapshot));
     m_logs->setText(snapshot.available
                         ? journalLogsText(snapshot, 40)
@@ -3271,6 +3404,15 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
         messages.append(entry.message);
     }
     const LogFacets facets = computeLogFacets(messages);
+    m_logTileLevels->setText(
+        snapshot.available || !facets.levels.isEmpty()
+            ? QString::number(facets.levels.size())
+            : QStringLiteral("--"));
+    m_logTilePipeline->setText(
+        facets.total > 0
+            ? QStringLiteral("%1%").arg(
+                100.0 * facets.parsed / facets.total, 0, 'f', 0)
+            : QStringLiteral("--"));
     m_logPipeline->setText(logPipelineSummaryText(facets)
                            + QStringLiteral("\n")
                            + logPipelineDetailText(facets));

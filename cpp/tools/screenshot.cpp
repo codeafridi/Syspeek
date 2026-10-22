@@ -201,6 +201,29 @@ int main(int argc, char *argv[]) {
         pod.reason = QStringLiteral("CrashLoopBackOff");
         pod.restarts = 7;
         kube.pods = {pod};
+        // Services story (M61n): three units, one crash-looping, so the
+        // FAILED tile flaps🗴 and the timeline carries a restart row.
+        ServicesSnapshot svc;
+        svc.available = true;
+        auto mkUnit = [](const char *name, const char *active,
+                         const char *sub) {
+            UnitRow row;
+            row.name = QString::fromUtf8(name);
+            row.load = QStringLiteral("loaded");
+            row.active = QString::fromUtf8(active);
+            row.sub = QString::fromUtf8(sub);
+            row.description = row.name + QStringLiteral(" service");
+            return row;
+        };
+        svc.units.append(mkUnit("ssh.service", "active", "running"));
+        svc.units.append(mkUnit("cron.service", "failed", "failed"));
+        svc.units.append(mkUnit("nginx.service", "active", "running"));
+        svc.runningCount = 2;
+        svc.failedCount = 1;
+        ServiceChange svcChange;
+        svcChange.unit = QStringLiteral("nginx.service");
+        svcChange.summary = QStringLiteral("restart (worker reset)");
+        svc.changes.append(svcChange);
         // Network-path story rides the same loop (M61m): two mtr
         // targets; the primary's RTT drifts and one hop flaps loss.
         PathSnapshot path;
@@ -257,12 +280,14 @@ int main(int argc, char *argv[]) {
             path.reports.first().hops[2].lossPercent = (i % 29 < 6) ? 2.5 : 0.0;
             path.reports.first().hops[4].avgMs = 12.0 + (i % 17) * 2.0;
             path.reports.first().hops[4].lastMs = path.reports.first().hops[4].avgMs;
+            svc.failedCount = (i % 37 < 9) ? 1 : 0;
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
             panel.setDockerSnapshot(docker);
             panel.setKubeSnapshot(kube);
             panel.setPathSnapshot(path);
+            panel.setServicesSnapshot(svc);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
@@ -279,6 +304,7 @@ int main(int argc, char *argv[]) {
         panel.setDockerSnapshot(docker);
         panel.setKubeSnapshot(kube);
         panel.setPathSnapshot(path);
+        panel.setServicesSnapshot(svc);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };

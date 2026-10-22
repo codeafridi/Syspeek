@@ -358,6 +358,19 @@ private:
     QLabel *m_pathTileRtt = nullptr;
     TimeseriesChart *m_chartPath = nullptr;
 
+    // Datadog-style Services page (M61n): unit-health tiles + changes.
+    QLabel *m_svcTileRunning = nullptr;
+    QLabel *m_svcTileFailed = nullptr;
+    QLabel *m_svcTileUnits = nullptr;
+    QLabel *m_svcTileChanges = nullptr;
+
+    // Datadog-style Logs page (M61o): journal flow tiles + pipeline.
+    QLabel *m_logTileEntries = nullptr;
+    QLabel *m_logTileErrors = nullptr;
+    QLabel *m_logTileLevels = nullptr;
+    QLabel *m_logTilePipeline = nullptr;
+    TimeseriesChart *m_chartLog = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
