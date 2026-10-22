@@ -455,6 +455,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
+        "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi"
+        " { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -2105,20 +2107,39 @@ QWidget *DashboardPanel::buildCostView() {
 
 QWidget *DashboardPanel::buildDisksView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- I/O fleet tiles; PSI tile is n/a off Linux like the card.
+    m_diskTileRead = new QLabel(QStringLiteral("--"), view);
+    m_diskTileRead->setObjectName(QStringLiteral("ddDiskTileRead"));
+    m_diskTileWrite = new QLabel(QStringLiteral("--"), view);
+    m_diskTileWrite->setObjectName(QStringLiteral("ddDiskTileWrite"));
+    m_diskTileUtil = new QLabel(QStringLiteral("--"), view);
+    m_diskTileUtil->setObjectName(QStringLiteral("ddDiskTileUtil"));
+    m_diskTilePsi = new QLabel(QStringLiteral("--"), view);
+    m_diskTilePsi->setObjectName(QStringLiteral("ddDiskTilePsi"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("READ KB/S"), m_diskTileRead,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WRITE KB/S"), m_diskTileWrite,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("UTIL MAX"), m_diskTileUtil,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PSI SOME"), m_diskTilePsi,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_diskSummary = new QLabel(QStringLiteral("--"), view);
     m_diskSummary->setObjectName(QStringLiteral("ddDiskSummary"));
-    m_diskSummary->setFont(monoFont(13, true));
-    layout->addWidget(makeCard(QStringLiteral("DISK I/O"), m_diskSummary, view));
-
-    m_diskPressure = new QLabel(QStringLiteral("--"), view);
-    m_diskPressure->setObjectName(QStringLiteral("ddDiskPressure"));
-    m_diskPressure->setFont(monoFont(10));
-    m_diskPressure->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("I/O PRESSURE (PSI)"), m_diskPressure, view));
+    m_diskSummary->setFont(monoFont(10));
+    layout->addWidget(
+        makeCard(QStringLiteral("DISK I/O"), m_diskSummary, view));
 
     m_disks = new QTreeWidget(view);
     m_disks->setObjectName(QStringLiteral("ddDisks"));
@@ -2134,8 +2155,56 @@ QWidget *DashboardPanel::buildDisksView() {
     for (int i = 1; i < 7; ++i) {
         m_disks->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
-    layout->addWidget(makeCard(QStringLiteral("DEVICES"), m_disks, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("DEVICES"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("DEVICES"), m_disks, view), 2);
+
+    // --- Throughput history (DD agent vocabulary: system.io.rkb_s).
+    m_chartIoRw = new TimeseriesChart(view);
+    m_chartIoRw->setUnit(QStringLiteral("kB/s"));
+    m_chartIoRw->setSeriesName(QStringLiteral("system.io.rkb_s"));
+    m_chartIoRw->setSeriesNameB(QStringLiteral("system.io.wkb_s"));
+
+    layout->addWidget(makeBanner(QStringLiteral("READ / WRITE"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("disk throughput"),
+                                    m_chartIoRw, view));
+
+    // --- Busy-ness history (max %util across devices).
+    m_chartIoUtil = new TimeseriesChart(view);
+    m_chartIoUtil->setUnit(QStringLiteral("Percent"));
+    m_chartIoUtil->setSeriesName(QStringLiteral("system.io.util"));
+
+    layout->addWidget(makeBanner(QStringLiteral("I/O UTILISATION"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeChartCard(QStringLiteral(
+        "busiest device %util"), m_chartIoUtil, view));
+
+    m_diskPressure = new QLabel(QStringLiteral("--"), view);
+    m_diskPressure->setObjectName(QStringLiteral("ddDiskPressure"));
+    m_diskPressure->setFont(monoFont(10));
+    m_diskPressure->setWordWrap(false);
+    layout->addWidget(
+        makeCard(QStringLiteral("I/O PRESSURE (PSI)"), m_diskPressure, view), 1);
+
+    m_diskPressure->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2377,6 +2446,29 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         if (m_chartDiskUtil != nullptr) {
             m_chartDiskUtil->push(utilMax);
         }
+        // Disks-page tiles + charts (M61j).
+        m_diskTileRead->setText(QString::number(readKb, 'f', 1));
+        m_diskTileWrite->setText(QString::number(writeKb, 'f', 1));
+        m_diskTileUtil->setText(
+            QStringLiteral("%1%").arg(utilMax, 0, 'f', 1));
+        if (m_chartIoRw != nullptr) {
+            m_chartIoRw->push(readKb);
+            m_chartIoRw->pushB(writeKb);
+        }
+        if (m_chartIoUtil != nullptr) {
+            m_chartIoUtil->push(utilMax);
+        }
+    } else {
+        m_diskTileRead->setText(QStringLiteral("--"));
+        m_diskTileWrite->setText(QStringLiteral("--"));
+        m_diskTileUtil->setText(QStringLiteral("--"));
+    }
+    if (snapshot.ioPressureAvailable) {
+        m_diskTilePsi->setText(
+            QStringLiteral("%1%").arg(snapshot.ioPressure.someAvg10, 0, 'f', 1));
+    } else {
+        m_diskTilePsi->setText(m_osPsi ? QStringLiteral("--")
+                                       : QStringLiteral("n/a"));
     }
     if (snapshot.hostAvailable && !snapshot.hostWarming
             && m_chartHostCpu != nullptr) {

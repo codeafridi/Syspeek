@@ -329,6 +329,14 @@ private:
     QLabel *m_memTileRss = nullptr;
     TimeseriesChart *m_chartMemPage = nullptr;
 
+    // Datadog-style Disks page (M61j): io tiles + rate/util charts.
+    QLabel *m_diskTileRead = nullptr;
+    QLabel *m_diskTileWrite = nullptr;
+    QLabel *m_diskTileUtil = nullptr;
+    QLabel *m_diskTilePsi = nullptr;
+    TimeseriesChart *m_chartIoRw = nullptr;
+    TimeseriesChart *m_chartIoUtil = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
