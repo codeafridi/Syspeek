@@ -224,6 +224,31 @@ int main(int argc, char *argv[]) {
         svcChange.unit = QStringLiteral("nginx.service");
         svcChange.summary = QStringLiteral("restart (worker reset)");
         svc.changes.append(svcChange);
+        // Journal story (M61o/M61p): a mixed-priority window with one
+        // recurring error group; errorCount flaps upward mid-run.
+        JournalSnapshot journal;
+        journal.available = true;
+        auto mkEntry = [](int prio, int pid, const char *comm,
+                          const char *msg) {
+            JournalEntry entry;
+            entry.priority = prio;
+            entry.pid = pid;
+            entry.comm = QString::fromUtf8(comm);
+            entry.message = QString::fromUtf8(msg);
+            return entry;
+        };
+        journal.entries.append(
+            mkEntry(6, 1, "systemd", "Started nightly refresh"));
+        journal.entries.append(
+            mkEntry(4, 456, "postgres", "checkpoint starting"));
+        journal.entries.append(
+            mkEntry(3, 456, "postgres", "db.connect refused (max_slots)"));
+        ErrorGroup dbGroup;
+        dbGroup.fingerprint = QStringLiteral("pg.connect");
+        dbGroup.comm = QStringLiteral("postgres");
+        dbGroup.sample = QStringLiteral("db.connect refused (max_slots)");
+        dbGroup.count = 3;
+        journal.errorGroups.append(dbGroup);
         // Network-path story rides the same loop (M61m): two mtr
         // targets; the primary's RTT drifts and one hop flaps loss.
         PathSnapshot path;
@@ -281,6 +306,10 @@ int main(int argc, char *argv[]) {
             path.reports.first().hops[4].avgMs = 12.0 + (i % 17) * 2.0;
             path.reports.first().hops[4].lastMs = path.reports.first().hops[4].avgMs;
             svc.failedCount = (i % 37 < 9) ? 1 : 0;
+            journal.errorCount = (i % 19 < 6) ? 4 : 1;
+            dbGroup.count = 1 + (i % 11);
+            journal.errorGroups.clear();
+            journal.errorGroups.append(dbGroup);
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
@@ -288,6 +317,7 @@ int main(int argc, char *argv[]) {
             panel.setKubeSnapshot(kube);
             panel.setPathSnapshot(path);
             panel.setServicesSnapshot(svc);
+            panel.setJournalSnapshot(journal);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
@@ -305,6 +335,7 @@ int main(int argc, char *argv[]) {
         panel.setKubeSnapshot(kube);
         panel.setPathSnapshot(path);
         panel.setServicesSnapshot(svc);
+        panel.setJournalSnapshot(journal);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };

@@ -462,7 +462,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddPathTileRtt, #ddSvcTileRunning, #ddSvcTileFailed,"
         " #ddSvcTileUnits, #ddSvcTileChanges { color: %TEXT%; }"
         "#ddLogTileEntries, #ddLogTileErrors, #ddLogTileLevels,"
-        " #ddLogTilePipeline { color: %TEXT%; }"
+        " #ddLogTilePipeline, #ddErrTileGroups, #ddErrTileCount,"
+        " #ddErrTileWorst, #ddErrTileRate { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -2053,7 +2054,7 @@ QWidget *DashboardPanel::buildLogsView() {
                               nullptr, view), 1);
     tiles->addWidget(makeTile(QStringLiteral("LEVELS"), m_logTileLevels,
                               nullptr, view), 1);
-    tiles->addWidget(makeTile(QStringLiteral("RATE /S"), m_logTilePipeline,
+    tiles->addWidget(makeTile(QStringLiteral("PARSE"), m_logTilePipeline,
                               nullptr, view), 1);
     layout->addLayout(tiles);
 
@@ -2112,14 +2113,60 @@ QWidget *DashboardPanel::buildLogsView() {
 
 QWidget *DashboardPanel::buildErrorsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Error-group tiles.
+    m_errTileGroups = new QLabel(QStringLiteral("--"), view);
+    m_errTileGroups->setObjectName(QStringLiteral("ddErrTileGroups"));
+    m_errTileCount = new QLabel(QStringLiteral("--"), view);
+    m_errTileCount->setObjectName(QStringLiteral("ddErrTileCount"));
+    m_errTileWorst = new QLabel(QStringLiteral("--"), view);
+    m_errTileWorst->setObjectName(QStringLiteral("ddErrTileWorst"));
+    m_errTileRate = new QLabel(QStringLiteral("--"), view);
+    m_errTileRate->setObjectName(QStringLiteral("ddErrTileRate"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("GROUPS"), m_errTileGroups,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ERRORS"), m_errTileCount,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("TOP GROUP"), m_errTileWorst,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WORST PRI"), m_errTileRate,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_errors = new QLabel(QStringLiteral("--"), view);
     m_errors->setObjectName(QStringLiteral("ddErrors"));
     m_errors->setFont(monoFont(10));
     m_errors->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("ERRORS AND WORSE"), m_errors, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("ERRORS AND WORSE"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("ERROR GROUPS"), m_errors, view), 1);
+
+    m_errors->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3398,6 +3445,43 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
                           ? journalErrorGroupsText(snapshot.errorGroups)
                           : (m_osJournal ? QStringLiteral("--")
                                          : unsupportedOsText()));
+    // Errors-page tiles (M61p): groups/total/top-group/worst severity.
+    if (snapshot.available) {
+        int topGroup = 0;
+        for (const ErrorGroup &group : snapshot.errorGroups) {
+            topGroup = qMax(topGroup, group.count);
+        }
+        int worstPriority = 7;
+        for (const JournalEntry &entry : snapshot.entries) {
+            worstPriority = qMin(worstPriority, entry.priority);
+        }
+        const bool hasEntries = !snapshot.entries.isEmpty();
+        m_errTileGroups->setText(QString::number(snapshot.errorGroups.size()));
+        m_errTileCount->setText(QString::number(snapshot.errorCount));
+        m_errTileCount->setStyleSheet(
+            snapshot.errorCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_errTileWorst->setText(QString::number(topGroup));
+        m_errTileWorst->setStyleSheet(
+            QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_errTileRate->setText(hasEntries
+                                   ? QString::number(worstPriority)
+                                   : QStringLiteral("--"));
+        m_errTileRate->setStyleSheet(
+            hasEntries
+                ? QStringLiteral("color: %1;").arg(
+                    worstPriority <= 3 ? ui_theme::crit()
+                                       : ui_theme::text())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+    } else {
+        m_errTileGroups->setText(m_osJournal ? QStringLiteral("--")
+                                             : QStringLiteral("n/a"));
+        m_errTileCount->setText(m_osJournal ? QStringLiteral("--")
+                                            : QStringLiteral("n/a"));
+        m_errTileWorst->setText(QStringLiteral("--"));
+        m_errTileRate->setText(QStringLiteral("--"));
+    }
 
     QStringList messages;
     for (const JournalEntry &entry : snapshot.entries) {

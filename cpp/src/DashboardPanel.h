@@ -371,6 +371,12 @@ private:
     QLabel *m_logTilePipeline = nullptr;
     TimeseriesChart *m_chartLog = nullptr;
 
+    // Datadog-style Errors page (M61p): grouped errors + volume.
+    QLabel *m_errTileGroups = nullptr;
+    QLabel *m_errTileCount = nullptr;
+    QLabel *m_errTileWorst = nullptr;
+    QLabel *m_errTileRate = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
