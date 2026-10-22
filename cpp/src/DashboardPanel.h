@@ -377,6 +377,18 @@ private:
     QLabel *m_errTileWorst = nullptr;
     QLabel *m_errTileRate = nullptr;
 
+    // Datadog-style Dependencies page (M61r): library resolution tiles.
+    QLabel *m_depTileLibs = nullptr;
+    QLabel *m_depTilePkg = nullptr;
+    QLabel *m_depTileUnmapped = nullptr;
+    QLabel *m_depTileRatio = nullptr;
+
+    // Datadog-style Software page (M61q): SBOM inventory tiles.
+    QLabel *m_sweTilePkgs = nullptr;
+    QLabel *m_sweTileLibs = nullptr;
+    QLabel *m_sweTileResolved = nullptr;
+    QLabel *m_sweTileFams = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 

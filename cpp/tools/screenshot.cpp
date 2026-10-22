@@ -76,6 +76,28 @@ DisplaySnapshot demoSnapshot(int tick) {
     conn.state = QStringLiteral("ESTABLISHED");
     s.connections = {conn};
 
+    // SBOM fixture (M61q/M61r): two deb packages + one brew purl so the
+    // package/resolution tiles and purl-family count render.
+    SbomReport sbom;
+    sbom.available = true;
+    sbom.libraryCount = 12;
+    sbom.resolvedCount = 9;
+    auto mkPkg = [](const char *pkg, const char *ver, const char *purl) {
+        SbomEntry entry;
+        entry.package = QString::fromUtf8(pkg);
+        entry.version = QString::fromUtf8(ver);
+        entry.arch = QStringLiteral("amd64");
+        entry.purl = QString::fromUtf8(purl);
+        return entry;
+    };
+    sbom.entries.append(mkPkg("libssl3", "3.5.5",
+                              "pkg:deb/ubuntu/libssl3@3.5.5?arch=amd64"));
+    sbom.entries.append(mkPkg("libpq5", "17.4-2",
+                              "pkg:deb/ubuntu/libpq5@17.4-2?arch=amd64"));
+    sbom.entries.append(mkPkg("openssl", "3.5.5",
+                              "pkg:brew/openssl@3.5.5"));
+    s.sbom = sbom;
+
     InterfaceRow iface;
     iface.name = QStringLiteral("wlp0s20f3");
     iface.rxBytes = 84ULL * 1024ULL * 1024ULL;

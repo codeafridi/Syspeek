@@ -463,7 +463,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddSvcTileUnits, #ddSvcTileChanges { color: %TEXT%; }"
         "#ddLogTileEntries, #ddLogTileErrors, #ddLogTileLevels,"
         " #ddLogTilePipeline, #ddErrTileGroups, #ddErrTileCount,"
-        " #ddErrTileWorst, #ddErrTileRate { color: %TEXT%; }"
+        " #ddErrTileWorst, #ddErrTileRate, #ddDepTileLibs, #ddDepTilePkg,"
+        " #ddDepTileUnmapped, #ddDepTileRatio, #ddSweTilePkgs,"
+        " #ddSweTileLibs, #ddSweTileResolved, #ddSweTileFams"
+        " { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1938,16 +1941,61 @@ QWidget *DashboardPanel::buildServicesView() {
 
 QWidget *DashboardPanel::buildDependenciesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Library tiles: the SBOM (M23) resolves deps to packages.
+    m_depTileLibs = new QLabel(QStringLiteral("--"), view);
+    m_depTileLibs->setObjectName(QStringLiteral("ddDepTileLibs"));
+    m_depTilePkg = new QLabel(QStringLiteral("--"), view);
+    m_depTilePkg->setObjectName(QStringLiteral("ddDepTilePkg"));
+    m_depTileUnmapped = new QLabel(QStringLiteral("--"), view);
+    m_depTileUnmapped->setObjectName(QStringLiteral("ddDepTileUnmapped"));
+    m_depTileRatio = new QLabel(QStringLiteral("--"), view);
+    m_depTileRatio->setObjectName(QStringLiteral("ddDepTileRatio"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("LIBRARIES"),
+                              m_depTileLibs, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PACKAGES"), m_depTilePkg,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("UNMAPPED"),
+                              m_depTileUnmapped, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RESOLVED"), m_depTileRatio,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_deps = new QLabel(QStringLiteral("--"), view);
     m_deps->setObjectName(QStringLiteral("ddDeps"));
     m_deps->setFont(monoFont(10));
     m_deps->setWordWrap(false);
+
+    layout->addWidget(makeBanner(QStringLiteral("SHARED LIBRARIES"),
+        ui_theme::accent(), view));
     layout->addWidget(
         makeCard(QStringLiteral("SHARED LIBRARIES (focused process)"), m_deps, view),
         1);
+
+    m_deps->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2660,23 +2708,66 @@ QWidget *DashboardPanel::buildTracesView() {
 
 QWidget *DashboardPanel::buildSoftwareView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- SBOM tiles (M23 model: entries resolve focused-app files).
+    m_sweTilePkgs = new QLabel(QStringLiteral("--"), view);
+    m_sweTilePkgs->setObjectName(QStringLiteral("ddSweTilePkgs"));
+    m_sweTileLibs = new QLabel(QStringLiteral("--"), view);
+    m_sweTileLibs->setObjectName(QStringLiteral("ddSweTileLibs"));
+    m_sweTileResolved = new QLabel(QStringLiteral("--"), view);
+    m_sweTileResolved->setObjectName(QStringLiteral("ddSweTileResolved"));
+    m_sweTileFams = new QLabel(QStringLiteral("--"), view);
+    m_sweTileFams->setObjectName(QStringLiteral("ddSweTileFams"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PACKAGES"), m_sweTilePkgs,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LIBRARIES"), m_sweTileLibs,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RESOLVED"),
+                              m_sweTileResolved, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PURL FAMILIES"),
+                              m_sweTileFams, nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_softwareSummary = new QLabel(QStringLiteral("--"), view);
     m_softwareSummary->setObjectName(QStringLiteral("ddSoftwareSummary"));
     m_softwareSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("SBOM (focused app)"), m_softwareSummary, view));
 
     m_software = new QLabel(QStringLiteral("--"), view);
     m_software->setObjectName(QStringLiteral("ddSoftware"));
     m_software->setFont(monoFont(10));
     m_software->setWordWrap(false);
+
+    layout->addWidget(makeBanner(QStringLiteral("SBOM / SOFTWARE"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SBOM (focused app)"), m_softwareSummary, view));
     layout->addWidget(
         makeCard(QStringLiteral("PACKAGES"), m_software, view), 1);
 
+    m_software->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3134,6 +3225,30 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     }
 
     m_softwareSummary->setText(sbomSummaryText(snapshot.sbom));
+    // Software-page tiles (M61q): package counts + purl families.
+    if (snapshot.sbom.available) {
+        m_sweTilePkgs->setText(QString::number(
+            snapshot.sbom.entries.size()));
+        m_sweTileLibs->setText(QString::number(snapshot.sbom.libraryCount));
+        m_sweTileResolved->setText(
+            QString::number(snapshot.sbom.resolvedCount));
+        QSet<QString> fams;
+        for (const SbomEntry &entry : snapshot.sbom.entries) {
+            const int pkgTag = entry.purl.indexOf(QLatin1Char(':'));
+            const int famSlash = entry.purl.indexOf(QLatin1Char('/'),
+                                                    pkgTag + 1);
+            if (pkgTag >= 0 && famSlash > pkgTag) {
+                fams.insert(entry.purl.mid(pkgTag + 1,
+                                           famSlash - pkgTag - 1));
+            }
+        }
+        m_sweTileFams->setText(QString::number(fams.size()));
+    } else {
+        m_sweTilePkgs->setText(QStringLiteral("--"));
+        m_sweTileLibs->setText(QStringLiteral("--"));
+        m_sweTileResolved->setText(QStringLiteral("--"));
+        m_sweTileFams->setText(QStringLiteral("--"));
+    }
     m_software->setText(snapshot.sbom.available
                             ? sbomDetailText(snapshot.sbom)
                             : (m_osDpkgSbom ? QStringLiteral("--")
@@ -3175,6 +3290,26 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         ++depCount;
     }
     m_deps->setText(deps.isEmpty() ? QStringLiteral("--") : deps);
+
+    // Dependencies-page tiles (M61r): SBOM resolution quality; all four
+    // tiles share the sbom source so the page stays self-consistent.
+    if (snapshot.sbom.available) {
+        m_depTileLibs->setText(
+            QString::number(snapshot.sbom.libraryCount));
+        m_depTilePkg->setText(QString::number(snapshot.sbom.entries.size()));
+        const int libTotal = qMax(1, snapshot.sbom.libraryCount);
+        const int unmapped = qMax(0, snapshot.sbom.libraryCount
+                                       - snapshot.sbom.resolvedCount);
+        m_depTileUnmapped->setText(QString::number(unmapped));
+        m_depTileRatio->setText(
+            QStringLiteral("%1%").arg(
+                100.0 * snapshot.sbom.resolvedCount / libTotal, 0, 'f', 0));
+    } else {
+        m_depTileLibs->setText(QStringLiteral("--"));
+        m_depTilePkg->setText(QStringLiteral("--"));
+        m_depTileUnmapped->setText(QStringLiteral("--"));
+        m_depTileRatio->setText(QStringLiteral("--"));
+    }
 
     m_populating = true;
     m_procs->clear();
