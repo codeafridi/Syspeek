@@ -98,6 +98,61 @@ DisplaySnapshot demoSnapshot(int tick) {
                               "pkg:brew/openssl@3.5.5"));
     s.sbom = sbom;
 
+    // Security posture fixture (M61w): systemd-analyze-style exposure
+    // raster with the real grade banding; high band crossed on peaks.
+    SecurityPosture sec;
+    sec.available = true;
+    sec.exposure = std::clamp(4.6 + 1.7 * w1, 1.0, 8.2);
+    sec.grade = sec.exposure < 2.5   ? QStringLiteral("low")
+                : sec.exposure < 5.0 ? QStringLiteral("medium")
+                : sec.exposure < 7.5 ? QStringLiteral("high")
+                                     : QStringLiteral("critical");
+    sec.exposedCount = 3 + static_cast<int>(std::abs(w2) * 2.0);
+    sec.findings.append(SecurityFinding{QStringLiteral("cap_sys_admin"),
+                                        8.0, false});
+    sec.findings.append(SecurityFinding{QStringLiteral("seccomp 0"), 6.5, false});
+    sec.findings.append(SecurityFinding{QStringLiteral("no-new-privs"),
+                                        1.0, true});
+    s.security = sec;
+
+    // Thread-profile fixture (M37): thread count + cpu wave so the
+    // profiles page and its chart render real math.
+    ProfileSnapshot prof;
+    prof.available = true;
+    prof.comm = QStringLiteral("cursor");
+    prof.threadCount = 12 + static_cast<int>(std::abs(w1) * 3.0);
+    prof.totalCpuPercent = cpuPct * 0.92;
+    prof.waitChannels = {
+        {QStringLiteral("ep_poll"), 4},
+        {QStringLiteral("futex_wait"), 3},
+        {QStringLiteral("read"), 2},
+        {QStringLiteral("nanosleep"), 1},
+        {QStringLiteral("select"), 0},
+    };
+    prof.totalPssBytes = static_cast<unsigned long long>(rssMb * 1e6 * 0.78);
+    prof.sampledAtMs = static_cast<qint64>(tick) * 2000;
+    ThreadProfile topThread;
+    topThread.tid = 2092714;
+    topThread.comm = QStringLiteral("gpu-compositor");
+    topThread.state = QStringLiteral("R");
+    topThread.cpuPercent = cpuPct * 0.4;
+    prof.threads.append(topThread);
+    ThreadProfile worker;
+    worker.tid = 2092721;
+    worker.comm = QStringLiteral("worker-3");
+    worker.state = QStringLiteral("S");
+    worker.waitChannel = QStringLiteral("ep_poll");
+    worker.cpuPercent = cpuPct * 0.2;
+    prof.threads.append(worker);
+    ThreadProfile ioThread;
+    ioThread.tid = 2092733;
+    ioThread.comm = QStringLiteral("io-writer");
+    ioThread.state = QStringLiteral("D");
+    ioThread.waitChannel = QStringLiteral("futex_wait");
+    ioThread.cpuPercent = cpuPct * 0.1;
+    prof.threads.append(ioThread);
+    s.profile = prof;
+
     InterfaceRow iface;
     iface.name = QStringLiteral("wlp0s20f3");
     iface.rxBytes = 84ULL * 1024ULL * 1024ULL;
@@ -260,6 +315,22 @@ int main(int argc, char *argv[]) {
         // Synthetic fixture declared beside the other riding stories.
         SyntheticSnapshot synthetic;
         synthetic.available = true;
+        // APM story (M61v): three services with drifting latencies +
+        // error burst on a 41-tick cycle so the ERRORS tile goes red.
+        TraceSnapshot trace;
+        trace.available = true;
+        // DBM story (M61x): cache-hit around 98%, commits/sec drift,
+        // rollbacks and deadlocks on long cycles.
+        DbmSnapshot dbm;
+        dbm.available = true;
+        dbm.database = QStringLiteral("shop_prod");
+        // FIM story (M61w): 9 watched paths, drift flapping 0..2.
+        FimSnapshot fim;
+        fim.available = true;
+        fim.enabled = true;
+        fim.watchedPaths = 9;
+        fim.fileCount = 1408;
+        fim.algorithm = QStringLiteral("sha256");
         ServiceChange svcChange;
         svcChange.unit = QStringLiteral("nginx.service");
         svcChange.summary = QStringLiteral("restart (worker reset)");
@@ -373,6 +444,54 @@ int main(int argc, char *argv[]) {
                 synthetic.downCount = 1;
                 synthetic.upCount = 0;
             }
+            // APM flow: spans creep, latency drifts per service, errors
+            // burst on a 41-tick cycle (red tile + map unchanged).
+            const double wa = std::sin(i / 18.0);
+            const double wb = std::sin(i / 30.0 + 1.2);
+            const double wc = std::sin(i / 40.0 + 2.4);
+            trace.traceCount = 40 + i / 6;
+            trace.spanCount = 900 + i * 7;
+            trace.errorCount = (i % 41 < 5) ? 12 : 0;
+            trace.services = {
+                {QStringLiteral("api"), 20 + i / 4, trace.errorCount,
+                 120.0 + 26.0 * wa, 310.0, 240.0},
+                {QStringLiteral("web"), 12 + i / 7, 0,
+                 84.0 + 18.0 * wb, 190.0, 150.0},
+                {QStringLiteral("billing-db"), 6 + i / 11, 0,
+                 44.0 + 9.0 * wc, 120.0, 96.0},
+            };
+            trace.sampledAtMs = baseMs + i * 2000;
+            // Postgres story: cache-hit ~98%, commits/sec drifts 30..80,
+            // rollback spikes on a 67-tick cycle, deadlocks rare.
+            dbm.cacheHitPercent = 98.4 + 0.8 * wc;
+            dbm.commitsPerSec = 48.0 + 21.0 * wb;
+            dbm.xactCommit = static_cast<quint64>(i * 51);
+            dbm.xactRollback = (i % 67 < 4) ? 7 : 0;
+            dbm.deadlocks = (i % 137 < 3) ? 2 : 0;
+            dbm.connections = 24;
+            dbm.sizeBytes = static_cast<quint64>(8.4e9);
+            dbm.blkReadTimeMs = 3.0 + 2.0 * std::abs(wc);
+            dbm.blkWriteTimeMs = 6.0 + 3.0 * std::abs(wb);
+            dbm.commitsPerSec = std::max(6.0, dbm.commitsPerSec);
+            // FIM drift: 0..2 modified files flapping on a 43-tick cycle.
+            fim.changes.clear();
+            if (i % 43 < 4) {
+                FimChange change;
+                change.kind = FimChangeKind::Modified;
+                change.path = QStringLiteral("/etc/hosts");
+                change.hash = QStringLiteral("a15f…");
+                change.atMs = baseMs + i * 2000;
+                fim.changes.append(change);
+            }
+            if (i % 43 > 2 && i % 31 < 5) {
+                FimChange change;
+                change.kind = FimChangeKind::Modified;
+                change.path = QStringLiteral("/etc/pam.d/login");
+                change.hash = QStringLiteral("9be2…");
+                change.atMs = baseMs + i * 2000;
+                fim.changes.append(change);
+            }
+            fim.sampledAtMs = baseMs + i * 2000;
             DisplaySnapshot snap = demoSnapshot(i);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
@@ -382,6 +501,9 @@ int main(int argc, char *argv[]) {
             panel.setServicesSnapshot(svc);
             panel.setJournalSnapshot(journal);
             panel.setSyntheticSnapshot(synthetic);
+            panel.setTraceSnapshot(trace);
+            panel.setDbmSnapshot(dbm);
+            panel.setFimSnapshot(fim);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
             app.processEvents();
@@ -401,6 +523,9 @@ int main(int argc, char *argv[]) {
         panel.setServicesSnapshot(svc);
         panel.setJournalSnapshot(journal);
         panel.setSyntheticSnapshot(synthetic);
+        panel.setTraceSnapshot(trace);
+        panel.setDbmSnapshot(dbm);
+        panel.setFimSnapshot(fim);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
     };

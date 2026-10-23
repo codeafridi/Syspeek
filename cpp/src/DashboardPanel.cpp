@@ -468,8 +468,13 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddSweTileLibs, #ddSweTileResolved, #ddSweTileFams,"
         " #ddEpTileTotal, #ddEpTilePublic, #ddEpTileLocal, #ddEpTileDb,"
         " #ddSynTileChecks, #ddSynTileUp, #ddSynTileDown, #ddSynTileAvg,"
-        " #ddInsTileAgents, #ddInsTileDd, #ddInsTileOtel, #ddInsTileOther"
-        " { color: %TEXT%; }"
+        " #ddInsTileAgents, #ddInsTileDd, #ddInsTileOtel, #ddInsTileOther,"
+        " #ddTraceTileTraces, #ddTraceTileSpans, #ddTraceTileErrors,"
+        " #ddTraceTileServices, #ddProfTileThreads, #ddProfTileCpu,"
+        " #ddProfTileOffCpu, #ddProfTilePss, #ddDbTileCache,"
+        " #ddDbTileCommits, #ddDbTileRollbacks, #ddDbTileDeadlocks,"
+        " #ddSecTileExposure, #ddSecTileFindings, #ddSecTileThreats,"
+        " #ddSecTileFim { color: %TEXT%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -1171,17 +1176,57 @@ QWidget *DashboardPanel::buildIncidentsView() {
 
 QWidget *DashboardPanel::buildProfilesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Thread-profile tiles (M37: thread-level cpu/off-cpu/pss).
+    m_profTileThreads = new QLabel(QStringLiteral("--"), view);
+    m_profTileThreads->setObjectName(QStringLiteral("ddProfTileThreads"));
+    m_profTileCpu = new QLabel(QStringLiteral("--"), view);
+    m_profTileCpu->setObjectName(QStringLiteral("ddProfTileCpu"));
+    m_profTileOffCpu = new QLabel(QStringLiteral("--"), view);
+    m_profTileOffCpu->setObjectName(QStringLiteral("ddProfTileOffCpu"));
+    m_profTilePss = new QLabel(QStringLiteral("--"), view);
+    m_profTilePss->setObjectName(QStringLiteral("ddProfTilePss"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("THREADS"), m_profTileThreads,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CPU %"), m_profTileCpu,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("OFF-CPU"), m_profTileOffCpu,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PSS MB"), m_profTilePss,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_profileSummary = new QLabel(QStringLiteral("--"), view);
     m_profileSummary->setObjectName(QStringLiteral("ddProfileSummary"));
     m_profileSummary->setFont(monoFont(13, true));
+
+    layout->addWidget(makeBanner(QStringLiteral("PROFILES"),
+        ui_theme::accent(), view));
     layout->addWidget(makeCard(
         QStringLiteral("PROFILES (threads / off-CPU / memory)"),
         m_profileSummary, view));
 
+    // --- Thread-cpu history (thread-level; the agent cannot sample
+    // cross-process threads unprivileged - Syspeek-own series).
+    m_chartProfile = new TimeseriesChart(view);
+    m_chartProfile->setUnit(QStringLiteral("Percent"));
+    m_chartProfile->setSeriesName(QStringLiteral("syspeek.profile.cpu"));
+
+    layout->addWidget(makeBanner(QStringLiteral("CPU OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("total thread cpu"),
+                                    m_chartProfile, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("THREAD DETAIL"),
+        ui_theme::warn(), view));
     m_profileThreads = new QLabel(QStringLiteral("--"), view);
     m_profileThreads->setObjectName(QStringLiteral("ddProfileThreads"));
     m_profileThreads->setFont(monoFont(10));
@@ -1204,6 +1249,25 @@ QWidget *DashboardPanel::buildProfilesView() {
     row->addWidget(
         makeCard(QStringLiteral("MEMORY (PSS)"), m_profileMemory, view), 1);
     layout->addLayout(row, 1);
+
+    m_profileThreads->setMinimumWidth(1);
+    m_profileOffCpu->setMinimumWidth(1);
+    m_profileMemory->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2201,34 +2265,99 @@ QWidget *DashboardPanel::buildInstrumentationView() {
 
 QWidget *DashboardPanel::buildDatabasesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Postgres-health tiles (M30/M40 model).
+    m_dbTileCache = new QLabel(QStringLiteral("--"), view);
+    m_dbTileCache->setObjectName(QStringLiteral("ddDbTileCache"));
+    m_dbTileCommits = new QLabel(QStringLiteral("--"), view);
+    m_dbTileCommits->setObjectName(QStringLiteral("ddDbTileCommits"));
+    m_dbTileRollbacks = new QLabel(QStringLiteral("--"), view);
+    m_dbTileRollbacks->setObjectName(QStringLiteral("ddDbTileRollbacks"));
+    m_dbTileDeadlocks = new QLabel(QStringLiteral("--"), view);
+    m_dbTileDeadlocks->setObjectName(QStringLiteral("ddDbTileDeadlocks"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("CACHE HIT"), m_dbTileCache,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("COMMITS /S"), m_dbTileCommits,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ROLLBACKS"), m_dbTileRollbacks,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DEADLOCKS"), m_dbTileDeadlocks,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_dbmSummary = new QLabel(QStringLiteral("--"), view);
     m_dbmSummary->setObjectName(QStringLiteral("ddDbmSummary"));
     m_dbmSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("DATABASE MONITORING (PostgreSQL)"), m_dbmSummary, view));
 
     m_dbm = new QLabel(QStringLiteral("--"), view);
     m_dbm->setObjectName(QStringLiteral("ddDbm"));
     m_dbm->setFont(monoFont(10));
     m_dbm->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("DBM"), m_dbm, view), 1);
 
     m_dbmStatements = new QLabel(QStringLiteral("--"), view);
     m_dbmStatements->setObjectName(QStringLiteral("ddDbmStatements"));
     m_dbmStatements->setFont(monoFont(10));
     m_dbmStatements->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("TOP QUERIES (pg_stat_statements)"), m_dbmStatements, view), 1);
 
     m_databases = new QLabel(QStringLiteral("--"), view);
     m_databases->setObjectName(QStringLiteral("ddDatabases"));
     m_databases->setFont(monoFont(10));
     m_databases->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("APP DATABASE CONNECTIONS"), m_databases, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("DATABASE MONITORING"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("DATABASE MONITORING (PostgreSQL)"),
+                 m_dbmSummary, view));
+    layout->addWidget(makeCard(QStringLiteral("DBM"), m_dbm, view), 1);
+
+    // --- Transaction-rate history; series names are the shipped
+    // postgres integration's (agent-bundle metadata on record).
+    m_chartDb = new TimeseriesChart(view);
+    m_chartDb->setUnit(QStringLiteral("Per Second"));
+    m_chartDb->setSeriesName(QStringLiteral("postgresql.commits"));
+    m_chartDb->setSeriesNameB(QStringLiteral("postgresql.rollbacks"));
+
+    layout->addWidget(makeBanner(QStringLiteral("TRANSACTION THROUGHPUT"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("commits vs rollbacks"),
+                                    m_chartDb, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("TOP QUERIES"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("TOP QUERIES (pg_stat_statements)"),
+                 m_dbmStatements, view), 1);
+    layout->addWidget(
+        makeCard(QStringLiteral("APP DATABASE CONNECTIONS"), m_databases, view),
+        1);
+
+    m_dbm->setMinimumWidth(1);
+    m_dbmStatements->setMinimumWidth(1);
+    m_databases->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -2786,79 +2915,190 @@ QWidget *DashboardPanel::buildHostView() {
 
 QWidget *DashboardPanel::buildSecurityView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Posture + threat tiles; setters feed their own tile below.
+    m_secTileExposure = new QLabel(QStringLiteral("--"), view);
+    m_secTileExposure->setObjectName(QStringLiteral("ddSecTileExposure"));
+    m_secTileFindings = new QLabel(QStringLiteral("--"), view);
+    m_secTileFindings->setObjectName(QStringLiteral("ddSecTileFindings"));
+    m_secTileThreats = new QLabel(QStringLiteral("--"), view);
+    m_secTileThreats->setObjectName(QStringLiteral("ddSecTileThreats"));
+    m_secTileFim = new QLabel(QStringLiteral("--"), view);
+    m_secTileFim->setObjectName(QStringLiteral("ddSecTileFim"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("EXPOSURE"), m_secTileExposure,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("FINDINGS"), m_secTileFindings,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("THREATS"), m_secTileThreats,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("FILE CHANGES"), m_secTileFim,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_securitySummary = new QLabel(QStringLiteral("--"), view);
     m_securitySummary->setObjectName(QStringLiteral("ddSecuritySummary"));
     m_securitySummary->setFont(monoFont(14, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("SANDBOX EXPOSURE"), m_securitySummary, view));
 
     m_security = new QLabel(QStringLiteral("--"), view);
     m_security->setObjectName(QStringLiteral("ddSecurity"));
     m_security->setFont(monoFont(10));
     m_security->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("HARDENING FINDINGS"), m_security, view), 1);
 
     m_threats = new QLabel(QStringLiteral("--"), view);
     m_threats->setObjectName(QStringLiteral("ddThreats"));
     m_threats->setFont(monoFont(10));
     m_threats->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("THREATS (log-based SIEM)"), m_threats, view), 1);
 
     m_fimSummary = new QLabel(QStringLiteral("--"), view);
     m_fimSummary->setObjectName(QStringLiteral("ddFimSummary"));
     m_fimSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("FILE INTEGRITY (FIM)"), m_fimSummary, view));
 
     m_fim = new QLabel(QStringLiteral("--"), view);
     m_fim->setObjectName(QStringLiteral("ddFim"));
     m_fim->setFont(monoFont(10));
     m_fim->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("FILE CHANGES"), m_fim, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("SANDBOX EXPOSURE"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SANDBOX EXPOSURE"), m_securitySummary, view));
+    layout->addWidget(
+        makeCard(QStringLiteral("HARDENING FINDINGS"), m_security, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("THREATS"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("THREATS (log-based SIEM)"), m_threats, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("FILE INTEGRITY"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("FILE INTEGRITY (FIM)"), m_fimSummary, view));
+    layout->addWidget(makeCard(QStringLiteral("FILE CHANGES"), m_fim, view), 1);
+
+    m_security->setMinimumWidth(1);
+    m_threats->setMinimumWidth(1);
+    m_fim->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
 QWidget *DashboardPanel::buildTracesView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Span-flow tiles.
+    m_traceTileTraces = new QLabel(QStringLiteral("--"), view);
+    m_traceTileTraces->setObjectName(QStringLiteral("ddTraceTileTraces"));
+    m_traceTileSpans = new QLabel(QStringLiteral("--"), view);
+    m_traceTileSpans->setObjectName(QStringLiteral("ddTraceTileSpans"));
+    m_traceTileErrors = new QLabel(QStringLiteral("--"), view);
+    m_traceTileErrors->setObjectName(QStringLiteral("ddTraceTileErrors"));
+    m_traceTileServices = new QLabel(QStringLiteral("--"), view);
+    m_traceTileServices->setObjectName(QStringLiteral("ddTraceTileServices"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("TRACES"), m_traceTileTraces,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SPANS"), m_traceTileSpans,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ERRORS"), m_traceTileErrors,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SERVICES"),
+                              m_traceTileServices, nullptr, view), 1);
+    layout->addLayout(tiles);
 
     m_traceSummary = new QLabel(QStringLiteral("--"), view);
     m_traceSummary->setObjectName(QStringLiteral("ddTraceSummary"));
     m_traceSummary->setFont(monoFont(13, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("APM (OTLP :4318)"), m_traceSummary, view));
 
-    auto *row = new QHBoxLayout;
-    row->setSpacing(10);
     m_traceMap = new QLabel(QStringLiteral("--"), view);
     m_traceMap->setObjectName(QStringLiteral("ddTraceMap"));
     m_traceMap->setFont(monoFont(10));
     m_traceMap->setWordWrap(false);
-    row->addWidget(makeCard(QStringLiteral("SERVICE MAP"), m_traceMap, view), 1);
 
     m_traceServices = new QLabel(QStringLiteral("--"), view);
     m_traceServices->setObjectName(QStringLiteral("ddTraceServices"));
     m_traceServices->setFont(monoFont(10));
     m_traceServices->setWordWrap(false);
-    row->addWidget(makeCard(QStringLiteral("SERVICE LATENCY"), m_traceServices, view), 1);
-    layout->addLayout(row, 1);
 
     m_traceRecent = new QLabel(QStringLiteral("--"), view);
     m_traceRecent->setObjectName(QStringLiteral("ddTraceRecent"));
     m_traceRecent->setFont(monoFont(10));
     m_traceRecent->setWordWrap(false);
-    layout->addWidget(makeCard(QStringLiteral("RECENT TRACES"), m_traceRecent, view), 1);
 
+    layout->addWidget(makeBanner(QStringLiteral("APM / TRACES"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("APM (OTLP :4318)"), m_traceSummary, view));
+
+    // --- Latency history (mean service latency per sample; spans are
+    // forwarded host-side - per-app latency is not an agent metric).
+    m_chartTrace = new TimeseriesChart(view);
+    m_chartTrace->setUnit(QStringLiteral("Milliseconds"));
+    m_chartTrace->setSeriesName(QStringLiteral("syspeek.trace.latency"));
+
+    layout->addWidget(makeBanner(QStringLiteral("LATENCY"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("mean service latency"),
+                                    m_chartTrace, view));
+
+    layout->addWidget(makeBanner(QStringLiteral("SERVICES"),
+        ui_theme::warn(), view));
+    auto *row = new QHBoxLayout;
+    row->setSpacing(10);
+    row->addWidget(makeCard(QStringLiteral("SERVICE MAP"), m_traceMap, view), 1);
+    row->addWidget(
+        makeCard(QStringLiteral("SERVICE LATENCY"), m_traceServices, view), 1);
+    layout->addLayout(row, 1);
+    layout->addWidget(
+        makeCard(QStringLiteral("RECENT TRACES"), m_traceRecent, view), 1);
+
+    m_traceMap->setMinimumWidth(1);
+    m_traceServices->setMinimumWidth(1);
+    m_traceRecent->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3378,6 +3618,28 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     m_profileOffCpu->setText(profileOffCpuText(snapshot.profile));
     m_profileMemory->setText(profileMemoryText(snapshot.profile));
 
+    // Profiles-page tiles (M61y): thread counts, cpu and pss totals;
+    // gated OSes keep profile.available false -> honest dashes.
+    if (snapshot.profile.available && !snapshot.profile.warming) {
+        m_profTileThreads->setText(
+            QString::number(snapshot.profile.threadCount));
+        m_profTileCpu->setText(
+            QStringLiteral("%1").arg(snapshot.profile.totalCpuPercent,
+                                     0, 'f', 1));
+        m_profTileOffCpu->setText(
+            QString::number(snapshot.profile.waitChannels.size()));
+        m_profTilePss->setText(QStringLiteral("%1").arg(
+            snapshot.profile.totalPssBytes / 1048576.0, 0, 'f', 1));
+        if (m_chartProfile != nullptr) {
+            m_chartProfile->push(snapshot.profile.totalCpuPercent);
+        }
+    } else {
+        m_profTileThreads->setText(QStringLiteral("--"));
+        m_profTileCpu->setText(QStringLiteral("--"));
+        m_profTileOffCpu->setText(QStringLiteral("--"));
+        m_profTilePss->setText(QStringLiteral("--"));
+    }
+
     DiskSnapshot disk;
     disk.disks = snapshot.disks;
     disk.pressure = snapshot.ioPressure;
@@ -3431,12 +3693,26 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     if (snapshot.security.available) {
         m_securitySummary->setText(securitySummaryText(snapshot.security));
         m_security->setText(securityDetailText(snapshot.security));
+        // Security-page tiles (M61w): exposure + finding counts.
+        m_secTileExposure->setText(
+            QStringLiteral("%1").arg(snapshot.security.exposure, 0, 'f', 1));
+        m_secTileExposure->setStyleSheet(
+            QStringLiteral("color: %1;").arg(
+                snapshot.security.exposure >= 7.5 ? ui_theme::crit()
+                : snapshot.security.exposure >= 2.5 ? ui_theme::warn()
+                                                    : ui_theme::text()));
+        m_secTileFindings->setText(
+            QString::number(snapshot.security.exposedCount));
     } else if (!m_osSecurity) {
         m_securitySummary->setText(unsupportedOsText());
         m_security->setText(unsupportedOsText());
+        m_secTileExposure->setText(QStringLiteral("n/a"));
+        m_secTileFindings->setText(QStringLiteral("n/a"));
     } else {
         m_securitySummary->setText(QStringLiteral("--"));
         m_security->setText(QStringLiteral("--"));
+        m_secTileExposure->setText(QStringLiteral("--"));
+        m_secTileFindings->setText(QStringLiteral("--"));
     }
 
     m_softwareSummary->setText(sbomSummaryText(snapshot.sbom));
@@ -3866,6 +4142,13 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
     const ThreatReport threats = evaluateThreats(events);
     m_threats->setText(threatSummaryText(threats) + QStringLiteral("\n")
                        + threatDetailText(threats));
+    // Security-page THREATS tile (M61w); red while overflow scenarios
+    // are firing.
+    m_secTileThreats->setText(QString::number(threats.findings.size()));
+    m_secTileThreats->setStyleSheet(
+        threats.findings.isEmpty()
+            ? QStringLiteral("color: %1;").arg(ui_theme::text())
+            : QStringLiteral("color: %1;").arg(ui_theme::crit()));
 }
 
 void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
@@ -4203,6 +4486,31 @@ void DashboardPanel::setTraceSnapshot(const TraceSnapshot &snapshot) {
     m_traceSummary->setText(traceSummaryText(snapshot));
     m_traceMap->setText(traceServiceMapText(snapshot));
     m_traceServices->setText(traceServicesText(snapshot));
+
+    // Traces-page tiles (M61v): span flow + mean service latency.
+    if (snapshot.available) {
+        m_traceTileTraces->setText(QString::number(snapshot.traceCount));
+        m_traceTileSpans->setText(QString::number(snapshot.spanCount));
+        m_traceTileErrors->setText(QString::number(snapshot.errorCount));
+        m_traceTileErrors->setStyleSheet(
+            snapshot.errorCount > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_traceTileServices->setText(
+            QString::number(snapshot.services.size()));
+        double sum = 0.0;
+        for (const ServiceLatency &svc : snapshot.services) {
+            sum += svc.avgMs;
+        }
+        if (m_chartTrace != nullptr && !snapshot.services.isEmpty()) {
+            m_chartTrace->push(sum / snapshot.services.size());
+        }
+    } else {
+        m_traceTileTraces->setText(QStringLiteral("--"));
+        m_traceTileSpans->setText(QStringLiteral("--"));
+        m_traceTileErrors->setText(QStringLiteral("--"));
+        m_traceTileServices->setText(QStringLiteral("--"));
+    }
     m_traceRecent->setText(traceRecentText(snapshot));
 }
 
@@ -4367,6 +4675,36 @@ void DashboardPanel::setDbmSnapshot(const DbmSnapshot &snapshot) {
     m_dbmSummary->setText(dbmSummaryText(snapshot));
     m_dbm->setText(dbmDetailText(snapshot));
     m_dbmStatements->setText(dbmStatementsText(snapshot));
+
+    // Databases-page tiles (M61x): the shipped postgres integration's
+    // vocabulary (postgresql.buffer_hit/commits/rollbacks/deadlocks).
+    if (snapshot.available) {
+        m_dbTileCache->setText(
+            QStringLiteral("%1%").arg(snapshot.cacheHitPercent, 0, 'f', 1));
+        m_dbTileCommits->setText(
+            QStringLiteral("%1").arg(snapshot.commitsPerSec, 0, 'f', 1));
+        m_dbTileRollbacks->setText(
+            QString::number(snapshot.xactRollback));
+        m_dbTileRollbacks->setStyleSheet(
+            snapshot.xactRollback > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::warn())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        m_dbTileDeadlocks->setText(
+            QString::number(snapshot.deadlocks));
+        m_dbTileDeadlocks->setStyleSheet(
+            snapshot.deadlocks > 0
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::text()));
+        if (m_chartDb != nullptr) {
+            m_chartDb->push(snapshot.commitsPerSec);
+            m_chartDb->pushB(static_cast<double>(snapshot.xactRollback));
+        }
+    } else {
+        m_dbTileCache->setText(QStringLiteral("--"));
+        m_dbTileCommits->setText(QStringLiteral("--"));
+        m_dbTileRollbacks->setText(QStringLiteral("--"));
+        m_dbTileDeadlocks->setText(QStringLiteral("--"));
+    }
 }
 
 void DashboardPanel::setTlsSnapshot(const TlsSnapshot &snapshot) {
@@ -4378,4 +4716,12 @@ void DashboardPanel::setFimSnapshot(const FimSnapshot &snapshot) {
     m_fimSummary->setText(m_osFim ? fimSummaryText(snapshot)
                                   : unsupportedOsText());
     m_fim->setText(m_osFim ? fimDetailText(snapshot) : unsupportedOsText());
+    // Security-page FILE CHANGES tile (M61w): drift count or n/a on
+    // gated OSes.
+    if (m_osFim && snapshot.available && !snapshot.baseline) {
+        m_secTileFim->setText(QString::number(snapshot.changes.size()));
+    } else {
+        m_secTileFim->setText(m_osFim ? QStringLiteral("--")
+                                      : QStringLiteral("n/a"));
+    }
 }

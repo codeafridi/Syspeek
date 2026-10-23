@@ -404,6 +404,27 @@ private:
     QLabel *m_insTileOtel = nullptr;
     QLabel *m_insTileOther = nullptr;
 
+    // Datadog-style Traces/Profiles/Databases/Security pages (M61v-y).
+    QLabel *m_traceTileTraces = nullptr;
+    QLabel *m_traceTileSpans = nullptr;
+    QLabel *m_traceTileErrors = nullptr;
+    QLabel *m_traceTileServices = nullptr;
+    TimeseriesChart *m_chartTrace = nullptr;
+    QLabel *m_profTileThreads = nullptr;
+    QLabel *m_profTileCpu = nullptr;
+    QLabel *m_profTileOffCpu = nullptr;
+    QLabel *m_profTilePss = nullptr;
+    TimeseriesChart *m_chartProfile = nullptr;
+    QLabel *m_dbTileCache = nullptr;
+    QLabel *m_dbTileCommits = nullptr;
+    QLabel *m_dbTileRollbacks = nullptr;
+    QLabel *m_dbTileDeadlocks = nullptr;
+    TimeseriesChart *m_chartDb = nullptr;
+    QLabel *m_secTileExposure = nullptr;
+    QLabel *m_secTileFindings = nullptr;
+    QLabel *m_secTileThreats = nullptr;
+    QLabel *m_secTileFim = nullptr;
+
     QListWidget *m_rail = nullptr;
     QStackedWidget *m_views = nullptr;
 
