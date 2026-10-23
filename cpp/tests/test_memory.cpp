@@ -15,6 +15,17 @@
 #include <sys/socket.h>
 #endif
 
+#if defined(Q_OS_LINUX)
+#include <linux/inet_diag.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/sock_diag.h>
+#include <linux/tcp.h>
+#include <sys/socket.h>
+#endif
+
+#include <QtEndian>
+
 #include <cmath>
 #include <cstdio>
 #if defined(Q_OS_WIN)
@@ -498,6 +509,153 @@ int main(int argc, char *argv[]) {
         check(linuxproc::sumRssKbWith(QList<int>{10, 10}, reader, total)
                   && total == 200,
               "sumRssKbWith double-counts shared pages (caveat documented)");
+    }
+
+    // ---- M62a: socket queues + netlink tcp diag + kernel limits ----
+    {
+        const QByteArray queues =
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+            "   0: 0100007F:0035 00000000:0000 0A 00000012:00000400 00:00000000 00000000     0        0 111 1\n";
+        QList<linuxproc::SocketInfo> socks;
+        check(linuxproc::parseNetTable(queues, QStringLiteral("tcp"), socks)
+                  && socks.size() == 1,
+              "parseNetTable: queued row parses");
+        check(socks.at(0).txQueue == 0x12 && socks.at(0).rxQueue == 0x400,
+              "parseNetTable: tx/rx queue hex columns decoded");
+    }
+#if defined(Q_OS_LINUX)
+    {
+        QByteArray fixtureMessage;
+        const char header[4] = {
+            static_cast<char>(AF_INET), 0x01, 0x00, 0x00
+        };
+        fixtureMessage.append(header, 4);
+        QByteArray idBytes(48, '\0');
+        auto *id = reinterpret_cast<struct inet_diag_sockid *>(idBytes.data());
+        qToBigEndian<quint16>(4711, &id->idiag_sport);
+        qToBigEndian<quint16>(80, &id->idiag_dport);
+        const unsigned char src[4] = {1, 2, 3, 4};
+        id->idiag_src[0] = *reinterpret_cast<const __be32 *>(src);
+        const unsigned char dst[4] = {93, 184, 216, 34};
+        id->idiag_dst[0] = *reinterpret_cast<const __be32 *>(dst);
+        id->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
+        id->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
+        fixtureMessage.append(idBytes);
+        const quint32 tails[5] = {0, 33, 44, 1000, 777};
+        fixtureMessage.append(reinterpret_cast<const char *>(tails),
+                              sizeof(tails));
+
+        QByteArray tiPayload(192, '\0');
+        auto *ti = reinterpret_cast<struct tcp_info *>(tiPayload.data());
+        ti->tcpi_retransmits = 3;
+        ti->tcpi_rtt = 1200;
+        ti->tcpi_rttvar = 300;
+        ti->tcpi_snd_cwnd = 10;
+        ti->tcpi_snd_mss = 1448;
+        ti->tcpi_total_retrans = 44;
+        ti->tcpi_bytes_acked = 5555;
+        ti->tcpi_bytes_received = 6666;
+        ti->tcpi_pmtu = 1500;
+        const quint16 infoLen = static_cast<quint16>(
+            RTA_LENGTH(static_cast<unsigned int>(tiPayload.size())));
+        fixtureMessage.append(reinterpret_cast<const char *>(&infoLen), 2);
+        const quint16 infoType = INET_DIAG_INFO;
+        fixtureMessage.append(reinterpret_cast<const char *>(&infoType), 2);
+        fixtureMessage.append(tiPayload);
+
+        const quint16 congLen = static_cast<quint16>(RTA_LENGTH(6));
+        fixtureMessage.append(reinterpret_cast<const char *>(&congLen), 2);
+        const quint16 congType = INET_DIAG_CONG;
+        fixtureMessage.append(reinterpret_cast<const char *>(&congType), 2);
+        fixtureMessage.append("cubic", 6);
+
+        struct nlmsghdr record = {};
+        record.nlmsg_len = NLMSG_LENGTH(
+            static_cast<unsigned int>(fixtureMessage.size()));
+        record.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+        QByteArray content(reinterpret_cast<const char *>(&record), sizeof(record));
+        content.append(fixtureMessage);
+        content.append(QByteArray(NLMSG_ALIGN(record.nlmsg_len)
+                                      - record.nlmsg_len,
+                                  '\0'));
+
+        struct nlmsghdr done = {};
+        done.nlmsg_len = NLMSG_LENGTH(0);
+        done.nlmsg_type = NLMSG_DONE;
+        content.append(reinterpret_cast<const char *>(&done), sizeof(done));
+
+        QList<linuxproc::TcpDiagInfo> parsed;
+        check(linuxproc::parseTcpDiagDump(content, parsed)
+                  && parsed.size() == 1,
+              "parseTcpDiagDump: synthetic inet_diag message parses");
+        if (parsed.size() == 1) {
+            const linuxproc::TcpDiagInfo &info = parsed.first();
+            check(info.localAddr == QStringLiteral("1.2.3.4")
+                      && info.localPort == 4711
+                      && info.remoteAddr == QStringLiteral("93.184.216.34")
+                      && info.remotePort == 80
+                      && info.state == QStringLiteral("ESTABLISHED")
+                      && info.inode == 777
+                      && info.rqueue == 33 && info.wqueue == 44
+                      && info.uid == 1000,
+                  "parseTcpDiagDump: socket identity decoded");
+            check(info.hasInfo && info.rttUsec == 1200 && info.rttVarUsec == 300
+                      && info.sndCwnd == 10 && info.sndMss == 1448
+                      && info.retransmits == 3 && info.totalRetrans == 44
+                      && info.bytesAcked == 5555 && info.bytesReceived == 6666
+                      && info.pmtu == 1500,
+                  "parseTcpDiagDump: tcp_info payload decoded");
+            check(info.congestion == QStringLiteral("cubic"),
+                  "parseTcpDiagDump: congestion algorithm attr decoded");
+        }
+    }
+#endif
+    {
+        linuxproc::CgroupInfo events;
+        check(linuxproc::parseCgroupMemoryEvents(
+                  "oom 7\noom_kill 2\nmax 1\n", events)
+              && events.memOomEvents == 7 && events.memOomKills == 2,
+              "parseCgroupMemoryEvents: oom/oom_kill counters");
+    }
+    {
+        unsigned long long allocated = 0;
+        unsigned long long limit2 = 0;
+        check(linuxproc::parseFileNr("  34976  0  1048576\n", allocated,
+                                     limit2)
+                  && allocated == 34976 && limit2 == 1048576,
+              "parseFileNr: allocated/limit columns");
+        check(!linuxproc::parseFileNr("no data", allocated, limit2),
+              "parseFileNr: malformed row rejected");
+    }
+    {
+        QList<QString> algorithms;
+        linuxproc::parseCongestionAvailable("cubic bbr2 cubic reno\n",
+                                            algorithms);
+        check(algorithms.size() == 3
+                  && algorithms.at(1) == QStringLiteral("bbr2"),
+              "parseCongestionAvailable: split + dedupe");
+    }
+    {
+        int running = -1;
+        int blocked2 = -1;
+        check(linuxproc::parseHostStatTail(
+                  "procs_running 5\nprocs_blocked 2\ncpu 1 2 3\n",
+                  running, blocked2)
+                  && running == 5 && blocked2 == 2,
+              "parseHostStatTail: running/blocked");
+    }
+    check(formatBytesCompact(97) == QStringLiteral("97 B")
+              && formatBytesCompact(2048) == QStringLiteral("2 KB")
+              && formatBytesCompact(3 * 1024ULL * 1024ULL)
+                     == QStringLiteral("3.0 MB"),
+          "formatBytesCompact: B/KB/MB");
+    {
+        linuxproc::HostCpuTimes stealCpu;
+        check(linuxproc::parseHostCpu(
+                  "cpu  1000 0 500 3000 200 0 0 700 0 0\ncpu0 1 2 3 4\n",
+                  stealCpu)
+                  && stealCpu.steal == 700 && stealCpu.idle == 3200,
+              "parseHostCpu: steal column decoded");
     }
 
     // ---- group sum (real /proc) ----

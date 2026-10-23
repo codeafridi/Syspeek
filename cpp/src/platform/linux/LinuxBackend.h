@@ -37,7 +37,11 @@ public:
     QList<unsigned long long> socketInodes(int pid) override;
     bool processInstrumentation(int pid, QList<QString> &agents) override;
     bool cgroupSample(int pid, linuxproc::CgroupInfo &out) override;
+    bool kernelLimits(linuxproc::KernelLimits &out) override;
     bool sumRssKb(const QList<int> &pids, unsigned long long &out) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;
+#if defined(Q_OS_LINUX)
+    QList<linuxproc::TcpDiagInfo> queryTcpDiag() override;
+#endif
 };

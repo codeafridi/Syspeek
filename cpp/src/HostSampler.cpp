@@ -78,6 +78,19 @@ HostSample HostSampler::sample() {
     }
 
     out.cpuPercent = linuxproc::hostCpuBusyPercent(m_lastCpu, cpu);
+    {
+        const long long deltaTotal =
+            static_cast<long long>(cpu.total)
+            - static_cast<long long>(m_lastCpu.total);
+        const long long deltaSteal =
+            static_cast<long long>(cpu.steal)
+            - static_cast<long long>(m_lastCpu.steal);
+        if (deltaTotal > 0 && deltaSteal > 0) {
+            out.stealPercent =
+                static_cast<double>(deltaSteal)
+                / static_cast<double>(deltaTotal) * 100.0;
+        }
+    }
     if (netOk) {
         out.netRxPerSec =
             linuxproc::netRatePerSec(m_lastNet.rxBytes, net.rxBytes, seconds);

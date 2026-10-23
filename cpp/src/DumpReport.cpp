@@ -110,6 +110,24 @@ QString dumpReportJson(int maxProcs) {
         host.insert(QStringLiteral("load5"), l5);
         host.insert(QStringLiteral("load15"), l15);
     }
+#if defined(Q_OS_LINUX)
+    linuxproc::KernelLimits kernel;
+    if (backend.kernelLimits(kernel) && kernel.available) {
+        host.insert(QStringLiteral("fdAllocated"),
+                    static_cast<double>(kernel.fdAllocated));
+        host.insert(QStringLiteral("fdMax"),
+                    static_cast<double>(kernel.fdMax));
+        host.insert(QStringLiteral("somaxconn"),
+                    static_cast<double>(kernel.somaxconn));
+        if (!kernel.congestion.isEmpty()) {
+            host.insert(QStringLiteral("congestion"), kernel.congestion);
+        }
+        host.insert(QStringLiteral("runningProcs"), kernel.runningProcs);
+        host.insert(QStringLiteral("blockedProcs"), kernel.blockedProcs);
+        host.insert(QStringLiteral("swappiness"), kernel.swappiness);
+        host.insert(QStringLiteral("overcommit"), kernel.overcommit);
+    }
+#endif
 
     unsigned long long diskTotal = 0;
     unsigned long long diskFree = 0;
@@ -208,6 +226,45 @@ QString dumpReportJson(int maxProcs) {
     root.insert(QStringLiteral("host"), host);
     root.insert(QStringLiteral("processCount"), pids.size());
     root.insert(QStringLiteral("processes"), processes);
+#if defined(Q_OS_LINUX)
+    {
+        QList<linuxproc::TcpDiagInfo> diag;
+        const bool queried = linuxproc::queryTcpDiag(diag);
+        QJsonObject tcpDiag;
+        tcpDiag.insert(QStringLiteral("queried"), queried);
+        int withInfo = 0;
+        for (const linuxproc::TcpDiagInfo &info : diag) {
+            if (info.hasInfo) {
+                ++withInfo;
+            }
+        }
+        tcpDiag.insert(QStringLiteral("count"), diag.size());
+        tcpDiag.insert(QStringLiteral("withInfo"), withInfo);
+        QJsonObject first;
+        if (!diag.isEmpty()) {
+            const linuxproc::TcpDiagInfo &info = diag.first();
+            first.insert(QStringLiteral("local"),
+                         QStringLiteral("%1:%2")
+                             .arg(info.localAddr)
+                             .arg(info.localPort));
+            first.insert(QStringLiteral("remote"),
+                         QStringLiteral("%1:%2")
+                             .arg(info.remoteAddr)
+                             .arg(info.remotePort));
+            first.insert(QStringLiteral("state"), info.state);
+            if (info.hasInfo) {
+                first.insert(QStringLiteral("rttMs"),
+                             info.rttUsec / 1000.0);
+                first.insert(QStringLiteral("cwnd"),
+                             static_cast<double>(info.sndCwnd));
+                first.insert(QStringLiteral("totalRetrans"),
+                             static_cast<double>(info.totalRetrans));
+            }
+        }
+        tcpDiag.insert(QStringLiteral("first"), first);
+        root.insert(QStringLiteral("tcpDiag"), tcpDiag);
+    }
+#endif
 
     QJsonObject services;
     const QList<ServiceRecord> serviceRecords = backend.readServices();

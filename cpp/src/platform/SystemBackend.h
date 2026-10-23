@@ -155,6 +155,10 @@ public:
         Q_UNUSED(out);
         return false;
     }
+    virtual bool kernelLimits(linuxproc::KernelLimits &out) {
+        Q_UNUSED(out);
+        return false;
+    }
     virtual bool sumRssKb(const QList<int> &pids, unsigned long long &out) {
         unsigned long long total = 0;
         bool any = false;
@@ -176,6 +180,11 @@ public:
     virtual QList<linuxproc::SocketInfo> readNetSockets() {
         return QList<linuxproc::SocketInfo>();
     }
+#if defined(Q_OS_LINUX)
+    virtual QList<linuxproc::TcpDiagInfo> queryTcpDiag() {
+        return QList<linuxproc::TcpDiagInfo>();
+    }
+#endif
     virtual bool hostSecurityPosture(QList<SecurityFinding> &out) {
         Q_UNUSED(out);
         return false;

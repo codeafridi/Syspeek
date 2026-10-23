@@ -16,6 +16,15 @@
 
 #include <sys/statvfs.h>
 #endif
+#if defined(Q_OS_LINUX)
+#include <linux/inet_diag.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/sock_diag.h>
+#include <linux/tcp.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 namespace linuxproc {
 
@@ -573,6 +582,14 @@ bool parseNetTable(const QByteArray &content, const QString &proto,
         bool ok = false;
         const int state = fields.at(3).toInt(&ok, 16);
         info.state = ok ? socketStateName(state) : QStringLiteral("UNKNOWN");
+
+        const QByteArray tcpQueues = fields.at(4);
+        const int queueColon = tcpQueues.indexOf(':');
+        if (queueColon > 0) {
+            info.txQueue = tcpQueues.left(queueColon).toULongLong(nullptr, 16);
+            info.rxQueue =
+                tcpQueues.mid(queueColon + 1).toULongLong(nullptr, 16);
+        }
         info.inode = fields.at(9).toULongLong();
         out.append(info);
     }
@@ -593,6 +610,221 @@ QList<SocketInfo> readNetSockets() {
     }
     return all;
 }
+
+#if defined(Q_OS_LINUX)
+static_assert(sizeof(struct nlmsghdr) == 16, "nlmsghdr layout");
+static_assert(sizeof(struct inet_diag_sockid) == 48, "inet_diag_sockid layout");
+static_assert(sizeof(struct inet_diag_msg) == 72, "inet_diag_msg layout");
+static_assert(sizeof(struct inet_diag_req_v2) == 56, "inet_diag_req_v2 layout");
+
+namespace {
+
+QString diagAddrText(quint8 family, const unsigned char *raw) {
+    if (family == AF_INET) {
+        return QStringLiteral("%1.%2.%3.%4")
+            .arg(raw[0])
+            .arg(raw[1])
+            .arg(raw[2])
+            .arg(raw[3]);
+    }
+    QString hex;
+    for (int word = 0; word < 4; ++word) {
+        const unsigned char *group = raw + word * 4;
+        hex += QStringLiteral("%1%2%3%4")
+                   .arg(group[3], 2, 16, QLatin1Char('0'))
+                   .arg(group[2], 2, 16, QLatin1Char('0'))
+                   .arg(group[1], 2, 16, QLatin1Char('0'))
+                   .arg(group[0], 2, 16, QLatin1Char('0'));
+    }
+    return ipv6FromHex(hex);
+}
+
+} // namespace
+
+bool parseTcpDiagDumpData(const char *data, qsizetype remaining,
+                          QList<TcpDiagInfo> &out) {
+
+    while (remaining >= static_cast<qsizetype>(sizeof(struct nlmsghdr))) {
+        auto nlh = reinterpret_cast<const struct nlmsghdr *>(data);
+        if (nlh->nlmsg_len < sizeof(struct nlmsghdr)
+            || static_cast<qsizetype>(nlh->nlmsg_len) > remaining) {
+            return false;
+        }
+        if (nlh->nlmsg_type == NLMSG_DONE
+            || nlh->nlmsg_type == NLMSG_ERROR) {
+            return true;
+        }
+        if (nlh->nlmsg_type != SOCK_DIAG_BY_FAMILY) {
+            data += NLMSG_ALIGN(nlh->nlmsg_len);
+            remaining -= NLMSG_ALIGN(nlh->nlmsg_len);
+            continue;
+        }
+        const unsigned int payloadLen = nlh->nlmsg_len - NLMSG_HDRLEN;
+        if (payloadLen >= sizeof(struct inet_diag_msg)) {
+            auto msg = reinterpret_cast<const struct inet_diag_msg *>(
+                data + NLMSG_HDRLEN);
+            TcpDiagInfo info;
+            info.localAddr = diagAddrText(
+                msg->idiag_family,
+                reinterpret_cast<const unsigned char *>(msg->id.idiag_src));
+            info.localPort = ntohs(msg->id.idiag_sport);
+            info.remoteAddr = diagAddrText(
+                msg->idiag_family,
+                reinterpret_cast<const unsigned char *>(msg->id.idiag_dst));
+            info.remotePort = ntohs(msg->id.idiag_dport);
+            info.state = socketStateName(msg->idiag_state);
+            info.rqueue = msg->idiag_rqueue;
+            info.wqueue = msg->idiag_wqueue;
+            info.uid = msg->idiag_uid;
+            info.inode = msg->idiag_inode;
+            const char *attr = data + NLMSG_HDRLEN
+                               + NLMSG_ALIGN(sizeof(struct inet_diag_msg));
+            const char *attrEnd = data + NLMSG_ALIGN(nlh->nlmsg_len);
+            while (attr + sizeof(struct rtattr) <= attrEnd) {
+                auto ra = reinterpret_cast<const struct rtattr *>(attr);
+                if (ra->rta_len < sizeof(struct rtattr)
+                    || attr + ra->rta_len > attrEnd) {
+                    break;
+                }
+                if (ra->rta_type == INET_DIAG_INFO
+                    && ra->rta_len >= RTA_LENGTH(0)) {
+                    auto ti = reinterpret_cast<const struct tcp_info *>(
+                        attr + RTA_LENGTH(0));
+                    const size_t have =
+                        static_cast<size_t>(ra->rta_len - RTA_LENGTH(0));
+                    const size_t base = offsetof(struct tcp_info, tcpi_rttvar)
+                                        + sizeof(quint32);
+                    info.hasInfo = have >= base;
+                    if (info.hasInfo) {
+                        info.retransmits = ti->tcpi_retransmits;
+                        info.rtoUsec = ti->tcpi_rto;
+                        info.sndMss = ti->tcpi_snd_mss;
+                        info.sndSsthresh = ti->tcpi_snd_ssthresh;
+                        info.rttUsec = ti->tcpi_rtt;
+                        info.rttVarUsec = ti->tcpi_rttvar;
+                        info.sndCwnd = ti->tcpi_snd_cwnd;
+                    }
+                    if (have >= offsetof(struct tcp_info, tcpi_pmtu)
+                                    + sizeof(quint32)) {
+                        info.pmtu = ti->tcpi_pmtu;
+                    }
+                    if (have >= offsetof(struct tcp_info, tcpi_total_retrans)
+                                    + sizeof(quint32)) {
+                        info.totalRetrans = ti->tcpi_total_retrans;
+                    }
+                    if (have >= offsetof(struct tcp_info, tcpi_segs_out)
+                                    + sizeof(ti->tcpi_segs_out)) {
+                        info.segsOut = ti->tcpi_segs_out;
+                        info.segsIn = ti->tcpi_segs_in;
+                    }
+                    if (have >= offsetof(struct tcp_info, tcpi_bytes_acked)
+                                    + sizeof(quint64)) {
+                        info.bytesAcked = ti->tcpi_bytes_acked;
+                        info.bytesReceived = ti->tcpi_bytes_received;
+                    }
+                    if (have >= offsetof(struct tcp_info, tcpi_bytes_sent)
+                                    + sizeof(quint64)) {
+                        info.bytesSent = ti->tcpi_bytes_sent;
+                        info.bytesRetrans = ti->tcpi_bytes_retrans;
+                    }
+                } else if (ra->rta_type == INET_DIAG_CONG
+                           && ra->rta_len > RTA_LENGTH(0)) {
+                    const char *text = attr + RTA_LENGTH(0);
+                    int textLen =
+                        static_cast<int>(ra->rta_len - RTA_LENGTH(0));
+                    if (textLen > 0 && text[textLen - 1] == '\0') {
+                        --textLen;
+                    }
+                    info.congestion = QString::fromLatin1(text, textLen);
+                }
+                attr += RTA_ALIGN(ra->rta_len);
+            }
+            out.append(info);
+        }
+        data += NLMSG_ALIGN(nlh->nlmsg_len);
+        remaining -= NLMSG_ALIGN(nlh->nlmsg_len);
+    }
+    return false;
+}
+
+bool parseTcpDiagDump(const QByteArray &content, QList<TcpDiagInfo> &out) {
+    return parseTcpDiagDumpData(content.constData(), content.size(), out);
+}
+
+bool queryTcpDiag(QList<TcpDiagInfo> &out) {
+    int fd = ::socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_SOCK_DIAG);
+    if (fd < 0) {
+        return false;
+    }
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 500000;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    bool answered = false;
+    for (const int family : {AF_INET, AF_INET6}) {
+        struct Request {
+            struct nlmsghdr nlh;
+            struct inet_diag_req_v2 req;
+        };
+        Request request{};
+        request.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct inet_diag_req_v2));
+        request.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+        request.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+        request.nlh.nlmsg_seq = 1;
+        request.req.sdiag_family = family;
+        request.req.sdiag_protocol = IPPROTO_TCP;
+        request.req.idiag_ext =
+            static_cast<quint8>((1u << (INET_DIAG_INFO - 1))
+                                | (1u << (INET_DIAG_CONG - 1)));
+        request.req.idiag_states = 0xFFF;
+        request.req.id.idiag_cookie[0] = INET_DIAG_NOCOOKIE;
+        request.req.id.idiag_cookie[1] = INET_DIAG_NOCOOKIE;
+
+        struct sockaddr_nl address{};
+        address.nl_family = AF_NETLINK;
+        struct iovec requestVec;
+        requestVec.iov_base = &request;
+        requestVec.iov_len = sizeof(request);
+        struct msghdr outMessage{};
+        outMessage.msg_name = &address;
+        outMessage.msg_namelen = sizeof(address);
+        outMessage.msg_iov = &requestVec;
+        outMessage.msg_iovlen = 1;
+        if (::sendmsg(fd, &outMessage, 0)
+            != static_cast<ssize_t>(sizeof(request))) {
+            continue;
+        }
+
+        QByteArray buffer(1 << 20, '\0');
+        for (;;) {
+            struct iovec replyVec;
+            replyVec.iov_base = buffer.data();
+            replyVec.iov_len = static_cast<size_t>(buffer.size());
+            struct sockaddr_nl from{};
+            struct msghdr inMessage{};
+            inMessage.msg_name = &from;
+            inMessage.msg_namelen = sizeof(from);
+            inMessage.msg_iov = &replyVec;
+            inMessage.msg_iovlen = 1;
+            const ssize_t received = ::recvmsg(fd, &inMessage, MSG_TRUNC);
+            if (received <= 0) {
+                break;
+            }
+            if ((inMessage.msg_flags & MSG_TRUNC) != 0) {
+                break;
+            }
+            const bool done =
+                parseTcpDiagDumpData(buffer.constData(), received, out);
+            answered = true;
+            if (done) {
+                break;
+            }
+        }
+    }
+    ::close(fd);
+    return answered;
+}
+#endif
 
 bool parsePidCgroup(const QByteArray &content, QString &version, QString &path) {
     const QList<QByteArray> lines = content.split('\n');
@@ -710,6 +942,187 @@ bool parseCgroupMemoryStat(const QByteArray &content, CgroupInfo &out) {
     return true;
 }
 
+bool parseCgroupMemoryEvents(const QByteArray &content, CgroupInfo &out) {
+    const QList<QByteArray> lines = content.split('\n');
+    for (const QByteArray &line : lines) {
+        const QList<QByteArray> fields = line.simplified().split(' ');
+        if (fields.size() < 2) {
+            continue;
+        }
+        bool ok = false;
+        const unsigned long long value = fields.at(1).toULongLong(&ok);
+        if (!ok) {
+            continue;
+        }
+        if (fields.at(0) == QByteArrayLiteral("oom")) {
+            out.memOomEvents = value;
+        } else if (fields.at(0) == QByteArrayLiteral("oom_kill")) {
+            out.memOomKills = value;
+        }
+    }
+    return true;
+}
+
+bool parseFileNr(const QByteArray &content, unsigned long long &allocated,
+                 unsigned long long &limit) {
+    const QList<QByteArray> fields = content.simplified().split(' ');
+    if (fields.size() < 3) {
+        return false;
+    }
+    bool ok1 = false;
+    bool ok2 = false;
+    const unsigned long long used = fields.at(0).toULongLong(&ok1);
+    const unsigned long long max = fields.at(2).toULongLong(&ok2);
+    if (!ok1 || !ok2) {
+        return false;
+    }
+    allocated = used;
+    limit = max;
+    return true;
+}
+
+void parseCongestionAvailable(const QByteArray &content, QList<QString> &out) {
+    const QList<QByteArray> algorithms = content.simplified().split(' ');
+    for (const QByteArray &algorithm : algorithms) {
+        const QString name = QString::fromLatin1(algorithm.trimmed());
+        if (!name.isEmpty() && !out.contains(name)) {
+            out.append(name);
+        }
+    }
+}
+
+bool parseHostStatTail(const QByteArray &content, int &running, int &blocked) {
+    bool foundRunning = false;
+    bool foundBlocked = false;
+    const QList<QByteArray> lines = content.split('\n');
+    for (const QByteArray &line : lines) {
+        const QList<QByteArray> fields = line.simplified().split(' ');
+        if (fields.size() < 2) {
+            continue;
+        }
+        bool ok = false;
+        const int value = fields.at(1).toInt(&ok);
+        if (!ok) {
+            continue;
+        }
+        if (fields.at(0) == QByteArrayLiteral("procs_running")) {
+            running = value;
+            foundRunning = true;
+        } else if (fields.at(0) == QByteArrayLiteral("procs_blocked")) {
+            blocked = value;
+            foundBlocked = true;
+        }
+    }
+    return foundRunning && foundBlocked;
+}
+
+bool readKernelLimits(KernelLimits &out) {
+    bool any = false;
+    {
+        QFile file(QStringLiteral("/proc/sys/fs/file-nr"));
+        if (file.open(QIODevice::ReadOnly)
+            && parseFileNr(file.readAll(), out.fdAllocated, out.fdMax)) {
+            any = true;
+            out.fdPressure =
+                out.fdMax > 0
+                && static_cast<double>(out.fdAllocated)
+                       / static_cast<double>(out.fdMax)
+                       >= 0.8;
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/sys/net/core/somaxconn"));
+        if (file.open(QIODevice::ReadOnly)) {
+            bool ok = false;
+            const unsigned long long value =
+                file.readAll().trimmed().toULongLong(&ok);
+            if (ok) {
+                out.somaxconn = value;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(
+            QStringLiteral("/proc/sys/net/ipv4/tcp_congestion_control"));
+        if (file.open(QIODevice::ReadOnly)) {
+            const QString name =
+                QString::fromLatin1(file.readAll().trimmed());
+            if (!name.isEmpty()) {
+                out.congestion = name;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(QStringLiteral(
+            "/proc/sys/net/ipv4/tcp_available_congestion_control"));
+        if (file.open(QIODevice::ReadOnly)) {
+            parseCongestionAvailable(file.readAll(), out.congestionAvailable);
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/sys/fs/inotify/max_user_watches"));
+        if (file.open(QIODevice::ReadOnly)) {
+            bool ok = false;
+            const unsigned long long value =
+                file.readAll().trimmed().toULongLong(&ok);
+            if (ok) {
+                out.inotifyWatchesMax = value;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/sys/kernel/pid_max"));
+        if (file.open(QIODevice::ReadOnly)) {
+            bool ok = false;
+            const unsigned long long value =
+                file.readAll().trimmed().toULongLong(&ok);
+            if (ok) {
+                out.pidMax = value;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/sys/vm/swappiness"));
+        if (file.open(QIODevice::ReadOnly)) {
+            bool ok = false;
+            const int value = file.readAll().trimmed().toInt(&ok);
+            if (ok) {
+                out.swappiness = value;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/sys/vm/overcommit_memory"));
+        if (file.open(QIODevice::ReadOnly)) {
+            bool ok = false;
+            const int value = file.readAll().trimmed().toInt(&ok);
+            if (ok) {
+                out.overcommit = value;
+                any = true;
+            }
+        }
+    }
+    {
+        QFile file(QStringLiteral("/proc/stat"));
+        if (file.open(QIODevice::ReadOnly)) {
+            int running = out.runningProcs;
+            int blocked = out.blockedProcs;
+            if (parseHostStatTail(file.readAll(), running, blocked)) {
+                out.runningProcs = running;
+                out.blockedProcs = blocked;
+                any = true;
+            }
+        }
+    }
+    out.available = any;
+    return any;
+}
+
 bool cgroupSample(int pid, CgroupInfo &out) {
     QFile cgroup(procPath(pid, "cgroup"));
     if (!cgroup.open(QIODevice::ReadOnly)) {
@@ -741,6 +1154,16 @@ bool cgroupSample(int pid, CgroupInfo &out) {
                 readFileBytes(base + QStringLiteral("/memory.max")), limit)) {
             out.memLimitBytes = limit;
         }
+        long long peak = 0;
+        if (parseCgroupMemoryValue(
+                readFileBytes(base + QStringLiteral("/memory.peak")), peak)) {
+            if (peak >= 0) {
+                out.memPeakBytes = static_cast<unsigned long long>(peak);
+                out.hasMemPeak = true;
+            }
+        }
+        parseCgroupMemoryEvents(
+            readFileBytes(base + QStringLiteral("/memory.events")), out);
         out.available = true;
     } else {
         const QString memBase = root + QStringLiteral("/memory") + path;
@@ -789,6 +1212,7 @@ bool parseHostCpu(const QByteArray &statContent, HostCpuTimes &out) {
 
     unsigned long long total = 0;
     unsigned long long idle = 0;
+    unsigned long long steal = 0;
     for (int i = 1; i < fields.size() && i <= 8; ++i) {
         bool ok = false;
         const unsigned long long value = fields.at(i).toULongLong(&ok);
@@ -799,6 +1223,9 @@ bool parseHostCpu(const QByteArray &statContent, HostCpuTimes &out) {
         if (i == 4 || i == 5) { // idle + iowait
             idle += value;
         }
+        if (i == 8) { // steal
+            steal = value;
+        }
     }
 
     if (total == 0) {
@@ -806,6 +1233,7 @@ bool parseHostCpu(const QByteArray &statContent, HostCpuTimes &out) {
     }
     out.total = total;
     out.idle = idle;
+    out.steal = steal;
     return true;
 }
 

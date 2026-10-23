@@ -196,6 +196,17 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     QHash<QString, int> stateCounts;
     QSet<QString> listenSeen;
     const QList<linuxproc::SocketInfo> sockets = m_backend->readNetSockets();
+#if defined(Q_OS_LINUX)
+    QHash<unsigned long long, linuxproc::TcpDiagInfo> tcpDiag;
+    if (!inodeSet.isEmpty()) {
+        const QList<linuxproc::TcpDiagInfo> diag = m_backend->queryTcpDiag();
+        for (const linuxproc::TcpDiagInfo &info : diag) {
+            if (info.inode != 0) {
+                tcpDiag.insert(info.inode, info);
+            }
+        }
+    }
+#endif
     for (const linuxproc::SocketInfo &socket : sockets) {
         stateCounts[socket.state] += 1;
 
@@ -218,6 +229,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                 entry.exposure = portcatalog::endpointExposure(socket.localAddr);
                 entry.service = portcatalog::serviceForPort(socket.localPort);
                 entry.database = portcatalog::portIsDatabase(socket.localPort);
+                // LISTEN rx_queue is the kernel's live accept backlog
+                // (iproute2 prints it as Recv-Q on a LISTEN socket).
+                entry.backlog = static_cast<int>(qMin<unsigned long long>(
+                    socket.rxQueue, 2147483647ULL));
                 endpoints.append(entry);
             }
         }
@@ -237,6 +252,29 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                       .arg(socket.remotePort)
                 : QStringLiteral("*");
         row.state = socket.state;
+#if defined(Q_OS_LINUX)
+        if (socket.proto.startsWith(QStringLiteral("tcp"))
+            && socket.inode != 0) {
+            const auto it = tcpDiag.find(socket.inode);
+            if (it != tcpDiag.end() && it->hasInfo) {
+                row.hasTcpDiag = true;
+                row.congestion = it->congestion;
+                row.rttUsec = it->rttUsec;
+                row.rttVarUsec = it->rttVarUsec;
+                row.rtoUsec = it->rtoUsec;
+                row.cwnd = it->sndCwnd;
+                row.sndMss = it->sndMss;
+                row.retransmits = it->retransmits;
+                row.totalRetrans = it->totalRetrans;
+                row.segsOut = static_cast<quint32>(it->segsOut);
+                row.segsIn = static_cast<quint32>(it->segsIn);
+                row.pmtu = it->pmtu;
+                row.bytesSent = it->bytesSent;
+                row.bytesAcked = it->bytesAcked;
+                row.bytesReceived = it->bytesReceived;
+            }
+        }
+#endif
         connections.append(row);
 
         if (portcatalog::portIsDatabase(socket.remotePort)) {
@@ -310,6 +348,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         snap.cgroupThrottled = cgroup.nrThrottled;
         snap.cgroupPeriods = cgroup.nrPeriods;
         snap.cgroupThrottledUsec = cgroup.throttledUsec;
+        snap.cgroupOomEvents = cgroup.memOomEvents;
+        snap.cgroupOomKills = cgroup.memOomKills;
+        snap.cgroupMemPeakBytes = cgroup.memPeakBytes;
+        snap.cgroupHasMemPeak = cgroup.hasMemPeak;
     }
 
     m_cpuIdentity = focus.identity;
@@ -332,11 +374,20 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
 
 void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
                                  const QList<linuxproc::SocketInfo> &sockets) {
+#if defined(Q_OS_LINUX)
+    linuxproc::KernelLimits kernel;
+    if (m_backend->kernelLimits(kernel) && kernel.available) {
+        snapshot.kernelLimits = kernel;
+        snapshot.hostRun = kernel.runningProcs;
+        snapshot.hostBlocked = kernel.blockedProcs;
+    }
+#endif
     const HostSample host = m_hostSampler.sample();
     if (host.available) {
         snapshot.hostAvailable = true;
         snapshot.hostWarming = host.warming;
         snapshot.hostCpuPercent = host.cpuPercent;
+        snapshot.hostStealPercent = host.stealPercent;
         snapshot.hostMemTotalKb = host.mem.totalKb;
         snapshot.hostMemAvailableKb = host.mem.availableKb;
         snapshot.hostDiskTotalBytes = host.diskTotalBytes;

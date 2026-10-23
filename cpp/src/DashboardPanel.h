@@ -172,6 +172,7 @@ private:
     QLabel *m_hostCpuInfo = nullptr;
     QLabel *m_hostFilesystems = nullptr;
     QLabel *m_hostNetwork = nullptr;
+    QLabel *m_kernel = nullptr;
     QLabel *m_securitySummary = nullptr;
     QLabel *m_security = nullptr;
     QLabel *m_threats = nullptr;
