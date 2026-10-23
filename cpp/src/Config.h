@@ -62,6 +62,11 @@ struct StatsdConfig {
     int emitIntervalMs = 1000;
 };
 
+struct MetricsConfig {
+    bool enabled = true;
+    int port = 9107;
+};
+
 struct SloConfig {
     QString name = QStringLiteral("focused-app availability");
     double objective = 0.999;
@@ -125,6 +130,7 @@ struct Config {
     TraceConfig traces;
     PathConfig path;
     StatsdConfig dogstatsd;
+    MetricsConfig metrics;
     SloConfig slo;
     DbmConfig database;
     TlsConfig tls;

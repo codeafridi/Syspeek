@@ -321,6 +321,19 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("metrics"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.metrics.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        const int port = settings.value(QStringLiteral("port")).toInt();
+        if (port > 0) {
+            config.metrics.port = clampInt(port, 1, 65535);
+        }
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("slo"));
     {
         const QString name = settings.value(QStringLiteral("name")).toString();
