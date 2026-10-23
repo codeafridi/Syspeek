@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A tiny, always on top HUD for the app you're focused on — CPU, RAM, and Docker/Kubernetes status at a glance.
+### A local-first HUD that follows the app you're focused on — and a 27-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -21,9 +21,31 @@
 
 ---
 
-No more digging through `top`. Syspeek follows the window you're using and
-shows that app's CPU and RAM, plus optional Docker/Kubernetes health, in a small
-panel that stays on top and out of your way.
+No more digging through `top`. Syspeek follows the window you're using and shows
+that app's CPU and RAM in a small always-on-top panel, plus a full metrics
+console behind it. Everything is collected **locally, unprivileged, with no
+telemetry** — nothing leaves your machine unless you point a scraper at it.
+
+**Highlights**
+
+- **Per-app focus tracking** — CPU, RSS, threads, open FDs, context switches,
+  runtime/instrumentation detection (what language it's written in).
+- **TCP diagnostics (Linux)** — per-connection `rtt`/`cwnd`/retransmit counters
+  via netlink, kernel receive-buffer drops, active-loss markers, latency chart.
+- **Kernel & limits (Linux)** — FD-table pressure, somaxconn, congestion
+  control, inotify/pid limits, scheduler run-queue state, CPU steal %.
+- **cgroup memory pressure** — peak memory, OOM events/kills, pid limits for
+  the focused app's unit.
+- **27-page console** — Overview, Processes, Memory, Network, Network Path,
+  Containers, Kubernetes, Disks, Host, Latency, Metrics (DogStatsD), Logs,
+  Errors, Software, Dependencies, Endpoints, Instrumentation, Synthetic checks,
+  Traces (OTLP), Profiles, Databases (PostgreSQL), Security, Settings, Cost,
+  Incidents, SLO, Alerts.
+- **Alerts & incidents** — local thresholds (CPU, memory, FD-table, steal,
+  failed services, journal errors) with desktop notifications and an incident
+  timeline.
+- **Docker & Kubernetes** — containers, problem pods, node capacity, cost
+  model, deprecated-API detection.
 
 ## Install
 

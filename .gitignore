@@ -7,3 +7,6 @@ dist/
 
 # generated winget/scoop manifests (CI artifacts)
 cpp/packaging/windows/manifests/
+
+# AppImage updatersync artifacts
+*.AppImage.zsync
