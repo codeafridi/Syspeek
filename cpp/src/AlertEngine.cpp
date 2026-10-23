@@ -31,6 +31,12 @@ bool metricFor(const AlertRule &rule, const AlertInput &input, double &value,
     } else if (rule.id == QLatin1String("watchdog_forecast")) {
         value = input.watchdogForecastSteps;
         valid = input.watchdogValid;
+    } else if (rule.id == QLatin1String("kernel_fd")) {
+        value = input.kernelFdPct;
+        valid = input.kernelFdValid;
+    } else if (rule.id == QLatin1String("host_steal")) {
+        value = input.stealPercent;
+        valid = input.stealValid;
     } else {
         valid = false;
     }
@@ -72,6 +78,12 @@ AlertEngine::AlertEngine() {
         {QStringLiteral("watchdog_forecast"),
          QStringLiteral("Watchdog forecast threshold"), QStringLiteral("warning"),
          0.0, true, 1, QStringLiteral(" samples")},
+        {QStringLiteral("kernel_fd"),
+         QStringLiteral("Kernel FD table pressure"), QStringLiteral("critical"),
+         80.0, true, 3, QStringLiteral("% fd table")},
+        {QStringLiteral("host_steal"),
+         QStringLiteral("Host CPU steal high"), QStringLiteral("warning"),
+         5.0, true, 5, QStringLiteral("%")},
     };
 }
 

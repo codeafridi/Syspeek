@@ -219,6 +219,7 @@ private:
     MetricStore m_cpuStore{120};
     MetricStore m_memStore{120};
     MetricStore m_hostCpuStore{120};
+    MetricStore m_stealStore{120};
 
     TimeseriesChart *m_chartCpu = nullptr;
     TimeseriesChart *m_chartMem = nullptr;

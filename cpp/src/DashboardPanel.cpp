@@ -3672,6 +3672,10 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 m_hostCpuSpark->setValues(m_hostCpuStore.values());
             }
         }
+        if (snapshot.kernelLimits.available
+            && snapshot.hostStealPercent >= 0.0 && !snapshot.hostWarming) {
+            m_stealStore.push(snapshot.hostStealPercent);
+        }
     } else {
         for (QLabel *label :
              {m_hostCpu, m_hostMem, m_hostDisk, m_hostNet, m_hostLoad}) {
@@ -3689,6 +3693,11 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     watchdog.append(WatchdogMetric{
         QStringLiteral("host-cpu"),
         detectAnomaly(m_hostCpuStore.values(), AnomalyModel::ZScore, 3.0)});
+    if (m_stealStore.size() > 0) {
+        watchdog.append(WatchdogMetric{
+            QStringLiteral("steal"),
+            detectAnomaly(m_stealStore.values(), AnomalyModel::Mad, 3.5)});
+    }
     m_watchdog->setText(watchdogText(watchdog));
 
     m_runtime->setText(runtimeSummaryText(snapshot.runtime)

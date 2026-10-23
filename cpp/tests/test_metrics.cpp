@@ -320,6 +320,40 @@ int main(int argc, char *argv[]) {
     check(engine.update(memInput, 8).size() == 1,
           "alert: low memory fires after sustained");
 
+    engine.reset();
+    AlertInput fdInput;
+    fdInput.kernelFdValid = true;
+    fdInput.kernelFdPct = 85.0;
+    check(engine.update(fdInput, 1).isEmpty(), "alert: fd not before sustained");
+    check(engine.update(fdInput, 2).isEmpty(), "alert: fd still not firing");
+    const QList<Alert> fdFired = engine.update(fdInput, 3);
+    check(fdFired.size() == 1
+              && fdFired.at(0).id == QStringLiteral("kernel_fd"),
+          "alert: kernel fd pressure fires at sustained count");
+    check(fdFired.at(0).detail.contains(QStringLiteral("85.0")),
+          "alert: fd detail carries the ratio");
+    fdInput.kernelFdPct = 40.0;
+    engine.update(fdInput, 4);
+    check(engine.active().isEmpty(), "alert: fd resolves on recovery");
+
+    engine.reset();
+    AlertInput stealInput;
+    stealInput.stealValid = true;
+    stealInput.stealPercent = 6.0;
+    for (int i = 1; i <= 4; ++i) {
+        engine.update(stealInput, i);
+    }
+    check(engine.update(stealInput, 5).size() == 1,
+          "alert: host steal fires at sustained 5");
+    stealInput.stealPercent = 1.0;
+    engine.update(stealInput, 6);
+    check(engine.active().isEmpty(), "alert: steal resolves below threshold");
+
+    AlertInput noSteal;
+    noSteal.stealValid = false;
+    check(engine.update(noSteal, 7).isEmpty(),
+          "alert: missing steal sample does not fire");
+
     int status = 0;
     double total = 0;
     double dns = 0;
