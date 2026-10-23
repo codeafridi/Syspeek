@@ -12,6 +12,7 @@ struct HostSample {
     bool available = false;
     bool warming = false;
     double cpuPercent = 0.0;
+    double stealPercent = 0.0;
     double netRxPerSec = 0.0;
     double netTxPerSec = 0.0;
     linuxproc::HostMem mem;

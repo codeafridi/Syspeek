@@ -111,6 +111,7 @@ private:
     IncidentTracker m_incidents;
     QList<double> m_cpuHistory;
     QList<double> m_hostCpuHistory;
+    QList<double> m_stealHistory;
     AlertInput m_alertInput;
     std::unique_ptr<Notifier> m_notifier;
     void evaluateAlerts();

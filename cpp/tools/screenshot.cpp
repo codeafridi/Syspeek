@@ -6,6 +6,9 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QDateTime>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QStackedWidget>
 
 #include <cmath>
 #include <cstdio>
@@ -44,6 +47,34 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.hostNetTxPerSec = tx;
     s.hostDiskTotalBytes = 512ULL * 1024ULL * 1024ULL * 1024ULL;
     s.hostDiskFreeBytes = 214ULL * 1024ULL * 1024ULL * 1024ULL;
+    s.hostStealPercent = 2.4;
+    s.cgroupAvailable = true;
+    s.cgroupVersion = QStringLiteral("v2");
+    s.cgroupPath = QStringLiteral("user.slice/app.cursor.scope");
+    s.cgroupMemUsage = 612ULL * 1024ULL * 1024ULL;
+    s.cgroupMemLimit = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+    s.cgroupThrottled = 12;
+    s.cgroupPeriods = 6480;
+    s.cgroupThrottledUsec = 154000000;
+    s.cgroupMemPeakBytes = 3775ULL * 1024ULL * 1024ULL;
+    s.cgroupHasMemPeak = true;
+    s.cgroupPidsCurrent = 148;
+    s.cgroupPidsMax = 10813;
+    s.focusOom.score = 187;
+    s.focusOom.scoreAdj = 0;
+    s.hostRun = 3;
+    s.hostBlocked = 1;
+    s.kernelLimits.available = true;
+    s.kernelLimits.fdAllocated = 14664;
+    s.kernelLimits.fdMax = 9223372036854775807ULL;
+    s.kernelLimits.somaxconn = 4096;
+    s.kernelLimits.congestion = QStringLiteral("cubic");
+    s.kernelLimits.congestionAvailable = {QStringLiteral("cubic"),
+                                          QStringLiteral("bbr2")};
+    s.kernelLimits.inotifyWatchesMax = 65536;
+    s.kernelLimits.pidMax = 4194304;
+    s.kernelLimits.swappiness = 60;
+    s.kernelLimits.overcommit = 1;
 
     ProcessRow proc;
     proc.pid = 2092707;
@@ -74,6 +105,25 @@ DisplaySnapshot demoSnapshot(int tick) {
     conn.local = QStringLiteral("127.0.0.1:59640");
     conn.remote = QStringLiteral("140.82.114.3:22");
     conn.state = QStringLiteral("ESTABLISHED");
+    conn.hasTcpDiag = true;
+    conn.congestion = QStringLiteral("cubic");
+    conn.rttUsec = 18400;
+    conn.rttVarUsec = 4200;
+    conn.rtoUsec = 208000;
+    conn.cwnd = 19;
+    conn.sndMss = 1448;
+    conn.retransmits = 2;
+    conn.totalRetrans = 47;
+    conn.segsOut = 48112;
+    conn.segsIn = 47918;
+    conn.pmtu = 1500;
+    conn.bytesSent = 250723456;
+    conn.bytesAcked = 250721920;
+    conn.bytesReceived = 88174032;
+    conn.hasSkmem = true;
+    conn.skdropDelta = 1;
+    conn.retransDelta = 2;
+    conn.skDrops = 3;
     s.connections = {conn};
 
     // SBOM fixture (M61q/M61r): two deb packages + one brew purl so the
@@ -165,7 +215,7 @@ DisplaySnapshot demoSnapshot(int tick) {
     // portcatalog::endpointExposure ("local" / "public"), one db port.
     auto mkEndpoint = [](const char *proto, const char *addr, quint16 port,
                          const char *exposure, const char *service,
-                         bool database) {
+                         bool database, int backlog) {
         EndpointRow row;
         row.proto = QString::fromUtf8(proto);
         row.addr = QString::fromUtf8(addr);
@@ -173,13 +223,14 @@ DisplaySnapshot demoSnapshot(int tick) {
         row.exposure = QString::fromUtf8(exposure);
         row.service = QString::fromUtf8(service);
         row.database = database;
+        row.backlog = backlog;
         return row;
     };
     s.endpoints = {
-        mkEndpoint("tcp", "127.0.0.1", 4318, "local", "syspeek", false),
-        mkEndpoint("tcp", "0.0.0.0", 5432, "public", "postgres", true),
-        mkEndpoint("tcp", "10.0.0.5", 8080, "public", "nginx", false),
-        mkEndpoint("tcp", "[::1]", 6379, "local", "redis", false),
+        mkEndpoint("tcp", "127.0.0.1", 4318, "local", "syspeek", false, 0),
+        mkEndpoint("tcp", "0.0.0.0", 5432, "public", "postgres", true, 41),
+        mkEndpoint("tcp", "10.0.0.5", 8080, "public", "nginx", false, 0),
+        mkEndpoint("tcp", "[::1]", 6379, "local", "redis", false, -1),
     };
     s.instrumentation = {QStringLiteral("datadog"),
                          QStringLiteral("opentelemetry")};
@@ -685,7 +736,23 @@ int main(int argc, char *argv[]) {
                                  : QStringLiteral("panel.png");
     driveHistory();
     driveStatsd();
-    const bool ok = panel.grab().save(out);
+    QScrollArea *grabScroll = nullptr;
+    if (argc > 4
+        && QString::fromUtf8(argv[4]) == QStringLiteral("full")) {
+        if (auto *stack = panel.findChild<QStackedWidget *>()) {
+            grabScroll = stack->currentWidget()->findChild<QScrollArea *>(
+                QStringLiteral("ddScroll"));
+        }
+        if (!grabScroll) {
+            grabScroll = panel.findChild<QScrollArea *>(
+                QStringLiteral("ddScroll"));
+        }
+    }
+    const QPixmap shot =
+        grabScroll && grabScroll->widget()
+            ? grabScroll->widget()->grab()
+            : panel.grab();
+    const bool ok = shot.save(out);
     std::printf("%s: %s\n", ok ? "saved" : "failed",
                 out.toUtf8().constData());
     return ok ? 0 : 2;

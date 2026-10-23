@@ -172,6 +172,7 @@ private:
     QLabel *m_hostCpuInfo = nullptr;
     QLabel *m_hostFilesystems = nullptr;
     QLabel *m_hostNetwork = nullptr;
+    QLabel *m_kernel = nullptr;
     QLabel *m_securitySummary = nullptr;
     QLabel *m_security = nullptr;
     QLabel *m_threats = nullptr;
@@ -218,6 +219,7 @@ private:
     MetricStore m_cpuStore{120};
     MetricStore m_memStore{120};
     MetricStore m_hostCpuStore{120};
+    MetricStore m_stealStore{120};
 
     TimeseriesChart *m_chartCpu = nullptr;
     TimeseriesChart *m_chartMem = nullptr;
@@ -350,6 +352,7 @@ private:
     QLabel *m_netTileRetrans = nullptr;
     QLabel *m_netTileTx = nullptr;
     TimeseriesChart *m_chartNetPage = nullptr;
+    TimeseriesChart *m_chartConnRtt = nullptr;
 
     // Datadog-style Network Path page (M61m): probe tiles + RTT history.
     QLabel *m_pathTileTargets = nullptr;

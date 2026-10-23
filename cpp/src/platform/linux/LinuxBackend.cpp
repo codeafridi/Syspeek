@@ -132,6 +132,14 @@ bool LinuxBackend::cgroupSample(int pid, linuxproc::CgroupInfo &out) {
     return linuxproc::cgroupSample(pid, out);
 }
 
+bool LinuxBackend::kernelLimits(linuxproc::KernelLimits &out) {
+    return linuxproc::readKernelLimits(out);
+}
+
+bool LinuxBackend::processOom(int pid, linuxproc::OomInfo &out) {
+    return linuxproc::processOom(pid, out);
+}
+
 bool LinuxBackend::sumRssKb(const QList<int> &pids, unsigned long long &out) {
     return linuxproc::sumRssKb(pids, out);
 }
@@ -139,3 +147,11 @@ bool LinuxBackend::sumRssKb(const QList<int> &pids, unsigned long long &out) {
 QList<linuxproc::SocketInfo> LinuxBackend::readNetSockets() {
     return linuxproc::readNetSockets();
 }
+
+#if defined(Q_OS_LINUX)
+QList<linuxproc::TcpDiagInfo> LinuxBackend::queryTcpDiag() {
+    QList<linuxproc::TcpDiagInfo> out;
+    linuxproc::queryTcpDiag(out);
+    return out;
+}
+#endif

@@ -42,6 +42,10 @@ struct AlertInput {
     bool watchdogValid = false;
     double watchdogScore = 0.0;        // max robust anomaly score
     int watchdogForecastSteps = 0;     // steps until forecast threshold
+    bool kernelFdValid = false;
+    double kernelFdPct = 0.0;          // file-nr allocated % of max
+    bool stealValid = false;
+    double stealPercent = 0.0;
 };
 
 class AlertEngine {

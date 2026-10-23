@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DiskStatus.h"
+#include "LinuxProcess.h"
 #include "SbomStatus.h"
 #include "SecurityStatus.h"
 #include "SloStatus.h"
@@ -30,6 +31,26 @@ struct ConnectionRow {
     QString local;
     QString remote;
     QString state;
+    bool hasTcpDiag = false;
+    QString congestion;
+    quint32 rttUsec = 0;
+    quint32 rttVarUsec = 0;
+    quint32 rtoUsec = 0;
+    quint32 cwnd = 0;
+    quint32 sndMss = 0;
+    quint32 retransmits = 0;
+    quint32 totalRetrans = 0;
+    quint32 segsOut = 0;
+    quint32 segsIn = 0;
+    quint32 pmtu = 0;
+    quint64 bytesSent = 0;
+    quint64 bytesAcked = 0;
+    quint64 bytesReceived = 0;
+    quint32 skDrops = 0;
+    bool hasSkmem = false;
+    quint32 retransDelta = 0;
+    quint32 skdropDelta = 0;
+    quint64 bytesAckedDelta = 0;
 };
 
 struct InterfaceRow {
@@ -47,6 +68,7 @@ struct EndpointRow {
     QString exposure;
     QString service;
     bool database = false;
+    int backlog = -1;
 };
 
 struct DisplaySnapshot {
@@ -80,9 +102,20 @@ struct DisplaySnapshot {
     unsigned long long cgroupThrottled = 0;
     unsigned long long cgroupPeriods = 0;
     unsigned long long cgroupThrottledUsec = 0;
+    unsigned long long cgroupOomEvents = 0;
+    unsigned long long cgroupOomKills = 0;
+    unsigned long long cgroupMemPeakBytes = 0;
+    bool cgroupHasMemPeak = false;
+    long long cgroupPidsCurrent = -1;
+    long long cgroupPidsMax = -1;
+    linuxproc::OomInfo focusOom;
     bool hostAvailable = false;
     bool hostWarming = false;
     double hostCpuPercent = 0.0;
+    double hostStealPercent = 0.0;
+    int hostRun = -1;
+    int hostBlocked = -1;
+    linuxproc::KernelLimits kernelLimits;
     unsigned long long hostMemTotalKb = 0;
     unsigned long long hostMemAvailableKb = 0;
     unsigned long long hostDiskTotalBytes = 0;

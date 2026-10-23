@@ -61,6 +61,15 @@ private:
     SloSpec m_sloSpec;
     IoRateTracker m_ioTracker;
     NetRateTracker m_netTracker;
+#if defined(Q_OS_LINUX)
+    struct DiagPrior {
+        quint64 bytesAcked = 0;
+        quint64 totalRetrans = 0;
+        quint32 skDrops = 0;
+        bool seen = false;
+    };
+    QHash<unsigned long long, DiagPrior> m_diagPrior;
+#endif
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

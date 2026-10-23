@@ -37,6 +37,8 @@ struct SocketInfo {
     quint16 remotePort = 0;
     QString state;
     unsigned long long inode = 0;
+    unsigned long long rxQueue = 0;
+    unsigned long long txQueue = 0;
 };
 
 struct InterfaceStats {
@@ -63,14 +65,37 @@ struct CgroupInfo {
     unsigned long long throttledUsec = 0;
     unsigned long long memUsageBytes = 0;
     long long memLimitBytes = -1;
+    long long pidsCurrent = -1;
+    long long pidsMax = -1;
     unsigned long long memAnonBytes = 0;
     unsigned long long memFileBytes = 0;
     unsigned long long memKernelBytes = 0;
+    unsigned long long memOomEvents = 0;
+    unsigned long long memOomKills = 0;
+    unsigned long long memPeakBytes = 0;
+    bool hasMemPeak = false;
+};
+
+struct KernelLimits {
+    bool available = false;
+    unsigned long long fdAllocated = 0;
+    unsigned long long fdMax = 0;
+    bool fdPressure = false;
+    unsigned long long somaxconn = 0;
+    QString congestion;
+    QList<QString> congestionAvailable;
+    unsigned long long inotifyWatchesMax = 0;
+    unsigned long long pidMax = 0;
+    int swappiness = -1;
+    int overcommit = -1;
+    int runningProcs = -1;
+    int blockedProcs = -1;
 };
 
 struct HostCpuTimes {
     unsigned long long total = 0;
     unsigned long long idle = 0;
+    unsigned long long steal = 0;
 };
 
 struct HostMem {
@@ -112,11 +137,65 @@ QList<unsigned long long> socketInodes(int pid);
 bool parseNetTable(const QByteArray &content, const QString &proto,
                    QList<SocketInfo> &out);
 QList<SocketInfo> readNetSockets();
+struct TcpDiagInfo {
+    QString localAddr;
+    quint16 localPort = 0;
+    QString remoteAddr;
+    quint16 remotePort = 0;
+    QString state;
+    QString congestion;
+    bool hasInfo = false;
+    quint8 retransmits = 0;
+    quint32 rttUsec = 0;
+    quint32 rttVarUsec = 0;
+    quint32 rtoUsec = 0;
+    quint32 sndMss = 0;
+    quint32 sndCwnd = 0;
+    quint32 sndSsthresh = 0;
+    quint32 totalRetrans = 0;
+    quint32 pmtu = 0;
+    quint64 segsOut = 0;
+    quint64 segsIn = 0;
+    quint64 bytesAcked = 0;
+    quint64 bytesReceived = 0;
+    quint64 bytesSent = 0;
+    quint64 bytesRetrans = 0;
+    quint32 rqueue = 0;
+    quint32 wqueue = 0;
+    quint32 uid = 0;
+    quint32 inode = 0;
+    quint32 skRmemAlloc = 0;
+    quint32 skRcvBuf = 0;
+    quint32 skWmemAlloc = 0;
+    quint32 skSndBuf = 0;
+    quint32 skFwdAlloc = 0;
+    quint32 skWmemQueued = 0;
+    quint32 skOptmem = 0;
+    quint32 skBacklog = 0;
+    quint32 skDrops = 0;
+    bool hasSkmem = false;
+};
+
+struct OomInfo {
+    int score = -1;
+    int scoreAdj = 0;
+};
+#if defined(Q_OS_LINUX)
+bool parseTcpDiagDump(const QByteArray &content, QList<TcpDiagInfo> &out);
+bool queryTcpDiag(QList<TcpDiagInfo> &out);
+#endif
 bool parseNetDevInterfaces(const QByteArray &content, QList<InterfaceStats> &out);
 bool parsePidCgroup(const QByteArray &content, QString &version, QString &path);
 bool parseCgroupCpuStat(const QByteArray &content, CgroupInfo &out);
+bool processOom(int pid, OomInfo &out);
 bool parseCgroupMemoryValue(const QByteArray &content, long long &out);
 bool parseCgroupMemoryStat(const QByteArray &content, CgroupInfo &out);
+bool parseCgroupMemoryEvents(const QByteArray &content, CgroupInfo &out);
+bool parseFileNr(const QByteArray &content, unsigned long long &allocated,
+                 unsigned long long &limit);
+void parseCongestionAvailable(const QByteArray &content, QList<QString> &out);
+bool parseHostStatTail(const QByteArray &content, int &running, int &blocked);
+bool readKernelLimits(KernelLimits &out);
 bool cgroupSample(int pid, CgroupInfo &out);
 QString serviceForPort(quint16 port);
 bool portIsDatabase(quint16 port);

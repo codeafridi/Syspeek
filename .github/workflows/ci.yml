@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -89,6 +89,19 @@ jobs:
           print("dump ok:", d["platform"], h["cores"], "cores",
                 int(h["memTotalKb"] // 1024), "MiB", d["processCount"], "procs",
                 "(ps ≈", ps_count, ")")
+          if d["platform"] == "linux":
+              k = h
+              assert k["somaxconn"] > 0 and k["fdMax"] > 0, k
+              assert k["runningProcs"] >= 0, k
+              print("kernel ok: fd %d somaxconn %d cc %s run %d blocked %d"
+                    % (int(k["fdAllocated"]), int(k["somaxconn"]),
+                       k.get("congestion", "-"), k["runningProcs"],
+                       k["blockedProcs"]))
+              td = d["tcpDiag"]
+              assert td["queried"] is True, td
+              assert td["count"] >= 0 and td["withInfo"] >= 0, td
+              print("tcpdiag ok: %d sockets, %d with tcp_info"
+                    % (td["count"], td["withInfo"]))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):

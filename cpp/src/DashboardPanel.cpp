@@ -1504,6 +1504,15 @@ QWidget *DashboardPanel::buildNetworkView() {
     layout->addWidget(makeChartCard(QStringLiteral("host rx + tx"),
                                     m_chartNetPage, view));
 
+    // --- Focused-app connection latency trend (netlink tcp_info per tick).
+    m_chartConnRtt = new TimeseriesChart(view);
+    m_chartConnRtt->setUnit(QStringLiteral("ms"));
+    m_chartConnRtt->setSeriesName(QStringLiteral("syspeek.conn.rtt"));
+    layout->addWidget(makeBanner(QStringLiteral("LATENCY (focused)"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("avg tcp_info rtt"),
+                                    m_chartConnRtt, view));
+
     auto *row = new QHBoxLayout();
     row->setSpacing(14);
     m_listen = new QLabel(QStringLiteral("--"), view);
@@ -2891,8 +2900,20 @@ QWidget *DashboardPanel::buildHostView() {
     row2->addWidget(makeCard(QStringLiteral("NETWORK"), m_hostNetwork, view), 1);
     layout->addLayout(row2, 1);
 
+    auto *row3 = new QHBoxLayout;
+    row3->setSpacing(10);
+    m_kernel = new QLabel(QStringLiteral("--"), view);
+    m_kernel->setObjectName(QStringLiteral("ddKernel"));
+    m_kernel->setFont(monoFont(10));
+    m_kernel->setWordWrap(false);
+    layout->addWidget(makeBanner(QStringLiteral("KERNEL & LIMITS"),
+        ui_theme::warn(), view));
+    row3->addWidget(
+        makeCard(QStringLiteral("KERNEL & LIMITS"), m_kernel, view), 1);
+    layout->addLayout(row3, 1);
+
     for (QLabel *label : {m_hostPlatform, m_hostCpuInfo, m_hostFilesystems,
-                          m_hostNetwork}) {
+                          m_hostNetwork, m_kernel}) {
         label->setMinimumWidth(1);
     }
 
@@ -3354,15 +3375,32 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             m_chartNetPage->push(snapshot.hostNetRxPerSec / 1024.0);
             m_chartNetPage->pushB(snapshot.hostNetTxPerSec / 1024.0);
         }
+        int rttRows = 0;
+        double rttSum = 0.0;
+        for (const ConnectionRow &conn2 : snapshot.connections) {
+            if (conn2.hasTcpDiag && (conn2.state == QStringLiteral("ESTABLISHED")
+                                     || conn2.rttUsec > 0)) {
+                rttSum += static_cast<double>(conn2.rttUsec);
+                ++rttRows;
+            }
+        }
+        if (m_chartConnRtt != nullptr && rttRows > 0) {
+            m_chartConnRtt->push(rttSum / rttRows / 1000.0);
+        }
     }
 
     updateOverviewText(snapshot);
 
-    m_memDetail->setText(QStringLiteral("RSS      %1\nVirtual  %2\nSwap     %3\nShared   %4")
+    m_memDetail->setText(QStringLiteral("RSS      %1\nVirtual  %2\nSwap     %3\nShared   %4\noom      %5")
                              .arg(formatMemoryKb(snapshot.rssKb),
                                   formatMemoryKb(snapshot.vmsKb),
                                   formatMemoryKb(snapshot.swapKb),
-                                  formatMemoryKb(snapshot.sharedKb)));
+                                  formatMemoryKb(snapshot.sharedKb),
+                                  snapshot.focusOom.score >= 0
+                                      ? QStringLiteral("score %1  adj %2")
+                                            .arg(snapshot.focusOom.score)
+                                            .arg(snapshot.focusOom.scoreAdj)
+                                      : QStringLiteral("--")));
     // Memory-page tiles + used/available history (M61i); used is
     // total - available (the snapshot does not split cache yet).
     m_memTileTotal->setText(formatMemoryKb(snapshot.hostMemTotalKb));
@@ -3390,8 +3428,39 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         if (shown >= 200) {
             break;
         }
-        net += QStringLiteral("%1 %2 -> %3  %4\n")
-                   .arg(conn.proto, conn.local, conn.remote, conn.state);
+        QString line = QStringLiteral("%1 %2 -> %3  %4")
+                           .arg(conn.proto, conn.local, conn.remote, conn.state);
+        if (conn.hasTcpDiag) {
+            line += QStringLiteral("\n   rtt %1/%2ms cwnd %3"
+                                   " rtx %4/%5 out %6 in %7 (%8)")
+                        .arg(conn.rttUsec / 1000.0, 0, 'f', 2)
+                        .arg(conn.rttVarUsec / 1000.0, 0, 'f', 1)
+                        .arg(conn.cwnd)
+                        .arg(conn.retransmits)
+                        .arg(conn.totalRetrans)
+                        .arg(formatBytesCompact(conn.bytesAcked),
+                             formatBytesCompact(conn.bytesReceived),
+                             conn.congestion);
+            QString markers;
+            if (conn.retransDelta > 0) {
+                markers += QStringLiteral("rtx+%1").arg(conn.retransDelta);
+            }
+            if (conn.skDrops > 0) {
+                if (!markers.isEmpty()) {
+                    markers += QStringLiteral("  ");
+                }
+                markers +=
+                    QStringLiteral("skdrop %1").arg(conn.skDrops);
+                if (conn.skdropDelta > 0) {
+                    markers += QStringLiteral(" (+%1)").arg(
+                        conn.skdropDelta);
+                }
+            }
+            if (!markers.isEmpty()) {
+                line += QStringLiteral("\n   %1").arg(markers);
+            }
+        }
+        net += line + QLatin1Char('\n');
         ++shown;
     }
     m_net->setText(net.isEmpty() ? QStringLiteral("no connections") : net);
@@ -3409,6 +3478,9 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                            .arg(entry.exposure);
         if (!entry.service.isEmpty()) {
             line += QStringLiteral("  [%1]").arg(entry.service);
+        }
+        if (entry.backlog > 0) {
+            line += QStringLiteral("  backlog %1").arg(entry.backlog);
         }
         endpointText += line + QLatin1Char('\n');
         ++epCount;
@@ -3552,6 +3624,26 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         text += QStringLiteral("cpu throttled %1 / %2 periods")
                     .arg(snapshot.cgroupThrottled)
                     .arg(snapshot.cgroupPeriods);
+        if (snapshot.cgroupHasMemPeak) {
+            text += QStringLiteral("\nmemory peak %1")
+                        .arg(formatMemoryKb(snapshot.cgroupMemPeakBytes / 1024));
+            if (snapshot.cgroupMemLimit > 0) {
+                const double row = 100.0
+                    * static_cast<double>(snapshot.cgroupMemPeakBytes)
+                    / static_cast<double>(snapshot.cgroupMemLimit);
+                text += QStringLiteral("  (%1% of max)").arg(row, 0, 'f', 0);
+            }
+        }
+        text += QStringLiteral("\noom events %1  kills %2")
+                    .arg(snapshot.cgroupOomEvents)
+                    .arg(snapshot.cgroupOomKills);
+        if (snapshot.cgroupPidsCurrent >= 0) {
+            text += QStringLiteral("\npids  %1 / %2")
+                        .arg(snapshot.cgroupPidsCurrent)
+                        .arg(snapshot.cgroupPidsMax < 0
+                                 ? QStringLiteral("max (unlimited)")
+                                 : QString::number(snapshot.cgroupPidsMax));
+        }
         m_cgroup->setText(text);
         m_dockTileCgMem->setText(
             formatMemoryKb(snapshot.cgroupMemUsage / 1024));
@@ -3580,6 +3672,10 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 m_hostCpuSpark->setValues(m_hostCpuStore.values());
             }
         }
+        if (snapshot.kernelLimits.available
+            && snapshot.hostStealPercent >= 0.0 && !snapshot.hostWarming) {
+            m_stealStore.push(snapshot.hostStealPercent);
+        }
     } else {
         for (QLabel *label :
              {m_hostCpu, m_hostMem, m_hostDisk, m_hostNet, m_hostLoad}) {
@@ -3597,6 +3693,11 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     watchdog.append(WatchdogMetric{
         QStringLiteral("host-cpu"),
         detectAnomaly(m_hostCpuStore.values(), AnomalyModel::ZScore, 3.0)});
+    if (m_stealStore.size() > 0) {
+        watchdog.append(WatchdogMetric{
+            QStringLiteral("steal"),
+            detectAnomaly(m_stealStore.values(), AnomalyModel::Mad, 3.5)});
+    }
     m_watchdog->setText(watchdogText(watchdog));
 
     m_runtime->setText(runtimeSummaryText(snapshot.runtime)
@@ -3689,6 +3790,47 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     m_hostCpuInfo->setText(hostInfoCpuText(snapshot.hostInfo));
     m_hostFilesystems->setText(hostInfoFilesystemsText(snapshot.hostInfo));
     m_hostNetwork->setText(hostInfoNetworkText(snapshot.hostInfo));
+
+    {
+        const linuxproc::KernelLimits &limits = snapshot.kernelLimits;
+        if (limits.available) {
+            QString kernelText =
+                QStringLiteral("fd %1 / %2%3\n")
+                    .arg(limits.fdAllocated)
+                    .arg(limits.fdMax)
+                    .arg(limits.fdPressure ? QStringLiteral("  !! FD pressure")
+                                            : QString());
+            kernelText +=
+                QStringLiteral("somaxconn %1  cc %2\n")
+                    .arg(limits.somaxconn)
+                    .arg(limits.congestion.isEmpty()
+                             ? QStringLiteral("--")
+                             : limits.congestion);
+            kernelText +=
+                QStringLiteral("inotify %1  pid_max %2\n")
+                    .arg(limits.inotifyWatchesMax)
+                    .arg(limits.pidMax);
+            kernelText +=
+                QStringLiteral("swappiness %1  overcommit %2\n")
+                    .arg(limits.swappiness)
+                    .arg(limits.overcommit);
+            kernelText +=
+                QStringLiteral("run %1  blocked %2  steal %3%")
+                    .arg(snapshot.hostRun < 0
+                             ? QStringLiteral("--")
+                             : QString::number(snapshot.hostRun))
+                    .arg(snapshot.hostBlocked < 0
+                             ? QStringLiteral("--")
+                             : QString::number(snapshot.hostBlocked))
+                    .arg(snapshot.hostStealPercent < 0.05
+                             ? QStringLiteral("0.0")
+                             : QString::number(
+                                   snapshot.hostStealPercent, 'f', 1));
+            m_kernel->setText(kernelText);
+        } else {
+            m_kernel->setText(unsupportedOsText());
+        }
+    }
 
     if (snapshot.security.available) {
         m_securitySummary->setText(securitySummaryText(snapshot.security));

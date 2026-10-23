@@ -298,6 +298,26 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     m_alertInput.appCpu = snapshot.cpuPercent;
     m_alertInput.hostCpuValid = snapshot.hostAvailable && !snapshot.hostWarming;
     m_alertInput.hostCpu = snapshot.hostCpuPercent;
+    if (snapshot.hostAvailable && !snapshot.hostWarming
+        && snapshot.hostStealPercent >= 0.0) {
+        m_alertInput.stealValid = true;
+        m_alertInput.stealPercent = snapshot.hostStealPercent;
+        m_stealHistory.append(snapshot.hostStealPercent);
+        if (m_stealHistory.size() > 120) {
+            m_stealHistory.removeFirst();
+        }
+    } else {
+        m_alertInput.stealValid = false;
+    }
+    if (snapshot.kernelLimits.available && snapshot.kernelLimits.fdMax > 0) {
+        m_alertInput.kernelFdValid = true;
+        m_alertInput.kernelFdPct =
+            100.0
+            * static_cast<double>(snapshot.kernelLimits.fdAllocated)
+                  / static_cast<double>(snapshot.kernelLimits.fdMax);
+    } else {
+        m_alertInput.kernelFdValid = false;
+    }
 
     if (snapshot.cpuValid) {
         m_cpuHistory.append(snapshot.cpuPercent);
@@ -315,11 +335,14 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
         detectAnomaly(m_cpuHistory, AnomalyModel::Mad, 3.5);
     const AnomalyResult hostAnomaly =
         detectAnomaly(m_hostCpuHistory, AnomalyModel::ZScore, 3.0);
+    const AnomalyResult stealAnomaly =
+        detectAnomaly(m_stealHistory, AnomalyModel::Mad, 3.5);
     const ForecastResult cpuForecast =
         forecastCrossing(m_cpuHistory, 90.0, 60);
     m_alertInput.watchdogValid = m_cpuHistory.size() >= 10;
     m_alertInput.watchdogScore =
-        qMax(std::fabs(cpuAnomaly.score), std::fabs(hostAnomaly.score));
+        qMax(qMax(std::fabs(cpuAnomaly.score), std::fabs(hostAnomaly.score)),
+             std::fabs(stealAnomaly.score));
     m_alertInput.watchdogForecastSteps =
         cpuForecast.crosses ? cpuForecast.stepsToThreshold : 0;
     if (snapshot.hostMemTotalKb > 0) {
