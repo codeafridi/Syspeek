@@ -271,8 +271,21 @@ jobs:
 
       - name: Installer smoke (linux)
         if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           sh -n install.sh
+          # The maintainers publish the portable bundle AFTER the tag-driven
+          # release job flips releases/latest; fall back to the previous
+          # release when the portable is not up yet.
+          if ! curl -fsI \
+             "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/syspeek-portable.tar.gz" \
+             > /dev/null 2>&1; then
+            prev="$(gh release list --limit 5 --json tagName --jq \
+              '[.[].tagName] | if length > 1 then .[1] else .[0] end')"
+            export SYSPEEK_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${prev}/syspeek-portable.tar.gz"
+            echo "portable not on latest yet — smoke fallback: ${prev}"
+          fi
           sh install.sh --no-bridge --no-autostart
           test -x "$HOME/.local/opt/syspeek/syspeek"
           test -x "$HOME/.local/bin/syspeek"
