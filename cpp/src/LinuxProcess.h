@@ -65,6 +65,8 @@ struct CgroupInfo {
     unsigned long long throttledUsec = 0;
     unsigned long long memUsageBytes = 0;
     long long memLimitBytes = -1;
+    long long pidsCurrent = -1;
+    long long pidsMax = -1;
     unsigned long long memAnonBytes = 0;
     unsigned long long memFileBytes = 0;
     unsigned long long memKernelBytes = 0;
@@ -162,6 +164,21 @@ struct TcpDiagInfo {
     quint32 wqueue = 0;
     quint32 uid = 0;
     quint32 inode = 0;
+    quint32 skRmemAlloc = 0;
+    quint32 skRcvBuf = 0;
+    quint32 skWmemAlloc = 0;
+    quint32 skSndBuf = 0;
+    quint32 skFwdAlloc = 0;
+    quint32 skWmemQueued = 0;
+    quint32 skOptmem = 0;
+    quint32 skBacklog = 0;
+    quint32 skDrops = 0;
+    bool hasSkmem = false;
+};
+
+struct OomInfo {
+    int score = -1;
+    int scoreAdj = 0;
 };
 #if defined(Q_OS_LINUX)
 bool parseTcpDiagDump(const QByteArray &content, QList<TcpDiagInfo> &out);
@@ -170,6 +187,7 @@ bool queryTcpDiag(QList<TcpDiagInfo> &out);
 bool parseNetDevInterfaces(const QByteArray &content, QList<InterfaceStats> &out);
 bool parsePidCgroup(const QByteArray &content, QString &version, QString &path);
 bool parseCgroupCpuStat(const QByteArray &content, CgroupInfo &out);
+bool processOom(int pid, OomInfo &out);
 bool parseCgroupMemoryValue(const QByteArray &content, long long &out);
 bool parseCgroupMemoryStat(const QByteArray &content, CgroupInfo &out);
 bool parseCgroupMemoryEvents(const QByteArray &content, CgroupInfo &out);

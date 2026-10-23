@@ -38,6 +38,7 @@ public:
     bool processInstrumentation(int pid, QList<QString> &agents) override;
     bool cgroupSample(int pid, linuxproc::CgroupInfo &out) override;
     bool kernelLimits(linuxproc::KernelLimits &out) override;
+    bool processOom(int pid, linuxproc::OomInfo &out) override;
     bool sumRssKb(const QList<int> &pids, unsigned long long &out) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;

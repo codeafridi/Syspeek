@@ -568,6 +568,17 @@ int main(int argc, char *argv[]) {
         const quint16 congType = INET_DIAG_CONG;
         fixtureMessage.append(reinterpret_cast<const char *>(&congType), 2);
         fixtureMessage.append("cubic", 6);
+        fixtureMessage.append(2, '\0');
+
+        const quint32 skmem[SK_MEMINFO_VARS] = {7, 212992, 1, 212992, 0, 4, 0,
+                                                0, 5};
+        const quint16 skLen = static_cast<quint16>(
+            RTA_LENGTH(SK_MEMINFO_VARS * sizeof(quint32)));
+        fixtureMessage.append(reinterpret_cast<const char *>(&skLen), 2);
+        const quint16 skType = INET_DIAG_SKMEMINFO;
+        fixtureMessage.append(reinterpret_cast<const char *>(&skType), 2);
+        fixtureMessage.append(reinterpret_cast<const char *>(skmem),
+                              sizeof(skmem));
 
         struct nlmsghdr record = {};
         record.nlmsg_len = NLMSG_LENGTH(
@@ -607,6 +618,10 @@ int main(int argc, char *argv[]) {
                   "parseTcpDiagDump: tcp_info payload decoded");
             check(info.congestion == QStringLiteral("cubic"),
                   "parseTcpDiagDump: congestion algorithm attr decoded");
+            check(info.hasSkmem && info.skRmemAlloc == 7
+                      && info.skRcvBuf == 212992 && info.skDrops == 5
+                      && info.skWmemQueued == 4,
+                  "parseTcpDiagDump: skmeminfo payload decoded");
         }
     }
 #endif

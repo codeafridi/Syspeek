@@ -3370,11 +3370,16 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 
     updateOverviewText(snapshot);
 
-    m_memDetail->setText(QStringLiteral("RSS      %1\nVirtual  %2\nSwap     %3\nShared   %4")
+    m_memDetail->setText(QStringLiteral("RSS      %1\nVirtual  %2\nSwap     %3\nShared   %4\noom      %5")
                              .arg(formatMemoryKb(snapshot.rssKb),
                                   formatMemoryKb(snapshot.vmsKb),
                                   formatMemoryKb(snapshot.swapKb),
-                                  formatMemoryKb(snapshot.sharedKb)));
+                                  formatMemoryKb(snapshot.sharedKb),
+                                  snapshot.focusOom.score >= 0
+                                      ? QStringLiteral("score %1  adj %2")
+                                            .arg(snapshot.focusOom.score)
+                                            .arg(snapshot.focusOom.scoreAdj)
+                                      : QStringLiteral("--")));
     // Memory-page tiles + used/available history (M61i); used is
     // total - available (the snapshot does not split cache yet).
     m_memTileTotal->setText(formatMemoryKb(snapshot.hostMemTotalKb));
@@ -3415,6 +3420,9 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                         .arg(formatBytesCompact(conn.bytesAcked),
                              formatBytesCompact(conn.bytesReceived),
                              conn.congestion);
+            if (conn.skDrops > 0) {
+                line += QStringLiteral("  skdrop %1").arg(conn.skDrops);
+            }
         }
         net += line + QLatin1Char('\n');
         ++shown;
@@ -3593,6 +3601,13 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         text += QStringLiteral("\noom events %1  kills %2")
                     .arg(snapshot.cgroupOomEvents)
                     .arg(snapshot.cgroupOomKills);
+        if (snapshot.cgroupPidsCurrent >= 0) {
+            text += QStringLiteral("\npids  %1 / %2")
+                        .arg(snapshot.cgroupPidsCurrent)
+                        .arg(snapshot.cgroupPidsMax < 0
+                                 ? QStringLiteral("max (unlimited)")
+                                 : QString::number(snapshot.cgroupPidsMax));
+        }
         m_cgroup->setText(text);
         m_dockTileCgMem->setText(
             formatMemoryKb(snapshot.cgroupMemUsage / 1024));

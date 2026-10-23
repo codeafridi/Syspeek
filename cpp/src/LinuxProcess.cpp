@@ -727,6 +727,22 @@ bool parseTcpDiagDumpData(const char *data, qsizetype remaining,
                         info.bytesSent = ti->tcpi_bytes_sent;
                         info.bytesRetrans = ti->tcpi_bytes_retrans;
                     }
+                } else if (ra->rta_type == INET_DIAG_SKMEMINFO
+                           && ra->rta_len
+                                  >= RTA_LENGTH(SK_MEMINFO_VARS
+                                                * sizeof(quint32))) {
+                    auto mem = reinterpret_cast<const quint32 *>(
+                        attr + RTA_LENGTH(0));
+                    info.hasSkmem = true;
+                    info.skRmemAlloc = mem[SK_MEMINFO_RMEM_ALLOC];
+                    info.skRcvBuf = mem[SK_MEMINFO_RCVBUF];
+                    info.skWmemAlloc = mem[SK_MEMINFO_WMEM_ALLOC];
+                    info.skSndBuf = mem[SK_MEMINFO_SNDBUF];
+                    info.skFwdAlloc = mem[SK_MEMINFO_FWD_ALLOC];
+                    info.skWmemQueued = mem[SK_MEMINFO_WMEM_QUEUED];
+                    info.skOptmem = mem[SK_MEMINFO_OPTMEM];
+                    info.skBacklog = mem[SK_MEMINFO_BACKLOG];
+                    info.skDrops = mem[SK_MEMINFO_DROPS];
                 } else if (ra->rta_type == INET_DIAG_CONG
                            && ra->rta_len > RTA_LENGTH(0)) {
                     const char *text = attr + RTA_LENGTH(0);
@@ -775,7 +791,8 @@ bool queryTcpDiag(QList<TcpDiagInfo> &out) {
         request.req.sdiag_protocol = IPPROTO_TCP;
         request.req.idiag_ext =
             static_cast<quint8>((1u << (INET_DIAG_INFO - 1))
-                                | (1u << (INET_DIAG_CONG - 1)));
+                                | (1u << (INET_DIAG_CONG - 1))
+                                | (1u << (INET_DIAG_SKMEMINFO - 1)));
         request.req.idiag_states = 0xFFF;
         request.req.id.idiag_cookie[0] = INET_DIAG_NOCOOKIE;
         request.req.id.idiag_cookie[1] = INET_DIAG_NOCOOKIE;
@@ -1123,6 +1140,26 @@ bool readKernelLimits(KernelLimits &out) {
     return any;
 }
 
+bool processOom(int pid, OomInfo &out) {
+    QFile score(QStringLiteral("/proc/%1/oom_score").arg(pid));
+    if (score.open(QIODevice::ReadOnly)) {
+        bool ok = false;
+        const int value = score.readAll().trimmed().toInt(&ok);
+        if (ok) {
+            out.score = value;
+        }
+    }
+    QFile adjFile(QStringLiteral("/proc/%1/oom_score_adj").arg(pid));
+    if (adjFile.open(QIODevice::ReadOnly)) {
+        bool ok = false;
+        const int value = adjFile.readAll().trimmed().toInt(&ok);
+        if (ok) {
+            out.scoreAdj = value;
+        }
+    }
+    return out.score >= 0;
+}
+
 bool cgroupSample(int pid, CgroupInfo &out) {
     QFile cgroup(procPath(pid, "cgroup"));
     if (!cgroup.open(QIODevice::ReadOnly)) {
@@ -1164,6 +1201,17 @@ bool cgroupSample(int pid, CgroupInfo &out) {
         }
         parseCgroupMemoryEvents(
             readFileBytes(base + QStringLiteral("/memory.events")), out);
+        long long pids = 0;
+        if (parseCgroupMemoryValue(
+                readFileBytes(base + QStringLiteral("/pids.current")), pids)
+            && pids >= 0) {
+            out.pidsCurrent = pids;
+        }
+        long long pidsMax = 0;
+        if (parseCgroupMemoryValue(
+                readFileBytes(base + QStringLiteral("/pids.max")), pidsMax)) {
+            out.pidsMax = pidsMax;
+        }
         out.available = true;
     } else {
         const QString memBase = root + QStringLiteral("/memory") + path;

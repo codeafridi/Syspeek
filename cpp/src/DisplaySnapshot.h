@@ -46,6 +46,8 @@ struct ConnectionRow {
     quint64 bytesSent = 0;
     quint64 bytesAcked = 0;
     quint64 bytesReceived = 0;
+    quint32 skDrops = 0;
+    bool hasSkmem = false;
 };
 
 struct InterfaceRow {
@@ -101,6 +103,9 @@ struct DisplaySnapshot {
     unsigned long long cgroupOomKills = 0;
     unsigned long long cgroupMemPeakBytes = 0;
     bool cgroupHasMemPeak = false;
+    long long cgroupPidsCurrent = -1;
+    long long cgroupPidsMax = -1;
+    linuxproc::OomInfo focusOom;
     bool hostAvailable = false;
     bool hostWarming = false;
     double hostCpuPercent = 0.0;

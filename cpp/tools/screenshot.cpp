@@ -58,6 +58,10 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.cgroupThrottledUsec = 154000000;
     s.cgroupMemPeakBytes = 3775ULL * 1024ULL * 1024ULL;
     s.cgroupHasMemPeak = true;
+    s.cgroupPidsCurrent = 148;
+    s.cgroupPidsMax = 10813;
+    s.focusOom.score = 187;
+    s.focusOom.scoreAdj = 0;
     s.hostRun = 3;
     s.hostBlocked = 1;
     s.kernelLimits.available = true;
@@ -116,6 +120,8 @@ DisplaySnapshot demoSnapshot(int tick) {
     conn.bytesSent = 250723456;
     conn.bytesAcked = 250721920;
     conn.bytesReceived = 88174032;
+    conn.hasSkmem = true;
+    conn.skDrops = 3;
     s.connections = {conn};
 
     // SBOM fixture (M61q/M61r): two deb packages + one brew purl so the

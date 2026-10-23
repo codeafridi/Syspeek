@@ -258,6 +258,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
             const auto it = tcpDiag.find(socket.inode);
             if (it != tcpDiag.end() && it->hasInfo) {
                 row.hasTcpDiag = true;
+                row.hasSkmem = it->hasSkmem;
+                row.skDrops = it->skDrops;
                 row.congestion = it->congestion;
                 row.rttUsec = it->rttUsec;
                 row.rttVarUsec = it->rttVarUsec;
@@ -337,6 +339,9 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     if (m_backend->capabilities().cgroups
         && m_backend->cgroupSample(focus.identity.pid, cgroup)
         && cgroup.available) {
+        linuxproc::OomInfo oom;
+        m_backend->processOom(focus.identity.pid, oom);
+        snap.focusOom = oom;
         snap.cgroupAvailable = true;
         snap.cgroupVersion = cgroup.version;
         snap.cgroupPath = cgroup.path;
@@ -352,6 +357,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         snap.cgroupOomKills = cgroup.memOomKills;
         snap.cgroupMemPeakBytes = cgroup.memPeakBytes;
         snap.cgroupHasMemPeak = cgroup.hasMemPeak;
+        snap.cgroupPidsCurrent = cgroup.pidsCurrent;
+        snap.cgroupPidsMax = cgroup.pidsMax;
     }
 
     m_cpuIdentity = focus.identity;
