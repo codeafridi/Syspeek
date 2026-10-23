@@ -121,6 +121,8 @@ DisplaySnapshot demoSnapshot(int tick) {
     conn.bytesAcked = 250721920;
     conn.bytesReceived = 88174032;
     conn.hasSkmem = true;
+    conn.skdropDelta = 1;
+    conn.retransDelta = 2;
     conn.skDrops = 3;
     s.connections = {conn};
 

@@ -48,6 +48,9 @@ struct ConnectionRow {
     quint64 bytesReceived = 0;
     quint32 skDrops = 0;
     bool hasSkmem = false;
+    quint32 retransDelta = 0;
+    quint32 skdropDelta = 0;
+    quint64 bytesAckedDelta = 0;
 };
 
 struct InterfaceRow {

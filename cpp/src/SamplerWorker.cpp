@@ -206,6 +206,9 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
             }
         }
     }
+    if (m_diagPrior.size() > 4096) {
+        m_diagPrior.clear();
+    }
 #endif
     for (const linuxproc::SocketInfo &socket : sockets) {
         stateCounts[socket.state] += 1;
@@ -261,6 +264,33 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
                 row.hasSkmem = it->hasSkmem;
                 row.skDrops = it->skDrops;
                 row.congestion = it->congestion;
+                const linuxproc::TcpDiagInfo &diagInfo = it.value();
+                const uint64_t key = socket.inode;
+                auto prior = m_diagPrior.find(key);
+                if (prior != m_diagPrior.end() && prior->seen) {
+                    row.retransDelta = static_cast<quint32>(
+                        diagInfo.totalRetrans > prior->totalRetrans
+                            ? diagInfo.totalRetrans - prior->totalRetrans
+                            : 0);
+                    row.skdropDelta =
+                        diagInfo.skDrops > prior->skDrops
+                            ? diagInfo.skDrops - prior->skDrops
+                            : 0;
+                    row.bytesAckedDelta =
+                        diagInfo.bytesAcked > prior->bytesAcked
+                            ? diagInfo.bytesAcked - prior->bytesAcked
+                            : 0;
+                } else {
+                    row.retransDelta = 0;
+                    row.skdropDelta = 0;
+                    row.bytesAckedDelta = 0;
+                }
+                DiagPrior next;
+                next.bytesAcked = diagInfo.bytesAcked;
+                next.totalRetrans = diagInfo.totalRetrans;
+                next.skDrops = it->skDrops;
+                next.seen = true;
+                m_diagPrior.insert(key, next);
                 row.rttUsec = it->rttUsec;
                 row.rttVarUsec = it->rttVarUsec;
                 row.rtoUsec = it->rtoUsec;

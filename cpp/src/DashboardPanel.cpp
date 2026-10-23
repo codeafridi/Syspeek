@@ -1504,6 +1504,15 @@ QWidget *DashboardPanel::buildNetworkView() {
     layout->addWidget(makeChartCard(QStringLiteral("host rx + tx"),
                                     m_chartNetPage, view));
 
+    // --- Focused-app connection latency trend (netlink tcp_info per tick).
+    m_chartConnRtt = new TimeseriesChart(view);
+    m_chartConnRtt->setUnit(QStringLiteral("ms"));
+    m_chartConnRtt->setSeriesName(QStringLiteral("syspeek.conn.rtt"));
+    layout->addWidget(makeBanner(QStringLiteral("LATENCY (focused)"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("avg tcp_info rtt"),
+                                    m_chartConnRtt, view));
+
     auto *row = new QHBoxLayout();
     row->setSpacing(14);
     m_listen = new QLabel(QStringLiteral("--"), view);
@@ -3366,6 +3375,18 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             m_chartNetPage->push(snapshot.hostNetRxPerSec / 1024.0);
             m_chartNetPage->pushB(snapshot.hostNetTxPerSec / 1024.0);
         }
+        int rttRows = 0;
+        double rttSum = 0.0;
+        for (const ConnectionRow &conn2 : snapshot.connections) {
+            if (conn2.hasTcpDiag && (conn2.state == QStringLiteral("ESTABLISHED")
+                                     || conn2.rttUsec > 0)) {
+                rttSum += static_cast<double>(conn2.rttUsec);
+                ++rttRows;
+            }
+        }
+        if (m_chartConnRtt != nullptr && rttRows > 0) {
+            m_chartConnRtt->push(rttSum / rttRows / 1000.0);
+        }
     }
 
     updateOverviewText(snapshot);
@@ -3420,8 +3441,23 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                         .arg(formatBytesCompact(conn.bytesAcked),
                              formatBytesCompact(conn.bytesReceived),
                              conn.congestion);
+            QString markers;
+            if (conn.retransDelta > 0) {
+                markers += QStringLiteral("rtx+%1").arg(conn.retransDelta);
+            }
             if (conn.skDrops > 0) {
-                line += QStringLiteral("  skdrop %1").arg(conn.skDrops);
+                if (!markers.isEmpty()) {
+                    markers += QStringLiteral("  ");
+                }
+                markers +=
+                    QStringLiteral("skdrop %1").arg(conn.skDrops);
+                if (conn.skdropDelta > 0) {
+                    markers += QStringLiteral(" (+%1)").arg(
+                        conn.skdropDelta);
+                }
+            }
+            if (!markers.isEmpty()) {
+                line += QStringLiteral("\n   %1").arg(markers);
             }
         }
         net += line + QLatin1Char('\n');
