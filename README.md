@@ -279,6 +279,12 @@ status instead of failing.
 Thresholds and polling intervals are configurable in
 `~/.config/syspeek/config.ini`; sensible defaults are used if it's absent.
 
+**Prometheus endpoint** — Syspeek exposes its live snapshot at
+`http://127.0.0.1:9107/metrics` (localhost only, on by default) in the
+Prometheus text exposition format — point your scraper or Grafana agent config
+at it (nothing leaves your machine unless you do). Disable with
+`[metrics] enabled=false` or move it with `port=`.
+
 Handy environment variables:
 
 - `SYSPEEK_PROBE=1 ./syspeek` — print the detected focus provider and

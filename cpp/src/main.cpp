@@ -14,6 +14,7 @@
 #include "PathSource.h"
 #include "StatsdSource.h"
 #include "DbmSource.h"
+#include "MetricsServer.h"
 #include "DumpReport.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
@@ -483,6 +484,11 @@ int main(int argc, char *argv[]) {
         settingsInfo.logPath = appLogFilePath();
         settingsInfo.autostartLine = settingsAutostartLine();
         settingsInfo.verbsLine = settingsVerbsLine();
+        settingsInfo.metricsLine =
+            config.metrics.enabled
+                ? QStringLiteral("http://127.0.0.1:%1/metrics")
+                      .arg(config.metrics.port)
+                : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
         settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
         settingsInfo.cpuHighPercent = config.health.cpuHighPercent;
@@ -525,6 +531,15 @@ int main(int argc, char *argv[]) {
     worker->moveToThread(thread);
     QObject::connect(thread, &QThread::started, worker, &SamplerWorker::start);
     QObject::connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+
+    auto *metricsServer =
+        config.metrics.enabled ? new MetricsServer(config.metrics, &app)
+                               : nullptr;
+    if (metricsServer != nullptr) {
+        metricsServer->start();
+        QObject::connect(worker, &SamplerWorker::snapshotReady, metricsServer,
+                         &MetricsServer::setSnapshot);
+    }
 
     quint64 lastSequence = 0;
     QObject::connect(worker, &SamplerWorker::snapshotReady, &hud,

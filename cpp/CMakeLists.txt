@@ -145,6 +145,10 @@ add_library(syspeek_core STATIC
     src/DbmStatus.h
     src/DbmSource.cpp
     src/DbmSource.h
+    src/PrometheusStatus.cpp
+    src/PrometheusStatus.h
+    src/MetricsServer.cpp
+    src/MetricsServer.h
     src/WatchdogStatus.cpp
     src/WatchdogStatus.h
     src/TlsSource.cpp

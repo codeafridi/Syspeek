@@ -39,6 +39,7 @@ struct SettingsInfo {
     QString logPath;
     QString autostartLine;
     QString verbsLine;
+    QString metricsLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;

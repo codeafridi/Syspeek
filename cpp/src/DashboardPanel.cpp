@@ -2631,6 +2631,10 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.autostartLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.autostartLine);
+    general += QStringLiteral("prometheus&nbsp;%1<br/>")
+        .arg(m_settings.metricsLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.metricsLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);

@@ -5,6 +5,7 @@
 #include "ServicesStatus.h"
 #include "JournalStatus.h"
 #include "AlertEngine.h"
+#include "PrometheusStatus.h"
 #include "SyntheticStatus.h"
 #include "DiskStatus.h"
 #include "TcpStatus.h"
@@ -353,6 +354,121 @@ int main(int argc, char *argv[]) {
     noSteal.stealValid = false;
     check(engine.update(noSteal, 7).isEmpty(),
           "alert: missing steal sample does not fire");
+
+    {
+        DisplaySnapshot s;
+        QString text = prometheusText(s);
+        check(!text.contains(QStringLiteral("syspeek_host_cpu_percent")),
+              "prometheus: host metrics omitted when host unavailable");
+        check(!text.contains(QStringLiteral("syspeek_app_")),
+              "prometheus: app metrics omitted when no focus");
+        check(
+            text.contains(QStringLiteral("# HELP syspeek_tcp_sockets")),
+            "prometheus: socket state helper always present");
+
+        s.hostAvailable = true;
+        s.hostCpuPercent = 34.5;
+        s.hostStealPercent = 2.4;
+        s.hostMemTotalKb = 16 * 1024 * 1024ULL;
+        s.hostMemAvailableKb = 15 * 1024 * 1024ULL;
+        s.hostDiskTotalBytes = 500 * 1024 * 1024 * 1024ULL;
+        s.hostDiskFreeBytes = 250 * 1024 * 1024 * 1024ULL;
+        s.hostLoad1 = 1.5;
+        s.kernelLimits.available = true;
+        s.kernelLimits.fdAllocated = 1234;
+        s.kernelLimits.fdMax = 10000;
+        s.kernelLimits.runningProcs = 2;
+        s.kernelLimits.blockedProcs = 0;
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_host_cpu_percent 34.500")),
+              "prometheus: host cpu gauge value");
+        check(text.contains(QStringLiteral("syspeek_host_load1 1.500")),
+              "prometheus: load gauge value");
+        check(text.contains(
+                  QStringLiteral("syspeek_kernel_fd_allocated 1234")),
+              "prometheus: kernel fd gauge");
+        check(text.contains(QStringLiteral("syspeek_kernel_pids_running 2")),
+              "prometheus: runnable gauge");
+        check(text.contains(
+                  QStringLiteral("syspeek_host_mem_total_bytes "
+                                 "17179869184")),
+              "prometheus: memory in bytes");
+
+        s.cpuValid = true;
+        s.appName = QStringLiteral("cu\"rsor \\weird\n");
+        s.pid = QStringLiteral("508637");
+        s.cpuPercent = 63.9;
+        s.rssKb = 634 * 1024;
+        ProcessRow row;
+        row.threads = 98;
+        row.fds = 1234;
+        s.processes.append(row);
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "app=\"cu\\\"rsor \\\\weird\\n\",pid=\"508637\"")),
+              "prometheus: label escaping (quote, backslash, newline)");
+        check(text.contains(QStringLiteral(
+                  "syspeek_app_rss_bytes{app=\"cu\\\"rsor")),
+              "prometheus: app rss with labels");
+        check(text.contains(QStringLiteral("syspeek_app_fds{app=")),
+              "prometheus: app fd sum");
+
+        InterfaceRow iface;
+        iface.name = QStringLiteral("eth0");
+        iface.rxBytes = 1'000'000'000ULL;
+        iface.txBytes = 500'000'000ULL;
+        iface.rxPerSec = 12500.0;
+        s.interfaces.append(iface);
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_net_rx_bytes_total{device=\"eth0\"} 1000000000")),
+              "prometheus: interface counter total");
+        check(text.contains(QStringLiteral(
+                  "syspeek_net_tx_bytes_per_second{device=\"eth0\"}")),
+              "prometheus: interface rate gauge");
+        check(text.contains(QStringLiteral(
+                  "# TYPE syspeek_net_rx_bytes_total counter")),
+              "prometheus: counter type declared");
+
+        DiskRow disk;
+        disk.name = QStringLiteral("sda");
+        disk.readKbPerSec = 100.0;
+        disk.utilPercent = 52.3;
+        disk.readAwaitMs = 2.5;
+        s.disks.append(disk);
+        s.disksAvailable = true;
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_disk_read_bytes_per_second{device=\"sda\"} 102400."
+                  "000")),
+              "prometheus: disk rate in bytes");
+        check(text.contains(QStringLiteral(
+                  "syspeek_disk_io_util_percent{device=\"sda\"} 52.300"))
+                  && text.contains(QStringLiteral(
+                      "syspeek_disk_await_seconds{device=\"sda\"} 0.003")),
+              "prometheus: disk util + await in seconds");
+
+        s.cgroupAvailable = true;
+        s.cgroupMemUsage = 7232409600ULL;
+        s.cgroupMemLimit = -1;
+        s.cgroupHasMemPeak = true;
+        s.cgroupMemPeakBytes = 3775ULL * 1024ULL * 1024ULL;
+        s.cgroupOomEvents = 0;
+        s.cgroupOomKills = 3;
+        s.cgroupPidsCurrent = 148;
+        text = prometheusText(s);
+        check(text.contains(
+                  QStringLiteral("syspeek_cgroup_mem_usage_bytes 7232409600")),
+              "prometheus: cgroup usage");
+        check(!text.contains(QStringLiteral("syspeek_cgroup_mem_limit_bytes")),
+              "prometheus: unlimited limit omitted");
+        check(text.contains(QStringLiteral(
+                  "syspeek_cgroup_oom_kills_total 3")),
+              "prometheus: oom kill counter");
+        check(text.contains(QStringLiteral("syspeek_cgroup_pids 148")),
+              "prometheus: cgroup pids gauge");
+    }
 
     int status = 0;
     double total = 0;
