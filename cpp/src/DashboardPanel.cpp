@@ -20,6 +20,9 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QDoubleSpinBox>
+#include <QSpinBox>
+#include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -2537,6 +2540,122 @@ QWidget *DashboardPanel::buildSettingsView() {
     m_settingsGeneral->setTextFormat(Qt::RichText);
     layout->addWidget(makeCard(QStringLiteral("GENERAL"), m_settingsGeneral, view));
 
+    // M66: editable monitors — runtime threshold/cycles reconfiguration
+    // grounded on shipped monit 5.34.2 strings ("Monit reloaded",
+    // "reload - Reinitialize monit", "for %d cycles",
+    // "The number of cycles must be between 1 and %zu", per-metric
+    // "CPU usage limit"/"Memory usage limit" vocabulary): edit each
+    // rule's threshold + sustained cycles, applied live and persisted.
+    auto *monitorsCard = new QFrame(this);
+    monitorsCard->setObjectName(QStringLiteral("ddCard"));
+    auto *monLayout = new QVBoxLayout(monitorsCard);
+    monLayout->setContentsMargins(14, 12, 14, 14);
+    monLayout->setSpacing(8);
+
+    struct MonitorBounds {
+        const char *id;
+        double min;
+        double max;
+        int decimals;
+    };
+    static const QList<MonitorBounds> monitorBounds = {
+        {"app_cpu", 0.0, 100.0, 0},
+        {"host_cpu", 0.0, 100.0, 0},
+        {"host_mem", 0.0, 100.0, 0},
+        {"disk", 0.0, 100.0, 0},
+        {"services_failed", 0.0, 100.0, 0},
+        {"k8s_issues", 0.0, 100.0, 0},
+        {"journal_errors", 0.0, 1000.0, 0},
+        {"watchdog_anomaly", 0.0, 50.0, 1},
+        {"watchdog_forecast", 0.0, 120.0, 0},
+        {"kernel_fd", 0.0, 100.0, 0},
+        {"host_steal", 0.0, 100.0, 1},
+    };
+    auto boundsFor = [&monitorBounds](const QString &id) {
+        for (const MonitorBounds &b : monitorBounds) {
+            if (QLatin1String(b.id) == id) {
+                return b;
+            }
+        }
+        return MonitorBounds{nullptr, 0.0, 1000000.0, 0};
+    };
+
+    for (const AlertRule &rule : defaultAlertRules()) {
+        const MonitorBounds b = boundsFor(rule.id);
+        auto *row = new QHBoxLayout();
+        row->setSpacing(8);
+
+        auto *title = new QLabel(rule.title, monitorsCard);
+        title->setObjectName(QStringLiteral("ddSettingsInfo"));
+        title->setFont(monoFont(10));
+        auto *sev = new QLabel(rule.severity.toUpper(), monitorsCard);
+        sev->setFont(monoFont(9, true));
+        sev->setStyleSheet(
+            rule.severity == QStringLiteral("critical")
+                ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                : QStringLiteral("color: %1;").arg(ui_theme::warn()));
+
+        auto *threshold = new QDoubleSpinBox(monitorsCard);
+        threshold->setRange(b.min, b.max);
+        threshold->setDecimals(b.decimals);
+        threshold->setFixedWidth(96);
+        threshold->setAlignment(Qt::AlignRight);
+        auto *cycleSpin = new QSpinBox(monitorsCard);
+        cycleSpin->setRange(1, 100);
+        cycleSpin->setFixedWidth(96);
+        cycleSpin->setAlignment(Qt::AlignRight);
+
+        auto emitRow = [this, threshold, cycleSpin, rule]() {
+            AlertRule updated = rule;
+            updated.threshold = threshold->value();
+            updated.sustained = cycleSpin->value();
+            emit monitorChanged(updated);
+        };
+        connect(threshold, &QDoubleSpinBox::valueChanged, this, emitRow);
+        connect(cycleSpin, &QSpinBox::valueChanged, this, emitRow);
+
+        const auto oldThreshold = m_monitorThreshold.take(rule.id);
+        if (oldThreshold != nullptr) {
+            delete oldThreshold;
+        }
+        const auto oldCycles = m_monitorCycles.take(rule.id);
+        if (oldCycles != nullptr) {
+            delete oldCycles;
+        }
+        m_monitorThreshold.insert(rule.id, threshold);
+        m_monitorCycles.insert(rule.id, cycleSpin);
+
+        auto *unitLabel = new QLabel(rule.unit, monitorsCard);
+        unitLabel->setObjectName(QStringLiteral("ddSettingsPath"));
+        unitLabel->setFont(monoFont(9));
+
+        row->addWidget(title, 1);
+        row->addWidget(sev);
+        row->addWidget(threshold);
+        row->addWidget(unitLabel);
+        row->addWidget(cycleSpin);
+        auto *cyclesLabel = new QLabel(QStringLiteral("cycles"), monitorsCard);
+        cyclesLabel->setObjectName(QStringLiteral("ddSettingsPath"));
+        cyclesLabel->setFont(monoFont(9));
+        row->addWidget(cyclesLabel);
+        monLayout->addLayout(row);
+    }
+
+    auto *resetRow = new QHBoxLayout();
+    resetRow->addStretch(1);
+    auto *monitorReset = new QPushButton(QStringLiteral("RESET"), monitorsCard);
+    monitorReset->setObjectName(QStringLiteral("ddCopy"));
+    monitorReset->setCursor(Qt::PointingHandCursor);
+    monitorReset->setFocusPolicy(Qt::NoFocus);
+    monitorReset->setToolTip(
+        QStringLiteral("restore the built-in monitor defaults"));
+    connect(monitorReset, &QPushButton::clicked, this,
+            &DashboardPanel::monitorsResetRequested);
+    resetRow->addWidget(monitorReset);
+    monLayout->addLayout(resetRow);
+
+    layout->addWidget(makeCard(QStringLiteral("MONITORS"), monitorsCard, view));
+
     // Diagnostics: command rows with copy buttons. Mirrors the shipped
     // Datadog agent's local surface (status/configcheck/flare per its
     // cmd/agent/subcommands and the embedded CLI strings in its binary;
@@ -2662,6 +2781,19 @@ void DashboardPanel::applySettingsInfo() {
 void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
     m_settings = info;
     applySettingsInfo();
+}
+
+void DashboardPanel::setMonitors(const QList<AlertRule> &rules) {
+    for (const AlertRule &rule : rules) {
+        if (auto *spin = m_monitorThreshold.value(rule.id)) {
+            const QSignalBlocker blocker(spin);
+            spin->setValue(rule.threshold);
+        }
+        if (auto *spin = m_monitorCycles.value(rule.id)) {
+            const QSignalBlocker blocker(spin);
+            spin->setValue(rule.sustained);
+        }
+    }
 }
 
 void DashboardPanel::copySettingCommand() {

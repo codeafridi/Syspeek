@@ -57,7 +57,11 @@ Alert makeAlert(const AlertRule &rule, double value, qint64 nowMs) {
 } // namespace
 
 AlertEngine::AlertEngine() {
-    m_rules = {
+    m_rules = defaultAlertRules();
+}
+
+QList<AlertRule> defaultAlertRules() {
+    return {
         {QStringLiteral("app_cpu"), QStringLiteral("Focused app CPU high"),
          QStringLiteral("critical"), 90.0, true, 3, QStringLiteral("%")},
         {QStringLiteral("host_cpu"), QStringLiteral("Host CPU high"),
@@ -122,6 +126,52 @@ QList<Alert> AlertEngine::update(const AlertInput &input, qint64 nowMs) {
 }
 
 void AlertEngine::reset() {
+    m_state.clear();
+    m_active.clear();
+}
+
+void AlertEngine::clearRuleState(const QString &id) {
+    State &state = m_state[id];
+    state.streak = 0;
+    state.firing = false;
+}
+
+bool AlertEngine::setRuleThreshold(const QString &id, double threshold) {
+    for (AlertRule &rule : m_rules) {
+        if (rule.id == id) {
+            if (!(threshold >= 0.0) || threshold > 1e9) {
+                return false;
+            }
+            if (rule.threshold == threshold) {
+                return true;
+            }
+            rule.threshold = threshold;
+            clearRuleState(id);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AlertEngine::setRuleSustained(const QString &id, int sustained) {
+    for (AlertRule &rule : m_rules) {
+        if (rule.id == id) {
+            if (sustained < 1 || sustained > 100) {
+                return false;
+            }
+            if (rule.sustained == sustained) {
+                return true;
+            }
+            rule.sustained = sustained;
+            clearRuleState(id);
+            return true;
+        }
+    }
+    return false;
+}
+
+void AlertEngine::resetRules() {
+    m_rules = defaultAlertRules();
     m_state.clear();
     m_active.clear();
 }

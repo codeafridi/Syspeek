@@ -824,6 +824,7 @@ int main(int argc, char *argv[]) {
     settingsInfo.cpuHighPercent = 90.0;
     settingsInfo.rssWarnGb = 1.0;
     panel.setSettingsInfo(settingsInfo);
+    panel.setMonitors(defaultAlertRules());
 
     panel.show();
     app.processEvents();

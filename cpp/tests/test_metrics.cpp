@@ -337,6 +337,71 @@ int main(int argc, char *argv[]) {
     engine.update(fdInput, 4);
     check(engine.active().isEmpty(), "alert: fd resolves on recovery");
 
+    // M66: editable monitors — threshold edits take effect live, cycles
+    // edits re-arm, restore returns the built-in rules (monit-grounded).
+    {
+        AlertEngine editable;
+        AlertInput hostInput;
+        hostInput.hostCpuValid = true;
+        hostInput.hostCpu = 15.0;
+        editable.update(hostInput, 1);
+        editable.update(hostInput, 2);
+        editable.update(hostInput, 3);
+        check(editable.active().isEmpty(),
+              "monitors: default host_cpu threshold stays quiet");
+        check(editable.setRuleThreshold(QStringLiteral("host_cpu"), 10.0),
+              "monitors: threshold edit accepted");
+        const AlertRule edited = [&editable]() {
+            for (const AlertRule &rule : editable.rules()) {
+                if (rule.id == QStringLiteral("host_cpu")) {
+                    return rule;
+                }
+            }
+            return AlertRule{};
+        }();
+        check(edited.threshold == 10.0,
+              "monitors: rules() reflects the edit");
+        check(editable.update(hostInput, 4).isEmpty(),
+              "monitors: edit cleared the old streak");
+        check(editable.update(hostInput, 5).isEmpty()
+                  && editable.update(hostInput, 6).isEmpty()
+                  && editable.update(hostInput, 7).isEmpty(),
+              "monitors: fresh streak builds under the new threshold");
+        const QList<Alert> firedAfterEdit = editable.update(hostInput, 8);
+        check(firedAfterEdit.size() == 1
+                  && firedAfterEdit.at(0).id == QStringLiteral("host_cpu"),
+              "monitors: fires at sustained count under the new threshold");
+
+        check(editable.setRuleSustained(QStringLiteral("host_cpu"), 1),
+              "monitors: cycles edit accepted");
+        const QList<Alert> firedOne =
+            editable.update(hostInput, 9);
+        check(firedOne.size() == 1, "monitors: single-sample arm after edit");
+    }
+    {
+        AlertEngine invalid;
+        check(!invalid.setRuleThreshold(QStringLiteral("nope"), 5.0),
+              "monitors: unknown rule id rejected");
+        check(!invalid.setRuleThreshold(QStringLiteral("host_cpu"), -1.0),
+              "monitors: negative threshold rejected");
+        check(!invalid.setRuleThreshold(QStringLiteral("host_cpu"), 2e9),
+              "monitors: overflow threshold rejected");
+        check(!invalid.setRuleSustained(QStringLiteral("host_cpu"), 0),
+              "monitors: zero cycles rejected");
+        check(!invalid.setRuleSustained(QStringLiteral("host_cpu"), 101),
+              "monitors: 101 cycles rejected (monit bounds)");
+        invalid.resetRules();
+        bool found = false;
+        for (const AlertRule &rule : invalid.rules()) {
+            if (rule.id == QStringLiteral("host_cpu")
+                && rule.threshold == 90.0 && rule.sustained == 5)
+            {
+                found = true;
+            }
+        }
+        check(found, "monitors: resetRules restores built-in defaults");
+    }
+
     engine.reset();
     AlertInput stealInput;
     stealInput.stealValid = true;
