@@ -493,12 +493,12 @@ int main() {
         kubeMergeMetrics(&mergePods, &mergeNodes, pods, nodes);
         check(mergePods.at(0).cpuMillis == 255.0
                   && mergePods.at(0).memBytes
-                         == 110L * 1024 * 1024 + 10L * 1024 * 1024,
+                         == 110LL * 1024 * 1024 + 10LL * 1024 * 1024,
               "kube: matched pod gains usage depth");
         check(mergePods.at(1).cpuMillis < 0.0 && mergePods.at(1).memBytes < 0,
               "kube: unmatched pod keeps unknown depth sentinel");
         check(mergeNodes.at(0).cpuMillis == 750.0
-                  && mergeNodes.at(0).memBytes == 3L * 1024 * 1024 * 1024,
+                  && mergeNodes.at(0).memBytes == 3LL * 1024 * 1024 * 1024,
               "kube: matched node gains usage depth");
     }
 

@@ -368,14 +368,14 @@ int main(int argc, char *argv[]) {
         pod.reason = QStringLiteral("CrashLoopBackOff");
         pod.restarts = 7;
         pod.cpuMillis = 512.0;
-        pod.memBytes = 503L * 1024 * 1024;
+        pod.memBytes = 503LL * 1024 * 1024;
         KubePod kubeIdle;
         kubeIdle.ns = QStringLiteral("default");
         kubeIdle.name = QStringLiteral("web-5f8d");
         kubeIdle.phase = QStringLiteral("Running");
         kubeIdle.restarts = 0;
         kubeIdle.cpuMillis = 22.0;
-        kubeIdle.memBytes = 64L * 1024 * 1024;
+        kubeIdle.memBytes = 64LL * 1024 * 1024;
         KubeNode kubeNode;
         kubeNode.name = QStringLiteral("node-1");
         kubeNode.ready = true;
@@ -387,7 +387,7 @@ int main(int argc, char *argv[]) {
         kubeNode.podsAllocatable = 110;
         kubeNode.podsRunning = 2;
         kubeNode.cpuMillis = 1890.0;
-        kubeNode.memBytes = 6200L * 1024 * 1024;
+        kubeNode.memBytes = 6200LL * 1024 * 1024;
         kube.pods = {pod, kubeIdle};
         kube.totalPods = 2;
         kube.nodes = {kubeNode};
@@ -396,7 +396,7 @@ int main(int argc, char *argv[]) {
         kube.nodesWithUsage = 1;
         pod.cpuMillis = 512.0;
         kube.podsCpuMillis = 534.0;
-        kube.podsMemBytes = 567L * 1024 * 1024;
+        kube.podsMemBytes = 567LL * 1024 * 1024;
         // Services story (M61n): three units, one crash-looping, so the
         // FAILED tile flaps🗴 and the timeline carries a restart row.
         ServicesSnapshot svc;
@@ -756,20 +756,20 @@ int main(int argc, char *argv[]) {
     pod.reason = QStringLiteral("CrashLoopBackOff");
     pod.restarts = 7;
     pod.cpuMillis = 512.0;
-    pod.memBytes = 503L * 1024 * 1024;
+    pod.memBytes = 503LL * 1024 * 1024;
     KubePod kubeWorking;
     kubeWorking.ns = QStringLiteral("default");
     kubeWorking.name = QStringLiteral("web-5f8d");
     kubeWorking.phase = QStringLiteral("Running");
     kubeWorking.restarts = 0;
     kubeWorking.cpuMillis = 22.0;
-    kubeWorking.memBytes = 64L * 1024 * 1024;
+    kubeWorking.memBytes = 64LL * 1024 * 1024;
     kube.pods = {pod, kubeWorking};
     kube.metricsOk = true;
     kube.podsWithUsage = 2;
     kube.nodesWithUsage = 1;
     kube.podsCpuMillis = 534.0;
-    kube.podsMemBytes = 567L * 1024 * 1024;
+    kube.podsMemBytes = 567LL * 1024 * 1024;
     KubeNode kubeNode;
     kubeNode.name = QStringLiteral("node-1");
     kubeNode.ready = true;
@@ -781,7 +781,7 @@ int main(int argc, char *argv[]) {
     kubeNode.podsAllocatable = 110;
     kubeNode.podsRunning = 12;
     kubeNode.cpuMillis = 1890.0;
-    kubeNode.memBytes = 6200L * 1024 * 1024;
+    kubeNode.memBytes = 6200LL * 1024 * 1024;
     kube.nodes = {kubeNode};
     panel.setKubeSnapshot(kube);
 
