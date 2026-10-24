@@ -203,3 +203,49 @@ QString fimDetailText(const FimSnapshot &snapshot) {
     }
     return lines.join(QLatin1Char('\n'));
 }
+
+FimEventFlags decodeFimEventFlags(quint32 flags) {
+    FimEventFlags out;
+    constexpr quint32 kItemCreated = 0x00000100;
+    constexpr quint32 kItemRemoved = 0x00000200;
+    constexpr quint32 kItemInodeMetaMod = 0x00000400;
+    constexpr quint32 kItemRenamed = 0x00000800;
+    constexpr quint32 kItemModified = 0x00001000;
+    constexpr quint32 kItemFinderInfoMod = 0x00002000;
+    constexpr quint32 kItemChangeOwner = 0x00004000;
+    constexpr quint32 kItemXattrMod = 0x00008000;
+    constexpr quint32 kItemIsFile = 0x00010000;
+    constexpr quint32 kItemIsDir = 0x00020000;
+    constexpr quint32 kItemIsSymlink = 0x00040000;
+    Q_UNUSED(kItemIsFile);
+    Q_UNUSED(kItemIsDir);
+    Q_UNUSED(kItemIsSymlink);
+
+    if ((flags & 0x1u) || (flags & 0x2u) || (flags & 0x4u)
+        || (flags & 0x8u)) {
+        out.dropped = true;
+    }
+    if (flags & 0x20u) {
+        out.rootChanged = true;
+    }
+    if (flags & kItemCreated) {
+        out.created = true;
+    }
+    if (flags & kItemRemoved) {
+        out.removed = true;
+    }
+    if (flags & kItemRenamed) {
+        out.renamed = true;
+    }
+    if (flags & kItemModified) {
+        out.modified = true;
+    }
+    out.metadata = (flags & (kItemInodeMetaMod | kItemFinderInfoMod
+                             | kItemChangeOwner | kItemXattrMod))
+                       != 0u
+                   && !(out.created || out.removed || out.modified
+                        || out.renamed);
+    out.anything = out.created || out.removed || out.modified || out.renamed
+                   || out.rootChanged || out.dropped || out.metadata;
+    return out;
+}
