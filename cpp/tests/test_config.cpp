@@ -106,6 +106,77 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M66: [alerts] overrides load over the engine defaults, reject
+        // invalid values, and a save/load roundtrip preserves an edit.
+        QTemporaryDir dir66;
+        const QString path = writeConfig(dir66, QByteArrayLiteral(
+            "[alerts]\n"
+            "host_cpu_threshold=72.5\n"
+            "host_cpu_cycles=2\n"
+            "journal_errors_threshold=500\n"
+            "kernel_fd_cycles=101\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        const AlertRule *hostCpu = nullptr;
+        const AlertRule *journal = nullptr;
+        const AlertRule *steal = nullptr;
+        for (const AlertRule &rule : c.alertRules) {
+            if (rule.id == QStringLiteral("host_cpu")) {
+                hostCpu = &rule;
+            } else if (rule.id == QStringLiteral("journal_errors")) {
+                journal = &rule;
+            } else if (rule.id == QStringLiteral("host_steal")) {
+                steal = &rule;
+            }
+        }
+        check(hostCpu != nullptr && journal != nullptr && steal != nullptr,
+              "alerts: engine defaults loaded into config");
+        check(hostCpu->threshold == 72.5 && hostCpu->sustained == 2,
+              "alerts: threshold + cycles override applied");
+        check(journal->threshold == 500.0 && journal->sustained == 2,
+              "alerts: single-key override keeps default cycles");
+        check(hostCpu != nullptr && steal != nullptr
+                  && steal->threshold == 5.0 && steal->sustained == 5,
+              "alerts: unkeyed rules keep defaults");
+        check(defaults.alertRules.isEmpty(),
+              "alerts: defaultConfig() carries no rules (engine defaults "
+              "live in AlertEngine)");
+    }
+    {
+        // saveAlertOverrides roundtrip: edit one rule, reload, everything
+        // else intact.
+        QTemporaryDir dir67;
+        const QString path = writeConfig(dir67, QByteArrayLiteral(
+            "[alerts]\n"
+            "host_cpu_threshold=72.5\n"));
+        QList<AlertRule> rules = defaultAlertRules();
+        for (AlertRule &rule : rules) {
+            if (rule.id == QStringLiteral("disk")) {
+                rule.threshold = 22.0;
+                rule.sustained = 4;
+            }
+        }
+        saveAlertOverrides(path, rules);
+        QString error;
+        const Config loaded = loadConfig(path, &error);
+        bool edited = false;
+        bool intact = false;
+        bool otherGroups = false;
+        for (const AlertRule &rule : loaded.alertRules) {
+            if (rule.id == QStringLiteral("disk")) {
+                edited = rule.threshold == 22.0 && rule.sustained == 4;
+            }
+            if (rule.id == QStringLiteral("app_cpu")) {
+                intact = rule.threshold == 90.0 && rule.sustained == 3;
+            }
+        }
+        otherGroups = loaded.health.cpuWarnPercent == 70.0;
+        check(edited, "alerts: saveAlertOverrides writes the edit");
+        check(intact, "alerts: save preserves untouched rules");
+        check(otherGroups, "alerts: save keeps the rest of the file");
+    }
+
+    {
         QTemporaryDir dir4;
         const QString path = writeConfig(dir4, QByteArrayLiteral(
             "[fim]\n"

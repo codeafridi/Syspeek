@@ -24,6 +24,7 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
     , m_hostSampler(HostSource::fromBackend(*m_backend))
     , m_diskSampler(DiskSource::fromBackend(*m_backend))
     , m_tcpSampler(TcpSource::fromBackend(*m_backend))
+    , m_profileSampler(m_backend.get())
     , m_groupCache(5000, *m_backend)
     , m_health(config.health) {
     m_intervalMs = config.sampleIntervalMs;

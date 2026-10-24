@@ -164,6 +164,31 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    // [alerts] = per-rule monitor overrides (M66). Missing keys keep the
+    // engine defaults; entries are keyed per rule id.
+    settings.beginGroup(QStringLiteral("alerts"));
+    {
+        QList<AlertRule> rules = defaultAlertRules();
+        for (AlertRule &rule : rules) {
+            const QString thresholdKey =
+                rule.id + QStringLiteral("_threshold");
+            const QString cyclesKey = rule.id + QStringLiteral("_cycles");
+            bool ok = false;
+            const double threshold = settings.value(thresholdKey)
+                                         .toString()
+                                         .toDouble(&ok);
+            if (ok && threshold >= 0.0 && threshold <= 1e9) {
+                rule.threshold = threshold;
+            }
+            const int cycles = settings.value(cyclesKey).toInt(&ok);
+            if (ok && cycles >= 1 && cycles <= 100) {
+                rule.sustained = cycles;
+            }
+        }
+        config.alertRules = rules;
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("docker"));
     {
         const int healthy = settings.value(QStringLiteral("healthy_ms")).toInt();
@@ -442,6 +467,20 @@ Config loadConfig(const QString &path, QString *errorMessage) {
 
     validate(config);
     return config;
+}
+
+void saveAlertOverrides(const QString &path,
+                        const QList<AlertRule> &rules) {
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("alerts"));
+    for (const AlertRule &rule : rules) {
+        settings.setValue(rule.id + QStringLiteral("_threshold"),
+                          rule.threshold);
+        settings.setValue(rule.id + QStringLiteral("_cycles"),
+                          rule.sustained);
+    }
+    settings.endGroup();
+    settings.sync();
 }
 
 QString defaultConfigPath() {

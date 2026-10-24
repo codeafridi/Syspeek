@@ -8,6 +8,8 @@
 #include <QString>
 #include <QtGlobal>
 
+class SystemBackend;
+
 struct ThreadSample {
     int tid = 0;
     QString comm;
@@ -50,14 +52,25 @@ ThreadSample parseTaskStat(const QByteArray &stat, const QString &wchan,
 // Sum Pss per mapping path from /proc/<pid>/smaps.
 QList<MemoryRegion> parseSmaps(const QByteArray &smaps);
 
+// M67 (pure, all-OS tested): phnt KTHREAD_STATE / KWAIT_REASON names —
+// the Windows thread-visibility vocabulary (ntkeapi.h).
+QString threadStateName(int state);
+QString threadWaitReasonName(int reason);
+
+// M67: one-shot /proc per-thread collection (LinuxBackend delegates here;
+// the sampler's no-backend fallback keeps old tests working unchanged).
+bool collectProcThreadSamples(int pid, QList<ThreadSample> &out);
+
 // Unprivileged profiler: per-thread CPU time deltas + off-CPU wait channels +
 // smaps memory regions (Datadog profile-type analogues: cpu/wall/block/memory).
 class ProfileSampler {
 public:
+    explicit ProfileSampler(SystemBackend *backend = nullptr);
     ProfileSnapshot sample(int pid);
     void reset();
 
 private:
+    SystemBackend *m_backend = nullptr;
     bool m_hasBaseline = false;
     QHash<int, QPair<quint64, quint64>> m_lastTicks;
     QElapsedTimer m_timer;

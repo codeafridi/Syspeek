@@ -1,5 +1,7 @@
 #include "ProfileStatus.h"
 
+#include "platform/SystemBackend.h"
+
 #include <QDir>
 #include <QFile>
 #include <QRegularExpression>
@@ -76,34 +78,73 @@ QList<MemoryRegion> parseSmaps(const QByteArray &smaps) {
     return regions;
 }
 
-void ProfileSampler::reset() {
-    m_hasBaseline = false;
-    m_lastTicks.clear();
-    m_timer.invalidate();
+// ---- M67: phnt thread-state / wait-reason names (ntkeapi.h enums) ----
+QString threadStateName(int state) {
+    switch (state) {
+    case 0:
+        return QStringLiteral("initialized");
+    case 1:
+        return QStringLiteral("ready");
+    case 2:
+        return QStringLiteral("running");
+    case 3:
+        return QStringLiteral("standby");
+    case 4:
+        return QStringLiteral("terminated");
+    case 5:
+        return QStringLiteral("waiting");
+    case 6:
+        return QStringLiteral("transition");
+    case 7:
+        return QStringLiteral("deferred-ready");
+    case 8:
+        return QStringLiteral("gate-wait-obsolete");
+    case 9:
+        return QStringLiteral("process-in-swap");
+    default:
+        return QStringLiteral("unknown");
+    }
 }
 
-ProfileSnapshot ProfileSampler::sample(int pid) {
-    ProfileSnapshot snapshot;
-    const QString base = QStringLiteral("/proc/%1").arg(pid);
-
-    QFile cmd(base + QStringLiteral("/comm"));
-    if (cmd.open(QIODevice::ReadOnly)) {
-        snapshot.comm = QString::fromUtf8(cmd.readAll()).trimmed();
+QString threadWaitReasonName(int reason) {
+    // KWAIT_REASON verbatim (phnt ntkeapi.h; MaximumWaitReason = 44).
+    static const char *const names[] = {
+        "Executive",       "FreePage",          "PageIn",
+        "PoolAllocation",  "DelayExecution",    "Suspended",
+        "UserRequest",     "WrExecutive",       "WrFreePage",
+        "WrPageIn",        "WrPoolAllocation",  "WrDelayExecution",
+        "WrSuspended",     "WrUserRequest",     "WrEventPair",
+        "WrQueue",         "WrLpcReceive",      "WrLpcReply",
+        "WrVirtualMemory", "WrPageOut",         "WrRendezvous",
+        "WrKeyedEvent",    "WrTerminated",      "WrProcessInSwap",
+        "WrCpuRateControl", "WrCalloutStack",   "WrKernel",
+        "WrResource",      "WrPushLock",        "WrMutex",
+        "WrQuantumEnd",    "WrDispatchInt",     "WrPreempted",
+        "WrYieldExecution", "WrFastMutex",      "WrGuardedMutex",
+        "WrRundown",       "WrAlertByThreadId", "WrDeferredPreempt",
+        "WrPhysicalFault", "WrIoRing",          "WrMdlCache",
+        "WrRcu",
+    };
+    if (reason < 0
+        || reason >= static_cast<int>(
+                          sizeof(names) / sizeof(names[0]))) {
+        return QStringLiteral("reason%1").arg(reason);
     }
+    return QString::fromLatin1(names[reason]);
+}
 
+// ---- M67: one-shot /proc per-thread row collection (Linux path) ----
+bool collectProcThreadSamples(int pid, QList<ThreadSample> &out) {
+    out.clear();
+    if (pid <= 0) {
+        return false;
+    }
+    const QString base = QStringLiteral("/proc/%1").arg(pid);
     QDir taskDir(base + QStringLiteral("/task"));
     if (!taskDir.exists()) {
-        return snapshot;
+        return false;
     }
-
-#if defined(Q_OS_WIN)
-    return snapshot;
-#else
-    const long hz = sysconf(_SC_CLK_TCK);
-    const QStringList tids =
-        taskDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    QList<ThreadSample> samples;
-    QHash<int, QPair<quint64, quint64>> current;
+    const QStringList tids = taskDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     for (const QString &entry : tids) {
         bool ok = false;
         const int tid = entry.toInt(&ok);
@@ -121,10 +162,55 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
         if (wchanFile.open(QIODevice::ReadOnly)) {
             wchan = QString::fromUtf8(wchanFile.readAll()).trimmed();
         }
-        const ThreadSample sample =
-            parseTaskStat(statFile.readAll(), wchan, tid);
-        samples.append(sample);
-        current.insert(tid, qMakePair(sample.utimeTicks, sample.stimeTicks));
+        out.append(parseTaskStat(statFile.readAll(), wchan, tid));
+    }
+    return !out.isEmpty();
+}
+
+void ProfileSampler::reset() {
+    m_hasBaseline = false;
+    m_lastTicks.clear();
+    m_timer.invalidate();
+}
+
+ProfileSampler::ProfileSampler(SystemBackend *backend) : m_backend(backend) {}
+
+ProfileSnapshot ProfileSampler::sample(int pid) {
+    ProfileSnapshot snapshot;
+    QList<ThreadSample> samples;
+    long hz = 0;
+
+#if defined(Q_OS_WIN)
+    if (m_backend == nullptr
+        || !m_backend->processThreadSamples(pid, samples, hz)) {
+        return snapshot;
+    }
+#else
+    if (m_backend != nullptr && m_backend->processThreadSamples(pid, samples, hz)) {
+        // backend rows: tickHz carries the unit (Linux clock ticks,
+        // Windows 100-ns intervals).
+    } else {
+        const QString base = QStringLiteral("/proc/%1").arg(pid);
+
+        QFile cmd(base + QStringLiteral("/comm"));
+        if (cmd.open(QIODevice::ReadOnly)) {
+            snapshot.comm = QString::fromUtf8(cmd.readAll()).trimmed();
+        }
+
+        if (!collectProcThreadSamples(pid, samples)) {
+            return snapshot;
+        }
+        hz = sysconf(_SC_CLK_TCK);
+    }
+#endif
+
+    QHash<int, QPair<quint64, quint64>> current;
+    for (const ThreadSample &sample : samples) {
+        current.insert(sample.tid,
+                       qMakePair(sample.utimeTicks, sample.stimeTicks));
+    }
+    if (snapshot.comm.isEmpty() && !samples.isEmpty()) {
+        snapshot.comm = samples.first().comm;
     }
 
     snapshot.available = true;
@@ -196,7 +282,8 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
         snapshot.waitChannels = snapshot.waitChannels.mid(0, 12);
     }
 
-    QFile smaps(base + QStringLiteral("/smaps"));
+#if !defined(Q_OS_WIN)
+    QFile smaps(QStringLiteral("/proc/%1/smaps").arg(pid));
     if (smaps.open(QIODevice::ReadOnly)) {
         const QList<MemoryRegion> regions = parseSmaps(smaps.readAll());
         for (const MemoryRegion &region : regions) {
@@ -204,10 +291,10 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
         }
         snapshot.regions = regions.mid(0, 12);
     }
+#endif
 
     m_lastTicks = current;
     return snapshot;
-#endif
 }
 
 QString profileSummaryText(const ProfileSnapshot &snapshot) {

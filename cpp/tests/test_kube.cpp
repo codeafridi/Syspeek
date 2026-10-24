@@ -422,6 +422,86 @@ int main() {
               "kube: nodes text");
     }
 
+    {
+        // M65: metrics.k8s.io/v1beta1 shapes (kubectl get --raw), grounded
+        // on the shipped kubectl 1.37.1 strings (PodMetricsList kinds,
+        // usage/window/containers tags, "Metrics API not available").
+        const QByteArray podsMetrics = QByteArrayLiteral(
+            "{\"kind\":\"PodMetricsList\",\"apiVersion\":"
+            "\"metrics.k8s.io/v1beta1\",\"metadata\":{},\"items\":["
+            "{\"kind\":\"PodMetrics\",\"metadata\":{\"name\":\"web-1\","
+            "\"namespace\":\"default\",\"creationTimestamp\":null},"
+            "\"timestamp\":\"2026-10-24T09:00:00Z\",\"window\":\"30s\","
+            "\"containers\":["
+            "{\"name\":\"app\",\"usage\":{\"cpu\":\"250m\",\"memory\":\"110Mi\"}},"
+            "{\"name\":\"sidecar\",\"usage\":{\"cpu\":\"5m\",\"memory\":\"10Mi\"}}]},"
+            "{\"kind\":\"PodMetrics\",\"metadata\":{\"name\":\"cpu-1\","
+            "\"namespace\":\"prod\",\"creationTimestamp\":null},\"window\":\"30s\","
+            "\"containers\":[{\"name\":\"c\",\"usage\":{\"cpu\":\"2\","
+            "\"memory\":\"2048Ki\"}}]}]}");
+        bool ok = false;
+        const QList<KubeMetricRow> pods =
+            parseKubePodMetricsJson(podsMetrics, &ok);
+        check(ok && pods.size() == 2, "kube: pod metrics parses");
+        check(pods.at(0).key == QStringLiteral("default/web-1")
+                  &&std::fabs(pods.at(0).cpuMillis - 255.0) < 1e-6
+                  && pods.at(0).memBytes == 110 * 1024 * 1024 + 10 * 1024 * 1024,
+              "kube: pod metrics container sums (millicores + bytes)");
+        check(pods.at(1).key == QStringLiteral("prod/cpu-1")
+                  && std::fabs(pods.at(1).cpuMillis - 2000.0) < 1e-6
+                  && pods.at(1).memBytes == 2048 * 1024,
+              "kube: pod metrics bare-core + Ki units");
+
+        const QByteArray nodesMetrics = QByteArrayLiteral(
+            "{\"kind\":\"NodeMetricsList\",\"apiVersion\":"
+            "\"metrics.k8s.io/v1beta1\",\"metadata\":{},\"items\":["
+            "{\"kind\":\"NodeMetrics\",\"metadata\":{\"name\":\"node-1\","
+            "\"creationTimestamp\":null},\"window\":\"30s\","
+            "\"usage\":{\"cpu\":\"750m\",\"memory\":\"3Gi\"}}]}");
+        bool nodesOk = false;
+        const QList<KubeMetricRow> nodes =
+            parseKubeNodeMetricsJson(nodesMetrics, &nodesOk);
+        check(nodesOk && nodes.size() == 1
+                  && nodes.at(0).key == QStringLiteral("node-1")
+                  && std::fabs(nodes.at(0).cpuMillis - 750.0) < 1e-6
+                  && nodes.at(0).memBytes == 3ULL * 1024 * 1024 * 1024,
+              "kube: node metrics parses");
+
+        bool statusOk = false;
+        parseKubePodMetricsJson(
+            QByteArrayLiteral("{\"kind\":\"Status\",\"apiVersion\":\"v1\","
+                              "\"status\":\"Failure\"}"),
+            &statusOk);
+        check(!statusOk, "kube: Status payload is not a metrics list");
+
+        bool garbageOk = true;
+        parseKubePodMetricsJson(QByteArrayLiteral("not json"), &garbageOk);
+        check(!garbageOk, "kube: garbage is not a metrics list");
+
+        // Merge semantics: unknown pods keep the -1 sentinel.
+        KubePod pod;
+        pod.ns = QStringLiteral("default");
+        pod.name = QStringLiteral("web-1");
+        KubeNode node;
+        node.name = QStringLiteral("node-1");
+        QList<KubePod> mergePods{pod};
+        QList<KubeNode> mergeNodes{node};
+        KubePod orphan;
+        orphan.ns = QStringLiteral("default");
+        orphan.name = QStringLiteral("other");
+        mergePods.append(orphan);
+        kubeMergeMetrics(&mergePods, &mergeNodes, pods, nodes);
+        check(mergePods.at(0).cpuMillis == 255.0
+                  && mergePods.at(0).memBytes
+                         == 110LL * 1024 * 1024 + 10LL * 1024 * 1024,
+              "kube: matched pod gains usage depth");
+        check(mergePods.at(1).cpuMillis < 0.0 && mergePods.at(1).memBytes < 0,
+              "kube: unmatched pod keeps unknown depth sentinel");
+        check(mergeNodes.at(0).cpuMillis == 750.0
+                  && mergeNodes.at(0).memBytes == 3LL * 1024 * 1024 * 1024,
+              "kube: matched node gains usage depth");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

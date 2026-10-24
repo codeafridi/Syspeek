@@ -22,6 +22,8 @@ struct KubePod {
     double memLimitBytes = 0.0;
     int containersWithoutCpuRequest = 0;
     int containersWithoutMemRequest = 0;
+    double cpuMillis = -1.0;
+    long long memBytes = -1;
 };
 
 struct KubeDeployment {
@@ -87,6 +89,14 @@ struct KubeNode {
     int podsCapacity = 0;
     int podsAllocatable = 0;
     int podsRunning = 0;
+    double cpuMillis = -1.0;
+    long long memBytes = -1;
+};
+
+struct KubeMetricRow {
+    QString key;
+    double cpuMillis = -1.0;
+    long long memBytes = -1;
 };
 
 struct KubeResources {
@@ -114,12 +124,25 @@ struct KubeSnapshot {
     int costPods = 0;
     QList<QPair<QString, double>> costByNamespace;
     QList<QPair<QString, double>> costTopWorkloads;
+    bool metricsOk = false;
+    QString metricsNote;
+    double podsCpuMillis = 0.0;
+    long long podsMemBytes = 0;
+    int podsWithUsage = 0;
+    int nodesWithUsage = 0;
     bool stale = false;
     QString errorMessage;
     qint64 sampledAtMs = 0;
 };
 
 KubeResources parseKubectlResources(const QByteArray &json, bool *ok);
+
+QList<KubeMetricRow> parseKubePodMetricsJson(const QByteArray &json, bool *ok);
+QList<KubeMetricRow> parseKubeNodeMetricsJson(const QByteArray &json,
+                                              bool *ok);
+void kubeMergeMetrics(QList<KubePod> *pods, QList<KubeNode> *nodes,
+                      const QList<KubeMetricRow> &podRows,
+                      const QList<KubeMetricRow> &nodeRows);
 
 double kubeParseCpuCores(const QString &quantity);
 double kubeParseMemoryBytes(const QString &quantity);

@@ -358,6 +358,12 @@ QString dumpReportJson(int maxProcs) {
                      envData.isEmpty()
                          ? 0
                          : envData.count('\n') + 1);
+        QList<ThreadSample> threadRows;
+        long threadTickHz = 0;
+        if (backend.processThreadSamples(selfPid, threadRows, threadTickHz)) {
+            depth.insert(QStringLiteral("threadRows"),
+                         static_cast<qlonglong>(threadRows.size()));
+        }
         root.insert(QStringLiteral("selfDepth"), depth);
         QJsonObject software;
         software.insert(QStringLiteral("programs"),

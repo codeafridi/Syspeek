@@ -495,6 +495,9 @@ int main(int argc, char *argv[]) {
         settingsInfo.rssWarnGb =
             double(config.health.rssWarnKb) / (1024.0 * 1024.0);
         hud.setSettingsInfo(settingsInfo);
+        hud.setMonitors(config.alertRules.isEmpty()
+                            ? defaultAlertRules()
+                            : config.alertRules);
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);

@@ -24,6 +24,7 @@
 #include "RuntimeStatus.h"
 #include "IncidentStatus.h"
 #include "ProfileStatus.h"
+#include "platform/null/NullBackend.h"
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
 
@@ -336,6 +337,71 @@ int main(int argc, char *argv[]) {
     fdInput.kernelFdPct = 40.0;
     engine.update(fdInput, 4);
     check(engine.active().isEmpty(), "alert: fd resolves on recovery");
+
+    // M66: editable monitors — threshold edits take effect live, cycles
+    // edits re-arm, restore returns the built-in rules (monit-grounded).
+    {
+        AlertEngine editable;
+        AlertInput hostInput;
+        hostInput.hostCpuValid = true;
+        hostInput.hostCpu = 15.0;
+        editable.update(hostInput, 1);
+        editable.update(hostInput, 2);
+        editable.update(hostInput, 3);
+        check(editable.active().isEmpty(),
+              "monitors: default host_cpu threshold stays quiet");
+        check(editable.setRuleThreshold(QStringLiteral("host_cpu"), 10.0),
+              "monitors: threshold edit accepted");
+        const AlertRule edited = [&editable]() {
+            for (const AlertRule &rule : editable.rules()) {
+                if (rule.id == QStringLiteral("host_cpu")) {
+                    return rule;
+                }
+            }
+            return AlertRule{};
+        }();
+        check(edited.threshold == 10.0,
+              "monitors: rules() reflects the edit");
+        check(editable.update(hostInput, 4).isEmpty(),
+              "monitors: edit cleared the old streak");
+        check(editable.update(hostInput, 5).isEmpty()
+                  && editable.update(hostInput, 6).isEmpty()
+                  && editable.update(hostInput, 7).isEmpty(),
+              "monitors: fresh streak builds under the new threshold");
+        const QList<Alert> firedAfterEdit = editable.update(hostInput, 8);
+        check(firedAfterEdit.size() == 1
+                  && firedAfterEdit.at(0).id == QStringLiteral("host_cpu"),
+              "monitors: fires at sustained count under the new threshold");
+
+        check(editable.setRuleSustained(QStringLiteral("host_cpu"), 1),
+              "monitors: cycles edit accepted");
+        const QList<Alert> firedOne =
+            editable.update(hostInput, 9);
+        check(firedOne.size() == 1, "monitors: single-sample arm after edit");
+    }
+    {
+        AlertEngine invalid;
+        check(!invalid.setRuleThreshold(QStringLiteral("nope"), 5.0),
+              "monitors: unknown rule id rejected");
+        check(!invalid.setRuleThreshold(QStringLiteral("host_cpu"), -1.0),
+              "monitors: negative threshold rejected");
+        check(!invalid.setRuleThreshold(QStringLiteral("host_cpu"), 2e9),
+              "monitors: overflow threshold rejected");
+        check(!invalid.setRuleSustained(QStringLiteral("host_cpu"), 0),
+              "monitors: zero cycles rejected");
+        check(!invalid.setRuleSustained(QStringLiteral("host_cpu"), 101),
+              "monitors: 101 cycles rejected (monit bounds)");
+        invalid.resetRules();
+        bool found = false;
+        for (const AlertRule &rule : invalid.rules()) {
+            if (rule.id == QStringLiteral("host_cpu")
+                && rule.threshold == 90.0 && rule.sustained == 5)
+            {
+                found = true;
+            }
+        }
+        check(found, "monitors: resetRules restores built-in defaults");
+    }
 
     engine.reset();
     AlertInput stealInput;
@@ -1337,6 +1403,62 @@ int main(int argc, char *argv[]) {
               "profile: anonymous mapping grouped");
         check(profileSummaryText(ProfileSnapshot{}).contains("unavailable"),
               "profile: summary for unavailable");
+
+        // M67: phnt thread-state / wait-reason names (ntkeapi.h enums).
+        check(threadStateName(2) == QStringLiteral("running")
+                  && threadStateName(5) == QStringLiteral("waiting")
+                  && threadStateName(4) == QStringLiteral("terminated"),
+              "profiles: KTHREAD_STATE names");
+        check(threadStateName(11) == QStringLiteral("unknown"),
+              "profiles: unknown thread state");
+        check(threadWaitReasonName(0) == QStringLiteral("Executive")
+                  && threadWaitReasonName(4)
+                         == QStringLiteral("DelayExecution")
+                  && threadWaitReasonName(15) == QStringLiteral("WrQueue"),
+              "profiles: KWAIT_REASON names");
+        check(threadWaitReasonName(44) == QStringLiteral("reason44"),
+              "profiles: out-of-range wait reason");
+    }
+
+    {
+        // M67: the sampler consumes backend rows (Windows NtQuery path
+        // shares this seam) — fake a collector, verify warming + delta.
+        class FakeProfileBackend : public NullBackend {
+        public:
+            bool processThreadSamples(int pid, QList<ThreadSample> &out,
+                                      long &tickHz) override {
+                Q_UNUSED(pid);
+                ThreadSample sample;
+                sample.tid = 4242;
+                sample.comm = QStringLiteral("demo");
+                sample.state = QStringLiteral("waiting");
+                sample.waitChannel = QStringLiteral("WrUserRequest");
+                sample.utimeTicks = calls * 1000000ULL;
+                sample.stimeTicks = 0;
+                out = {sample};
+                tickHz = 10000000;
+                ++calls;
+                return true;
+            }
+            int calls = 0;
+        };
+        FakeProfileBackend backend;
+        ProfileSampler sampler(&backend);
+        const ProfileSnapshot first = sampler.sample(1);
+        check(first.warming && first.threadCount == 1,
+              "profiles: backend path warms once");
+        ::QThread::msleep(105);
+        const ProfileSnapshot second = sampler.sample(1);
+        check(!second.warming && second.threadCount == 1,
+              "profiles: backend path emits a row");
+        check(second.threads.size() == 1
+                  && second.threads.first().tid == 4242
+                  && second.threads.first().cpuPercent > 50.0,
+              "profiles: 100ns-thread delta drives cpu percent");
+        check(second.waitChannels.size() == 1
+                  && second.waitChannels.first().first
+                         == QStringLiteral("WrUserRequest"),
+              "profiles: wait-reason grouping");
     }
 
     {

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -204,9 +204,11 @@ jobs:
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth
           assert depth.get("envPairs", 0) > 0, depth
+          assert depth.get("threadRows", 0) > 0, depth
           print("self depth ok: ctx", depth.get("ctxSwitches"), ",",
                 depth.get("cmdlineLength"), "chars cmdline,",
-                depth.get("envPairs"), "env pairs")
+                depth.get("envPairs"), "env pairs,",
+                depth.get("threadRows"), "thread rows")
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs"):

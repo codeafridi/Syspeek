@@ -232,6 +232,10 @@ HudWindow::HudWindow(QWidget *parent)
     m_panel = new DashboardPanel(m_pages);
     connect(m_panel, &DashboardPanel::collapseRequested, this,
             &HudWindow::toggleDetails);
+    connect(m_panel, &DashboardPanel::monitorChanged, this,
+            &HudWindow::applyMonitorChange);
+    connect(m_panel, &DashboardPanel::monitorsResetRequested, this,
+            &HudWindow::resetMonitors);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -524,6 +528,24 @@ void HudWindow::setSettingsInfo(const SettingsInfo &info) {
     if (m_panel != nullptr) {
         m_panel->setSettingsInfo(info);
     }
+}
+
+void HudWindow::setMonitors(const QList<AlertRule> &rules) {
+    if (m_panel != nullptr) {
+        m_panel->setMonitors(rules);
+    }
+}
+
+void HudWindow::applyMonitorChange(const AlertRule &rule) {
+    m_alerts.setRuleThreshold(rule.id, rule.threshold);
+    m_alerts.setRuleSustained(rule.id, rule.sustained);
+    saveAlertOverrides(defaultConfigPath(), m_alerts.rules());
+}
+
+void HudWindow::resetMonitors() {
+    m_alerts.resetRules();
+    saveAlertOverrides(defaultConfigPath(), m_alerts.rules());
+    setMonitors(m_alerts.rules());
 }
 
 void HudWindow::evaluateAlerts() {

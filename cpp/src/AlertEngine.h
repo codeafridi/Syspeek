@@ -58,13 +58,22 @@ public:
     const QList<Alert> &active() const { return m_active; }
     void reset();
 
+    QList<AlertRule> rules() const { return m_rules; }
+    bool setRuleThreshold(const QString &id, double threshold);
+    bool setRuleSustained(const QString &id, int sustained);
+    void resetRules();
+
 private:
     struct State {
         int streak = 0;
         bool firing = false;
     };
 
+    void clearRuleState(const QString &id);
+
     QList<AlertRule> m_rules;
     QHash<QString, State> m_state;
     QList<Alert> m_active;
 };
+
+QList<AlertRule> defaultAlertRules();

@@ -6,6 +6,9 @@
 #include "KubeStatus.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
+
+#include "Config.h"
+
 #include "IncidentStatus.h"
 #include "WatchdogStatus.h"
 #include "Notifier.h"
@@ -46,6 +49,13 @@ public:
     void setServicesSnapshot(const ServicesSnapshot &snapshot);
 
     void setJournalSnapshot(const JournalSnapshot &snapshot);
+
+    void setMonitors(const QList<AlertRule> &rules);
+
+    void applyMonitorChange(const AlertRule &rule);
+    void resetMonitors();
+
+public:
 
     void setNotifier(std::unique_ptr<Notifier> notifier);
 

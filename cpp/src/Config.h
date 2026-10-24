@@ -1,8 +1,12 @@
 #pragma once
 
+#include <QHash>
+#include <QList>
 #include <QString>
 #include <QStringList>
 #include <QtGlobal>
+
+#include "AlertEngine.h"
 
 struct HealthConfig {
     double cpuWarnPercent = 70.0;
@@ -124,6 +128,7 @@ struct FimConfig {
 
 struct Config {
     HealthConfig health;
+    QList<AlertRule> alertRules;
     DockerConfig docker;
     KubeConfig kube;
     SyntheticConfig synthetic;
@@ -143,5 +148,8 @@ struct Config {
 Config defaultConfig();
 
 Config loadConfig(const QString &path, QString *errorMessage);
+
+void saveAlertOverrides(const QString &path,
+                        const QList<AlertRule> &rules);
 
 QString defaultConfigPath();

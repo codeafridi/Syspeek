@@ -1104,6 +1104,118 @@ bool WindowsBackend::systemContextSwitches(int pid, unsigned long long &out) {
     return true;
 }
 
+// M67: per-thread rows (pHnt SYSTEM_THREAD_INFORMATION verbatim fields:
+// KernelTime/UserTime 100-ns intervals, state/waitReason) — grounded in
+// phnt ntexapi.h/ntkeapi.h + windows_exporter 0.30.2 KernelTime100ns.
+bool WindowsBackend::processThreadSamples(int pid, QList<ThreadSample> &out,
+                                          long &tickHz) {
+    out.clear();
+    tickHz = 0;
+    if (pid <= 0) {
+        return false;
+    }
+    const NtQuerySystemInformationFn query = ntQuerySystemInformation();
+    if (query == nullptr) {
+        return false;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    {
+        QMutexLocker locker(&m_mutex);
+        tickHz = 10000000;
+        if (m_threadCacheAt != 0 && now - m_threadCacheAt < 1000) {
+            const auto cached = m_threadCache.constFind(pid);
+            if (cached != m_threadCache.constEnd()) {
+                out = cached.value();
+                return !out.isEmpty();
+            }
+            return false;
+        }
+    }
+
+    QByteArray buffer(1 << 20, Qt::Uninitialized);
+    LONG status = 0;
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        ULONG needed = 0;
+        status = query(kSystemProcessInformation, buffer.data(),
+                       static_cast<ULONG>(buffer.size()), &needed);
+        if (status == 0) {
+            break;
+        }
+        if (status != kStatusInfoLengthMismatch) {
+            return false;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+    if (status != 0) {
+        return false;
+    }
+
+    QHash<int, QList<ThreadSample>> map;
+    const BYTE *cursor = reinterpret_cast<const BYTE *>(buffer.constData());
+    const BYTE *end = cursor + buffer.size();
+    while (cursor + sizeof(NtProcInfo) <= end) {
+        auto *record = reinterpret_cast<const NtProcInfo *>(cursor);
+        const int recordPid =
+            static_cast<int>(reinterpret_cast<ULONG_PTR>(
+                record->uniqueProcessId));
+        QList<ThreadSample> rows;
+        if (recordPid > 0 && record->numberOfThreads > 0) {
+            QString imageName;
+            if (record->imageNameLength > 0
+                && record->imageNameBuffer != nullptr) {
+                imageName = QString::fromWCharArray(
+                    record->imageNameBuffer, record->imageNameLength);
+                if (imageName.endsWith(QStringLiteral(".exe"),
+                                       Qt::CaseInsensitive)) {
+                    imageName.chop(4);
+                }
+            }
+            rows.reserve(record->numberOfThreads);
+            for (ULONG t = 0; t < record->numberOfThreads; ++t) {
+                const NtThreadInfo &thread = record->threads[t];
+                const int tid = static_cast<int>(
+                    reinterpret_cast<ULONG_PTR>(thread.clientId[1]));
+                if (tid <= 0) {
+                    continue;
+                }
+                ThreadSample sample;
+                sample.tid = tid;
+                sample.comm = imageName;
+                sample.state = threadStateName(thread.threadState);
+                sample.waitChannel = thread.threadState == 5
+                                         ? threadWaitReasonName(
+                                               thread.waitReason)
+                                         : QString();
+                if (thread.userTime.QuadPart >= 0
+                    && thread.kernelTime.QuadPart >= 0) {
+                    sample.utimeTicks =
+                        static_cast<quint64>(thread.userTime.QuadPart);
+                    sample.stimeTicks =
+                        static_cast<quint64>(thread.kernelTime.QuadPart);
+                }
+                rows.append(sample);
+            }
+            map.insert(recordPid, rows);
+        }
+        if (record->nextEntryOffset == 0) {
+            break;
+        }
+        cursor += record->nextEntryOffset;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    m_threadCache = map;
+    m_threadCacheAt = now;
+    const auto found = map.constFind(pid);
+    if (found == map.constEnd()) {
+        return false;
+    }
+    tickHz = 10000000;
+    out = found.value();
+    return !out.isEmpty();
+}
+
 
 QByteArray WindowsBackend::processEnv(int pid) {
     // PEB walk (cmdline/environment), same-user only: ReadProcessMemory

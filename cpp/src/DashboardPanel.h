@@ -18,6 +18,7 @@
 #include "IncidentStatus.h"
 #include "FimStatus.h"
 
+#include <QHash>
 #include <QSet>
 #include <QWidget>
 
@@ -26,6 +27,8 @@ class QListWidget;
 class QStackedWidget;
 class QTreeWidget;
 class QPushButton;
+class QDoubleSpinBox;
+class QSpinBox;
 class Sparkline;
 class TimeseriesChart;
 
@@ -71,8 +74,14 @@ public:
 
     void setSettingsInfo(const SettingsInfo &info);
 
+    // M66: editable monitors — populates the threshold/cycles editors and
+    // refreshes them without re-emitting editor signals (block during fill).
+    void setMonitors(const QList<AlertRule> &rules);
+
 signals:
     void collapseRequested();
+    void monitorChanged(const AlertRule &rule);
+    void monitorsResetRequested();
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
@@ -438,4 +447,6 @@ private:
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
     QLabel *m_settingsDiagnostics = nullptr;
+    QHash<QString, QDoubleSpinBox *> m_monitorThreshold;
+    QHash<QString, QSpinBox *> m_monitorCycles;
 };
