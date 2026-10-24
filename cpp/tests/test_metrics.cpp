@@ -27,6 +27,10 @@
 #include "platform/null/NullBackend.h"
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
+#include "platform/mac/MacFimStream.h"
+#include <QFile>
+#include <QTemporaryDir>
+#include <QThread>
 
 #include <QApplication>
 #include <QPixmap>
@@ -1718,6 +1722,91 @@ int main(int argc, char *argv[]) {
               "fim: detail text");
         check(fimDetailText(FimSnapshot{}).contains(QStringLiteral("disabled")),
               "fim: disabled detail");
+
+        const auto fsevent = decodeFimEventFlags(0x100u | 0x20000u);
+        check(fsevent.created && !fsevent.removed && !fsevent.renamed
+                  && !fsevent.metadata && fsevent.scanWorthy(),
+              "fim: fsevents created decodes");
+        const auto fsremoved = decodeFimEventFlags(0x200u);
+        check(fsremoved.removed && fsremoved.scanWorthy(),
+              "fim: fsevents removed decodes");
+        const auto fsrenamed = decodeFimEventFlags(0x800u);
+        check(fsrenamed.renamed && fsrenamed.scanWorthy(),
+              "fim: fsevents renamed decodes");
+        const auto fsmodified = decodeFimEventFlags(0x1000u);
+        check(fsmodified.modified && !fsmodified.created && fsmodified.scanWorthy(),
+              "fim: fsevents modified decodes");
+        const auto fsmeta = decodeFimEventFlags(0x400u | 0x4000u | 0x8000u);
+        check(fsmeta.metadata && !fsmeta.scanWorthy(),
+              "fim: fsevents attributes-only not scan-worthy");
+        const auto fsroot = decodeFimEventFlags(0x20u);
+        check(fsroot.rootChanged && fsroot.scanWorthy() && !fsroot.created,
+              "fim: fsevents root-changed decodes");
+        const auto fsdropped = decodeFimEventFlags(0x1u | 0x4u);
+        check(fsdropped.dropped && fsdropped.scanWorthy(),
+              "fim: fsevents dropped decodes");
+        check(!decodeFimEventFlags(0x10u).anything,
+              "fim: fsevents history-done inert");
+        check(!decodeFimEventFlags(0u).anything,
+              "fim: fsevents empty flags inert");
+
+#if defined(Q_OS_MACOS)
+        {
+            QTemporaryDir dir;
+            const QString file = dir.filePath(QStringLiteral("fim_probe.txt"));
+            {
+                QFile out(file);
+                out.open(QIODevice::WriteOnly);
+                out.write("one");
+            }
+            MacFimStream stream;
+            int fired = 0;
+            QStringList lastPaths;
+            auto *holder = new QObject(&app);
+            const bool started =
+                stream.start({dir.path()},
+                             holder,
+                             [&fired, &lastPaths](const QStringList &paths) {
+                                 ++fired;
+                                 lastPaths = paths;
+                             });
+            check(started, "fim: mac fsevents stream started");
+            check(stream.running(), "fim: mac fsevents stream running");
+            if (started) {
+                {
+                    QFile out(file);
+                    out.open(QIODevice::Append);
+                    out.write("two");
+                }
+                for (int i = 0; i < 100 && fired < 1; ++i) {
+                    QThread::msleep(50);
+                    app.processEvents();
+                }
+                check(fired >= 1, "fim: mac fsevents fired on modify");
+                {
+                    QFile out(dir.filePath(QStringLiteral("fim_new.txt")));
+                    out.open(QIODevice::WriteOnly);
+                    out.write("new");
+                }
+                for (int i = 0; i < 100 && fired < 2; ++i) {
+                    QThread::msleep(50);
+                    app.processEvents();
+                }
+                check(fired >= 2, "fim: mac fsevents fired on create");
+                check(!lastPaths.isEmpty(), "fim: mac fsevents reports paths");
+                stream.stop();
+                check(!stream.running(), "fim: mac fsevents stopped");
+            }
+            delete holder;
+        }
+#else
+        {
+            MacFimStream stream;
+            check(!stream.start({QStringLiteral("/")}, nullptr, {}),
+                  "fim: non-mac stream stub refuses start");
+            check(!stream.running(), "fim: non-mac stream stub inert");
+        }
+#endif
     }
 
     std::printf("%d failure(s)\n", failures);

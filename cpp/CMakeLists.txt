@@ -208,7 +208,9 @@ elseif(APPLE)
         src/platform/mac/MacLogSource.mm
         src/platform/mac/MacLogSource.h
         src/platform/mac/MacOverlay.mm
-        src/platform/mac/MacOverlay.h)
+        src/platform/mac/MacOverlay.h
+        src/platform/mac/MacFimStream.mm
+        src/platform/mac/MacFimStream.h)
 elseif(WIN32)
     find_package(Qt6 QUIET COMPONENTS DBus)
     target_sources(syspeek_core PRIVATE
@@ -235,7 +237,7 @@ target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::Network)
 if(APPLE)
     target_link_libraries(syspeek_core PUBLIC
         "-framework Cocoa" "-framework CoreFoundation" "-framework IOKit"
-        "-framework OSLog")
+        "-framework OSLog" "-framework CoreServices")
     target_compile_options(syspeek_core PUBLIC $<$<COMPILE_LANGUAGE:OBJCXX>:-Wno-deprecated-declarations>)
 elseif(UNIX)
     target_link_libraries(syspeek_core PUBLIC Qt6::DBus)

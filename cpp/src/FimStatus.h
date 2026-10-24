@@ -61,3 +61,32 @@ QList<FimChange> diffFim(const QHash<QString, FimFileMeta> &previous,
 
 QString fimSummaryText(const FimSnapshot &snapshot);
 QString fimDetailText(const FimSnapshot &snapshot);
+
+// macOS FSEvents item-event flags (Apple FSEvents.h bit masks) decoded to the
+// scan-worthy kinds this source consumes. Pure so it is unit-testable on every
+// platform; mirrors osquery's FSEventsEventPublisher name table
+// (ItemCreated -> CREATED, ItemRemoved -> DELETED, ItemModified -> UPDATED,
+// ItemRenamed -> MOVED_TO, ItemChangeOwner/ItemXattrMod/ItemInodeMetaMod ->
+// ATTRIBUTES_MODIFIED). Pure directory-level events without FileEvents cannot
+// produce these item flags.
+struct FimEventFlags {
+    bool created = false;      // kFSEventStreamEventFlagItemCreated 0x100
+    bool removed = false;      // kFSEventStreamEventFlagItemRemoved 0x200
+    bool modified = false;     // kFSEventStreamEventFlagItemModified 0x1000
+    bool renamed = false;      // kFSEventStreamEventFlagItemRenamed 0x800
+    bool metadata = false;     // owner/xattr/inode-meta/finder-info only
+    bool rootChanged = false;  // kFSEventStreamEventFlagRootChanged 0x20
+    bool dropped = false;      // MustScanSubDirs 0x1 / UserDropped 0x2 /
+                               // KernelDropped 0x4 / EventIdsWrapped 0x8
+    bool anything = false;     // at least one item/root/drop signal above
+
+    // Whether an event batch containing this flag mask should trigger the
+    // debounced rescan (metadata-only drift is still caught by the periodic
+    // stat pass, but item/content/structure changes rescan immediately).
+    bool scanWorthy() const {
+        return created || removed || modified || renamed || rootChanged
+                   || dropped;
+    }
+};
+
+FimEventFlags decodeFimEventFlags(quint32 flags);

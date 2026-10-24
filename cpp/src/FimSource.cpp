@@ -12,6 +12,10 @@
 
 #include <sys/stat.h>
 
+#if defined(Q_OS_MACOS)
+#include "platform/mac/MacFimStream.h"
+#endif
+
 namespace {
 
 constexpr int kMaxFiles = 5000;
@@ -127,9 +131,44 @@ QStringList expandPaths(const QStringList &paths) {
 
 } // namespace
 
+QStringList fimWatchRoots(const QStringList &paths) {
+    QStringList roots;
+    roots.reserve(paths.size());
+    for (const QString &raw : paths) {
+        const QString path = QDir::cleanPath(raw);
+        if (path.contains(QLatin1Char('*')) || path.contains(QLatin1Char('?'))
+            || path.contains(QLatin1Char('['))) {
+            const int slash = path.lastIndexOf(QLatin1Char('/'));
+            roots.append(slash <= 0 ? QStringLiteral("/")
+                                    : path.left(slash));
+            continue;
+        }
+        const QFileInfo info(path);
+        if (info.isDir() && !info.isSymLink()) {
+            roots.append(path);
+            continue;
+        }
+        const QString parent = info.absolutePath();
+        if (info.isFile()
+            || QFileInfo(parent).isDir()
+                                 && !QFileInfo(parent).isSymLink()) {
+            const QString canonical =
+                QFileInfo(parent).canonicalFilePath();
+            roots.append(canonical.isEmpty() ? parent : canonical);
+        }
+    }
+    roots.removeAll(QString());
+    roots.removeDuplicates();
+    return roots;
+}
+
 FimSource::FimSource(const FimConfig &config, QObject *parent)
     : QObject(parent)
     , m_config(config) {
+}
+
+FimSource::~FimSource() {
+    stop();
 }
 
 void FimSource::start() {
@@ -144,23 +183,49 @@ void FimSource::start() {
     }
     m_timer->start();
 
-    if (m_config.watch && m_watcher == nullptr) {
-        m_watcher = new QFileSystemWatcher(this);
+    if (m_config.watch && m_debounce == nullptr) {
         m_debounce = new QTimer(this);
         m_debounce->setSingleShot(true);
         m_debounce->setInterval(400);
         connect(m_debounce, &QTimer::timeout, this, &FimSource::onTick);
+
+#if defined(Q_OS_MACOS)
+        auto *stream = new MacFimStream();
+        if (stream->start(
+                fimWatchRoots(m_config.paths),
+                this,
+                [this](const QStringList &) { onWatchEvent(); })) {
+            m_stream = stream;
+        } else {
+            delete stream;
+        }
+        if (m_stream == nullptr) {
+#endif
+        m_watcher = new QFileSystemWatcher(this);
         connect(m_watcher, &QFileSystemWatcher::directoryChanged, this,
                 &FimSource::onWatchEvent);
         connect(m_watcher, &QFileSystemWatcher::fileChanged, this,
                 &FimSource::onWatchEvent);
+#if defined(Q_OS_MACOS)
+        }
+#endif
     }
-    armWatchers();
+    if (m_config.watch && m_stream == nullptr) {
+        armWatchers();
+    }
 
     onTick();
 }
 
 void FimSource::stop() {
+#if defined(Q_OS_MACOS)
+    if (m_stream != nullptr) {
+        auto *stream = m_stream;
+        m_stream = nullptr;
+        stream->stop();
+        delete stream;
+    }
+#endif
     if (m_timer != nullptr) {
         m_timer->stop();
     }

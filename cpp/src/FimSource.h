@@ -8,6 +8,7 @@
 
 class QFileSystemWatcher;
 class QTimer;
+class MacFimStream;
 
 // Watches a set of files/directories for integrity drift: a periodic stat+hash
 // scan (AIDE/Tripwire style) combined with QFileSystemWatcher for near
@@ -19,6 +20,7 @@ class FimSource : public QObject {
 public:
     explicit FimSource(const FimConfig &config = FimConfig{},
                        QObject *parent = nullptr);
+    ~FimSource() override;
 
 public slots:
     void start();
@@ -38,6 +40,7 @@ private:
     QTimer *m_timer = nullptr;
     QTimer *m_debounce = nullptr;
     QFileSystemWatcher *m_watcher = nullptr;
+    MacFimStream *m_stream = nullptr;
     QHash<QString, FimFileMeta> m_baseline;
     QList<FimChange> m_changes;
     bool m_primed = false;
