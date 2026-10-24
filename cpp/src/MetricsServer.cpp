@@ -40,7 +40,8 @@ void MetricsServer::start() {
         return;
     }
     m_port = m_server->serverPort();
-    qInfo() << "[metrics] http://127.0.0.1:" << m_port << "/metrics";
+    qInfo().noquote() << QStringLiteral(
+        "[metrics] listening on http://127.0.0.1:%1/metrics").arg(m_port);
 }
 
 void MetricsServer::stop() {
