@@ -23,6 +23,8 @@ public:
     QList<int> allPids() override;
     unsigned long long startTime(int pid) override;
     ProcessIdentity identity(int pid) override;
+    bool processThreadSamples(int pid, QList<ThreadSample> &out,
+                              long &tickHz) override;
     bool procCpu(int pid, unsigned long long &ticks,
                  unsigned long long &startTime) override;
     bool totalCpuTicks(unsigned long long &out) override;

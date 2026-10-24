@@ -24,6 +24,7 @@
 #include "RuntimeStatus.h"
 #include "IncidentStatus.h"
 #include "ProfileStatus.h"
+#include "platform/null/NullBackend.h"
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
 
@@ -1402,6 +1403,62 @@ int main(int argc, char *argv[]) {
               "profile: anonymous mapping grouped");
         check(profileSummaryText(ProfileSnapshot{}).contains("unavailable"),
               "profile: summary for unavailable");
+
+        // M67: phnt thread-state / wait-reason names (ntkeapi.h enums).
+        check(threadStateName(2) == QStringLiteral("running")
+                  && threadStateName(5) == QStringLiteral("waiting")
+                  && threadStateName(4) == QStringLiteral("terminated"),
+              "profiles: KTHREAD_STATE names");
+        check(threadStateName(11) == QStringLiteral("unknown"),
+              "profiles: unknown thread state");
+        check(threadWaitReasonName(0) == QStringLiteral("Executive")
+                  && threadWaitReasonName(4)
+                         == QStringLiteral("DelayExecution")
+                  && threadWaitReasonName(15) == QStringLiteral("WrQueue"),
+              "profiles: KWAIT_REASON names");
+        check(threadWaitReasonName(44) == QStringLiteral("reason44"),
+              "profiles: out-of-range wait reason");
+    }
+
+    {
+        // M67: the sampler consumes backend rows (Windows NtQuery path
+        // shares this seam) — fake a collector, verify warming + delta.
+        class FakeProfileBackend : public NullBackend {
+        public:
+            bool processThreadSamples(int pid, QList<ThreadSample> &out,
+                                      long &tickHz) override {
+                Q_UNUSED(pid);
+                ThreadSample sample;
+                sample.tid = 4242;
+                sample.comm = QStringLiteral("demo");
+                sample.state = QStringLiteral("waiting");
+                sample.waitChannel = QStringLiteral("WrUserRequest");
+                sample.utimeTicks = calls * 1000000ULL;
+                sample.stimeTicks = 0;
+                out = {sample};
+                tickHz = 10000000;
+                ++calls;
+                return true;
+            }
+            int calls = 0;
+        };
+        FakeProfileBackend backend;
+        ProfileSampler sampler(&backend);
+        const ProfileSnapshot first = sampler.sample(1);
+        check(first.warming && first.threadCount == 1,
+              "profiles: backend path warms once");
+        ::QThread::msleep(105);
+        const ProfileSnapshot second = sampler.sample(1);
+        check(!second.warming && second.threadCount == 1,
+              "profiles: backend path emits a row");
+        check(second.threads.size() == 1
+                  && second.threads.first().tid == 4242
+                  && second.threads.first().cpuPercent > 50.0,
+              "profiles: 100ns-thread delta drives cpu percent");
+        check(second.waitChannels.size() == 1
+                  && second.waitChannels.first().first
+                         == QStringLiteral("WrUserRequest"),
+              "profiles: wait-reason grouping");
     }
 
     {

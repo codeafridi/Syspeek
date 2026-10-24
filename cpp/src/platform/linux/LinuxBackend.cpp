@@ -2,6 +2,8 @@
 
 #include <QFile>
 
+#include <unistd.h>
+
 QString LinuxBackend::platformName() const {
     return QStringLiteral("linux");
 }
@@ -80,6 +82,16 @@ unsigned long long LinuxBackend::startTime(int pid) {
 
 ProcessIdentity LinuxBackend::identity(int pid) {
     return linuxproc::identity(pid);
+}
+
+bool LinuxBackend::processThreadSamples(int pid, QList<ThreadSample> &out,
+                                        long &tickHz) {
+    if (!collectProcThreadSamples(pid, out)) {
+        tickHz = 0;
+        return false;
+    }
+    tickHz = sysconf(_SC_CLK_TCK);
+    return true;
 }
 
 bool LinuxBackend::procCpu(int pid, unsigned long long &ticks,

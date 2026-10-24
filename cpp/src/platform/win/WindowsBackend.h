@@ -77,6 +77,12 @@ private:
     bool systemContextSwitches(int pid, unsigned long long &out);
     QHash<int, unsigned long long> m_ctxMap;
     qint64 m_ctxMapAt = 0;
+
+    // M67: per-thread CPU/wait samples from the same walk (1 s TTL cache).
+    bool processThreadSamples(int pid, QList<ThreadSample> &out,
+                              long &tickHz) override;
+    QHash<int, QList<ThreadSample>> m_threadCache;
+    qint64 m_threadCacheAt = 0;
 #endif
     bool m_tcpCountersOk = false;
 };

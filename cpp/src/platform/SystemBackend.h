@@ -3,6 +3,7 @@
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
 #include "ProcessIdentity.h"
+#include "ProfileStatus.h"
 #include "SecurityStatus.h"
 #include "ServicesStatus.h"
 #include "TcpStatus.h"
@@ -90,6 +91,19 @@ public:
     virtual ProcessIdentity identity(int pid) {
         Q_UNUSED(pid);
         return ProcessIdentity{};
+    }
+    // M67: one-shot per-thread rows for the focused app (Linux /proc task
+    // dir, Windows NtQuerySystemInformation walk; n/a on mac). Default
+    // false = the profile page stays honest on unsupported platforms.
+    // tickHz reports the row time unit: kernel clock ticks on Linux,
+    // 100-ns intervals on Windows (phnt NtQuerySystemInformation;
+    // windows_exporter KernelTime100ns).
+    virtual bool processThreadSamples(int pid, QList<ThreadSample> &out,
+                                      long &tickHz) {
+        Q_UNUSED(pid);
+        Q_UNUSED(out);
+        Q_UNUSED(tickHz);
+        return false;
     }
     virtual bool procCpu(int pid, unsigned long long &ticks,
                          unsigned long long &startTime) {
