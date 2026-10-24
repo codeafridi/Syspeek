@@ -191,6 +191,10 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (timeout > 0) {
             config.docker.timeoutMs = timeout;
         }
+        const QString socket = settings.value(QStringLiteral("socket")).toString();
+        if (!socket.isEmpty()) {
+            config.docker.socketPath = socket;
+        }
     }
     settings.endGroup();
 

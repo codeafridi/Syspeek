@@ -1,6 +1,21 @@
+#include "DockerEngineClient.h"
 #include "DockerStatus.h"
 
+#include <QElapsedTimer>
+#include <QFileInfo>
+#include <QHash>
+#include <QStringList>
 #include <cstdio>
+
+static QString liveNamesCellValue(const QList<DockerContainer> &rows,
+                                  const QString &id) {
+    for (const DockerContainer &row : rows) {
+        if (row.id == id) {
+            return row.name;
+        }
+    }
+    return id;
+}
 
 namespace {
 
@@ -199,6 +214,135 @@ int main() {
         check(!fresh.at(0).crashed,
               "never-observed-running exit is not a crash");
     }
+
+    // --- M64 engine API models -----------------------------
+    const QByteArray containersJson = QByteArrayLiteral(R"json([
+        {"Id":"c1","Names":["/web"],"Image":"nginx:alpine","State":"running",
+         "Status":"Up 2 days (healthy)"},
+        {"Id":"c2","Names":["/db"],"Image":"pg:16","State":"running",
+         "Status":"Up 5 minutes"},
+        {"Id":"c3","Names":["/job"],"Image":"alpine","State":"exited",
+         "Status":"Exited (0) 2 days ago"}
+    ])json");
+    QString engineParseError;
+    const QList<DockerContainer> parsed =
+        parseDockerContainersJson(containersJson, &engineParseError);
+    check(parsed.size() == 3, "containers json parses three rows");
+    check(parsed.at(0).name == QStringLiteral("web"), "engine name strips /");
+    check(parsed.at(0).image == QStringLiteral("nginx:alpine"),
+          "engine image captured");
+    check(parsed.at(0).state == QStringLiteral("running"),
+          "engine state captured");
+    check(parsed.at(0).health == QStringLiteral("healthy"),
+          "engine status-derived health text");
+    check(parsed.at(2).exitCode == 0, "engine exited status exit code");
+
+    const QByteArray statsJson = QByteArrayLiteral(R"json({
+        "read": "2026-10-24T08:00:00Z",
+        "cpu_stats": {"cpu_usage": {"total_usage": 88000000000},
+                      "system_cpu_usage": 22000000000000,
+                      "online_cpus": 8},
+        "precpu_stats": {"cpu_usage": {"total_usage": 80300000000},
+                         "system_cpu_usage": 21800000000000},
+        "memory_stats": {"usage": 234000000, "limit": 4000000000},
+        "networks": {"eth0": {"rx_bytes": 1048576, "tx_bytes": 2048}},
+        "blkio_stats": {"io_service_bytes_recursive": [
+            {"op": "read", "value": 512000},
+            {"op": "write", "value": 4096}]},
+        "pids_stats": {"current": 12}
+    })json");
+    DockerDepth depth;
+    check(parseDockerStatsJson(statsJson, &depth), "stats json parses");
+    check(depth.cpuCores == 8, "stats online_cpus");
+    check(depth.cpuPercent > 30.7 && depth.cpuPercent < 30.9,
+          "stats cpu percent (delta cpu 7.7e9 / system 2e11 * 8 cores = 30.8)");
+    check(depth.hasMem && depth.memUsedBytes == 234000000
+              && depth.memLimitBytes == 4000000000,
+          "stats memory fields");
+    check(depth.hasNet && depth.netRxBytes == 1048576
+              && depth.netTxBytes == 2048,
+          "stats network sums across interfaces");
+    check(depth.hasBlk && depth.blkReadBytes == 512000
+              && depth.blkWriteBytes == 4096,
+          "stats blkio read/write ops");
+    check(depth.pids == 12, "stats pids");
+
+    DockerDepth degenerate;
+    check(parseDockerStatsJson(QByteArrayLiteral(
+              "{\"cpu_stats\":{\"cpu_usage\":{\"total_usage\":100},"
+              "\"online_cpus\":4,\"system_cpu_usage\":50},"
+              "\"precpu_stats\":{\"cpu_usage\":{\"total_usage\":100},"
+              "\"system_cpu_usage\":50},"
+              "\"memory_stats\":{\"usage\":0}}"),
+          &degenerate),
+          "degenerate stats still parse");
+    check(degenerate.cpuPercent < 0.0,
+          "zero system delta leaves cpu unknown (-1)");
+    check(!degenerate.hasMem, "zero usage marks memory absent");
+    check(!parseDockerStatsJson(
+              QByteArrayLiteral(
+                  "{\"message\":\"no such container: zzz\"}"),
+              &degenerate),
+          "engine error message rejects stats parse");
+
+    // --- Transport: live Docker Engine roundtrip when a local engine socket
+    // exists (CI runners without docker skip this; dev boxes prove it).
+#if !defined(Q_OS_WIN)
+    const QString liveSocket =
+        QStringLiteral("/var/run/docker.sock");
+    if (QFileInfo::exists(liveSocket)) {
+        DockerEngineClient client(liveSocket, 3000);
+        QByteArray fetched;
+        QString liveError;
+        if (client.get(QStringLiteral("/containers/json?all=1"), &fetched,
+                       &liveError)) {
+            QString liveParseError;
+            const QList<DockerContainer> rows =
+                parseDockerContainersJson(fetched, &liveParseError);
+            check(liveParseError.isEmpty(),
+                  "live engine containers json parses");
+            std::printf("live engine ok: %lld rows\n",
+                        static_cast<long long>(rows.size()));
+            QStringList runningIds;
+            for (const DockerContainer &row : rows) {
+                if (row.state == QLatin1String("running") && runningIds.size() < 3) {
+                    runningIds.append(row.id);
+                }
+            }
+            if (!runningIds.isEmpty()) {
+                QElapsedTimer statsClock;
+                statsClock.start();
+                const QHash<QString, QByteArray> statsBodies =
+                    client.statsMulti(runningIds, 6000, &liveError);
+                const qint64 wallMs = statsClock.elapsed();
+                for (const QString &id : runningIds) {
+                    const QByteArray raw = statsBodies.value(id);
+                    if (raw.isEmpty()) {
+                        continue;
+                    }
+                    DockerDepth liveDepth;
+                    if (parseDockerStatsJson(raw, &liveDepth)) {
+                        std::printf(
+                            "live stats ok (multi): %s cpu=%.1f cores=%d pids=%d\n",
+                            liveNamesCellValue(rows, id).toLatin1().constData(),
+                            liveDepth.cpuPercent, liveDepth.cpuCores,
+                            liveDepth.pids);
+                    }
+                }
+                std::printf(
+                    "multiplexed stats wall: %lld ms for %lld requests\n",
+                    wallMs, static_cast<long long>(runningIds.size()));
+            }
+        } else if (liveError.contains(QStringLiteral("Permission denied"))) {
+            std::printf("SKIP live engine: permission denied in CI\n");
+        } else {
+            std::printf("SKIP live engine: %s\n",
+                        liveError.toUtf8().constData());
+        }
+    } else {
+        std::printf("SKIP live engine: no local engine socket\n");
+    }
+#endif
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

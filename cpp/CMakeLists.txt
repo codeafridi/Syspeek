@@ -99,6 +99,8 @@ add_library(syspeek_core STATIC
     src/DockerStatus.h
     src/DockerSource.cpp
     src/DockerSource.h
+    src/DockerEngineClient.cpp
+    src/DockerEngineClient.h
     src/Config.cpp
     src/Config.h
     src/CostModel.cpp
