@@ -2571,7 +2571,7 @@ QWidget *DashboardPanel::buildSettingsView() {
         {"kernel_fd", 0.0, 100.0, 0},
         {"host_steal", 0.0, 100.0, 1},
     };
-    auto boundsFor = [&monitorBounds](const QString &id) {
+    auto boundsFor = [](const QString &id) {
         for (const MonitorBounds &b : monitorBounds) {
             if (QLatin1String(b.id) == id) {
                 return b;
