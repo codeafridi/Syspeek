@@ -105,13 +105,58 @@ void KubeSource::beginQuery() {
     m_stderr.clear();
     m_running = true;
     m_aborting = false;
+    m_phase = 0;
+    m_havePending = false;
+    m_metricsOk = false;
+    m_metricsNote.clear();
+    m_metricsPodsRaw.clear();
+    m_metricsNodesRaw.clear();
 
-    m_process->start(m_kubectlPath,
-                     {QStringLiteral("get"),
-                      QStringLiteral("pods,deployments,events,nodes"),
-                      QStringLiteral("-A"),
-                      QStringLiteral("-o"), QStringLiteral("json")});
+    startPhase(0, {QStringLiteral("get"),
+                   QStringLiteral("pods,deployments,events,nodes"),
+                   QStringLiteral("-A"),
+                   QStringLiteral("-o"), QStringLiteral("json")});
+}
+
+void KubeSource::startPhase(int phase, const QStringList &arguments) {
+    m_phase = phase;
+    m_process->start(m_kubectlPath, arguments);
     m_deadlineTimer->start(m_config.timeoutMs);
+}
+
+void KubeSource::advancePhase() {
+    m_running = true;
+    m_aborting = false;
+    m_stdout.clear();
+    m_stderr.clear();
+    startPhase(1, {QStringLiteral("get"), QStringLiteral("--raw"),
+                   QStringLiteral("/apis/metrics.k8s.io/v1beta1/pods")});
+}
+
+void KubeSource::finishMetrics() {
+    m_phase = 0;
+
+    bool podsOk = false;
+    bool nodesOk = false;
+    const QList<KubeMetricRow> podRows =
+        parseKubePodMetricsJson(m_metricsPodsRaw, &podsOk);
+    const QList<KubeMetricRow> nodeRows =
+        parseKubeNodeMetricsJson(m_metricsNodesRaw, &nodesOk);
+
+    kubeMergeMetrics(&m_pendingResources.pods, &m_pendingResources.nodes,
+                     podRows, nodeRows);
+
+    m_metricsOk = podsOk && nodesOk;
+    if (!m_metricsOk && m_metricsNote.isEmpty()) {
+        m_metricsNote = QStringLiteral(
+            "not available - install metrics-server");
+    }
+
+    const int issues =
+        kubeIssueCount(m_pendingResources.pods,
+                       m_pendingResources.deployments);
+    emitSnapshot(KubeState::Ok, QString(), m_pendingResources, true);
+    scheduleNext(nextIntervalMs(KubeState::Ok, issues > 0));
 }
 
 void KubeSource::scheduleNext(int intervalMs) {
@@ -178,6 +223,11 @@ void KubeSource::onErrorOccurred(QProcess::ProcessError error) {
     m_deadlineTimer->stop();
     m_running = false;
     m_aborting = false;
+    if (m_phase != 0 && m_havePending) {
+        m_metricsNote = QStringLiteral("metrics fetch degraded");
+        finishMetrics();
+        return;
+    }
     emitSnapshot(KubeState::CommandFailed,
                  QStringLiteral("could not start kubectl"), {}, false);
     scheduleNext(nextIntervalMs(KubeState::CommandFailed, false));
@@ -188,6 +238,7 @@ void KubeSource::onFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     m_killTimer->stop();
 
     const bool wasAborting = m_aborting;
+    const int phase = m_phase;
     m_running = false;
     m_aborting = false;
 
@@ -196,30 +247,69 @@ void KubeSource::onFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     }
 
     if (wasAborting) {
-        emitSnapshot(m_abortState, m_abortMessage, {}, false);
-        scheduleNext(nextIntervalMs(m_abortState, false));
+        if (phase == 0) {
+            emitSnapshot(m_abortState, m_abortMessage, {}, false);
+            scheduleNext(nextIntervalMs(m_abortState, false));
+        } else {
+            m_metricsNote = QStringLiteral("metrics fetch degraded");
+            finishMetrics();
+        }
         return;
     }
 
     if (exitStatus != QProcess::NormalExit || exitCode != 0) {
-        const KubeState state = classifyKubeFailure(m_stderr);
-        emitSnapshot(state, QString::fromUtf8(m_stderr).trimmed(), {}, false);
-        scheduleNext(nextIntervalMs(state, false));
+        if (phase == 0) {
+            const KubeState state = classifyKubeFailure(m_stderr);
+            emitSnapshot(state, QString::fromUtf8(m_stderr).trimmed(), {},
+                         false);
+            scheduleNext(nextIntervalMs(state, false));
+        } else {
+            const QString err = QString::fromUtf8(m_stderr).trimmed();
+            if (err.contains(QLatin1String("NotFound"))
+                || err.contains(QLatin1String("not found"))
+                || err.contains(QLatin1String("could not find"))) {
+                m_metricsNote = QStringLiteral(
+                    "not available - install metrics-server");
+            } else if (!err.isEmpty()) {
+                m_metricsNote = QStringLiteral("unavailable: %1")
+                                    .arg(err.split(QLatin1Char('\n')).first()
+                                             .left(120));
+            }
+            finishMetrics();
+        }
         return;
     }
 
-    bool ok = false;
-    const KubeResources resources = parseKubectlResources(m_stdout, &ok);
-    if (!ok) {
-        emitSnapshot(KubeState::ParseFailed,
-                     QStringLiteral("unexpected kubectl output"), {}, false);
-        scheduleNext(nextIntervalMs(KubeState::ParseFailed, false));
+    if (phase == 0) {
+        bool ok = false;
+        const KubeResources resources =
+            parseKubectlResources(m_stdout, &ok);
+        if (!ok) {
+            emitSnapshot(KubeState::ParseFailed,
+                         QStringLiteral("unexpected kubectl output"), {},
+                         false);
+            scheduleNext(nextIntervalMs(KubeState::ParseFailed, false));
+            return;
+        }
+        m_pendingResources = resources;
+        m_havePending = true;
+        advancePhase();
         return;
     }
 
-    const int issues = kubeIssueCount(resources.pods, resources.deployments);
-    emitSnapshot(KubeState::Ok, QString(), resources, true);
-    scheduleNext(nextIntervalMs(KubeState::Ok, issues > 0));
+    if (phase == 1) {
+        m_metricsPodsRaw = m_stdout;
+        m_running = true;
+        m_aborting = false;
+        m_stdout.clear();
+        m_stderr.clear();
+        startPhase(2, {QStringLiteral("get"), QStringLiteral("--raw"),
+                       QStringLiteral("/apis/metrics.k8s.io/v1beta1/nodes")});
+        return;
+    }
+
+    m_metricsNodesRaw = m_stdout;
+    finishMetrics();
 }
 
 void KubeSource::emitSnapshot(KubeState state, const QString &message,
@@ -246,6 +336,21 @@ void KubeSource::emitSnapshot(KubeState state, const QString &message,
         snapshot.eventCount = kubeWarningCount(resources.events);
         snapshot.diagnoses = kubeDiagnose(resources.pods, resources.events);
         snapshot.deprecations = checkDeprecations(resources.objects);
+
+        snapshot.metricsOk = m_metricsOk;
+        snapshot.metricsNote = m_metricsNote;
+        for (const KubePod &pod : snapshot.pods) {
+            if (pod.cpuMillis >= 0.0) {
+                snapshot.podsCpuMillis += pod.cpuMillis;
+                snapshot.podsMemBytes += pod.memBytes;
+                ++snapshot.podsWithUsage;
+            }
+        }
+        for (const KubeNode &node : snapshot.nodes) {
+            if (node.cpuMillis >= 0.0) {
+                ++snapshot.nodesWithUsage;
+            }
+        }
 
         const CostSummary cost =
             computeClusterCost(resources.pods, m_costConfig.cpuPerCoreHour,

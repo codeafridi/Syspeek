@@ -1828,14 +1828,15 @@ QWidget *DashboardPanel::buildKubernetesView() {
 
     m_kubePods = new QTreeWidget(view);
     m_kubePods->setObjectName(QStringLiteral("ddKubePods"));
-    m_kubePods->setColumnCount(4);
+    m_kubePods->setColumnCount(6);
     m_kubePods->setHeaderLabels({QStringLiteral("Pod"), QStringLiteral("Namespace"),
-                                 QStringLiteral("Phase"), QStringLiteral("Restarts")});
+                                 QStringLiteral("Phase"), QStringLiteral("Restarts"),
+                                 QStringLiteral("CPU"), QStringLiteral("MEM")});
     m_kubePods->setRootIsDecorated(false);
     m_kubePods->setSelectionMode(QAbstractItemView::NoSelection);
     m_kubePods->setFocusPolicy(Qt::NoFocus);
     m_kubePods->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 4; ++i) {
+    for (int i = 1; i < 6; ++i) {
         m_kubePods->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
 
@@ -1862,12 +1863,12 @@ QWidget *DashboardPanel::buildKubernetesView() {
     layout->addWidget(
         makeCard(QStringLiteral("CLUSTER"), m_kubeSummary, view));
 
-    auto *tables = new QHBoxLayout();
-    tables->setSpacing(14);
-    tables->addWidget(makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
-    tables->addWidget(
+    m_kubePods->setColumnWidth(0, 150);
+    layout->addWidget(
+        makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
+    layout->addWidget(
         makeCard(QStringLiteral("DEPLOYMENTS"), m_kubeDeploys, view), 1);
-    layout->addLayout(tables, 2);
+    m_kubeDeploys->setColumnWidth(0, 150);
 
     // --- Rail-count history (Syspeek-own counter).
     m_chartKube = new TimeseriesChart(view);
@@ -4093,6 +4094,18 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
         item->setText(2, pod.phase);
         item->setText(3, QString::number(pod.restarts));
         item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+        if (pod.cpuMillis >= 0.0) {
+            item->setText(4,
+                          QStringLiteral("%1m").arg(pod.cpuMillis, 0, 'f', 0));
+            item->setText(
+                5, QStringLiteral("%1Mi").arg(
+                       pod.memBytes / (1024.0 * 1024.0), 0, 'f', 0));
+        } else {
+            item->setText(4, QStringLiteral("--"));
+            item->setText(5, QStringLiteral("--"));
+        }
+        item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
+        item->setTextAlignment(5, Qt::AlignRight | Qt::AlignVCenter);
         if (kubePodIsIssue(pod)) {
             item->setForeground(0, QColor(QStringLiteral("#d1685f")));
         }

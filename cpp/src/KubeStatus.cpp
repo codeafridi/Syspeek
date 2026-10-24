@@ -359,6 +359,132 @@ KubeResources parseKubectlResources(const QByteArray &json, bool *ok) {
     return resources;
 }
 
+QList<KubeMetricRow> parseKubePodMetricsJson(const QByteArray &json,
+                                             bool *ok) {
+    if (ok != nullptr) {
+        *ok = false;
+    }
+    QList<KubeMetricRow> rows;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(json);
+    const QJsonObject root = doc.object();
+    if (root.isEmpty()
+        || root.value(QStringLiteral("kind")).toString()
+               != QStringLiteral("PodMetricsList")) {
+        return rows;
+    }
+    const QJsonArray items =
+        root.value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &itemValue : items) {
+        const QJsonObject item = itemValue.toObject();
+        const QJsonObject meta =
+            item.value(QStringLiteral("metadata")).toObject();
+        const QString name = meta.value(QStringLiteral("name")).toString();
+        const QString ns = meta.value(QStringLiteral("namespace")).toString();
+        if (name.isEmpty() || ns.isEmpty()) {
+            continue;
+        }
+        double cpuMillis = 0.0;
+        long long memBytes = 0;
+        const QJsonArray containers =
+            item.value(QStringLiteral("containers")).toArray();
+        for (const QJsonValue &containerValue : containers) {
+            const QJsonObject usage = containerValue.toObject()
+                                          .value(QStringLiteral("usage"))
+                                          .toObject();
+            cpuMillis += kubeParseCpuCores(
+                             usage.value(QStringLiteral("cpu")).toString())
+                         * 1000.0;
+            memBytes += static_cast<long long>(kubeParseMemoryBytes(
+                usage.value(QStringLiteral("memory")).toString()));
+        }
+        KubeMetricRow row;
+        row.key = ns + QStringLiteral("/") + name;
+        row.cpuMillis = cpuMillis;
+        row.memBytes = memBytes;
+        rows.append(row);
+    }
+    if (ok != nullptr) {
+        *ok = true;
+    }
+    return rows;
+}
+
+QList<KubeMetricRow> parseKubeNodeMetricsJson(const QByteArray &json,
+                                              bool *ok) {
+    if (ok != nullptr) {
+        *ok = false;
+    }
+    QList<KubeMetricRow> rows;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(json);
+    const QJsonObject root = doc.object();
+    if (root.isEmpty()
+        || root.value(QStringLiteral("kind")).toString()
+               != QStringLiteral("NodeMetricsList")) {
+        return rows;
+    }
+    const QJsonArray items =
+        root.value(QStringLiteral("items")).toArray();
+    for (const QJsonValue &itemValue : items) {
+        const QJsonObject item = itemValue.toObject();
+        const QString name = item.value(QStringLiteral("metadata"))
+                                 .toObject()
+                                 .value(QStringLiteral("name"))
+                                 .toString();
+        if (name.isEmpty()) {
+            continue;
+        }
+        const QJsonObject usage =
+            item.value(QStringLiteral("usage")).toObject();
+        KubeMetricRow row;
+        row.key = name;
+        row.cpuMillis =
+            kubeParseCpuCores(usage.value(QStringLiteral("cpu")).toString())
+            * 1000.0;
+        row.memBytes = static_cast<long long>(kubeParseMemoryBytes(
+            usage.value(QStringLiteral("memory")).toString()));
+        rows.append(row);
+    }
+    if (ok != nullptr) {
+        *ok = true;
+    }
+    return rows;
+}
+
+void kubeMergeMetrics(QList<KubePod> *pods, QList<KubeNode> *nodes,
+                      const QList<KubeMetricRow> &podRows,
+                      const QList<KubeMetricRow> &nodeRows) {
+    if (pods == nullptr || nodes == nullptr) {
+        return;
+    }
+
+    QHash<QString, KubeMetricRow> podIndex;
+    for (const KubeMetricRow &row : podRows) {
+        podIndex.insert(row.key, row);
+    }
+    for (KubePod &pod : *pods) {
+        const KubeMetricRow row = podIndex.value(
+            pod.ns + QStringLiteral("/") + pod.name);
+        if (row.cpuMillis >= 0.0) {
+            pod.cpuMillis = row.cpuMillis;
+            pod.memBytes = row.memBytes;
+        }
+    }
+
+    QHash<QString, KubeMetricRow> nodeIndex;
+    for (const KubeMetricRow &row : nodeRows) {
+        nodeIndex.insert(row.key, row);
+    }
+    for (KubeNode &node : *nodes) {
+        const KubeMetricRow row = nodeIndex.value(node.name);
+        if (row.cpuMillis >= 0.0) {
+            node.cpuMillis = row.cpuMillis;
+            node.memBytes = row.memBytes;
+        }
+    }
+}
+
 bool kubePodIsIssue(const KubePod &pod) {
     if (pod.phase == QStringLiteral("Failed")
         || pod.phase == QStringLiteral("Unknown")) {
@@ -435,16 +561,24 @@ QString kubeSummaryText(const KubeSnapshot &snapshot) {
         break;
     }
 
+    QString text;
     if (snapshot.issueCount > 0) {
-        return QStringLiteral("k8s: %1 %2")
-            .arg(snapshot.issueCount)
-            .arg(snapshot.issueCount == 1 ? QStringLiteral("issue")
-                                          : QStringLiteral("issues"));
+        text = QStringLiteral("k8s: %1 %2")
+                   .arg(snapshot.issueCount)
+                   .arg(snapshot.issueCount == 1 ? QStringLiteral("issue")
+                                                 : QStringLiteral("issues"));
+    } else {
+        text = QStringLiteral("k8s: %1 pods").arg(snapshot.totalPods);
     }
-
-    QString text = QStringLiteral("k8s: %1 pods").arg(snapshot.totalPods);
     if (snapshot.state == KubeState::Stale || snapshot.stale) {
         text += QStringLiteral(" | stale");
+    }
+    if (snapshot.metricsOk) {
+        text += QStringLiteral("\nmetrics: ok - %1 pods, %2 nodes with usage")
+                    .arg(snapshot.podsWithUsage)
+                    .arg(snapshot.nodesWithUsage);
+    } else if (!snapshot.metricsNote.isEmpty()) {
+        text += QStringLiteral("\nmetrics: %1").arg(snapshot.metricsNote);
     }
     return text;
 }
@@ -776,8 +910,14 @@ QString kubeNodesText(const QList<KubeNode> &nodes) {
     for (const KubeNode &node : nodes) {
         const double memCapacity = node.memCapacityBytes / (1024.0 * 1024.0 * 1024.0);
         const double memAlloc = node.memAllocatableBytes / (1024.0 * 1024.0 * 1024.0);
+        QString usage;
+        if (node.cpuMillis >= 0.0 && node.memBytes >= 0) {
+            usage = QStringLiteral("  usage %1m/%2Mi")
+                        .arg(node.cpuMillis, 0, 'f', 0)
+                        .arg(node.memBytes / (1024.0 * 1024.0), 0, 'f', 0);
+        }
         text += QStringLiteral("%1 %2  %3  k8s %4  cpu %5/%6  mem %7/%8GiB  "
-                               "pods %9/%10%11%12\n")
+                               "pods %9/%10%11%12%13\n")
                     .arg(node.name.leftJustified(20, ' '),
                          node.ready ? QStringLiteral("Ready ")
                                     : QStringLiteral("NotRdy"),
@@ -794,7 +934,8 @@ QString kubeNodesText(const QList<KubeNode> &nodes) {
                              : QStringLiteral("  ") + node.instanceType,
                          node.zone.isEmpty()
                              ? QString()
-                             : QStringLiteral("  ") + node.zone);
+                             : QStringLiteral("  ") + node.zone,
+                         usage);
     }
     return text.trimmed();
 }

@@ -35,6 +35,9 @@ private slots:
 
 private:
     void beginQuery();
+    void startPhase(int phase, const QStringList &arguments);
+    void advancePhase();
+    void finishMetrics();
     void scheduleNext(int intervalMs);
     void emitSnapshot(KubeState state, const QString &message,
                       const KubeResources &resources, bool success);
@@ -64,4 +67,12 @@ private:
     KubeResources m_prevResources;
     bool m_havePrev = false;
     QList<KubeChange> m_timeline;
+
+    int m_phase = 0;
+    KubeResources m_pendingResources;
+    bool m_havePending = false;
+    bool m_metricsOk = false;
+    QString m_metricsNote;
+    QByteArray m_metricsPodsRaw;
+    QByteArray m_metricsNodesRaw;
 };
