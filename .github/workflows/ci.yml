@@ -275,16 +275,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sh -n install.sh
-          # The maintainers publish the portable bundle AFTER the tag-driven
-          # release job flips releases/latest; fall back to the previous
-          # release when the portable is not up yet.
-          if ! curl -fsI \
-             "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/syspeek-portable.tar.gz" \
-             > /dev/null 2>&1; then
-            prev="$(gh release list --limit 5 --json tagName --jq \
-              '[.[].tagName] | if length > 1 then .[1] else .[0] end')"
-            export SYSPEEK_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${prev}/syspeek-portable.tar.gz"
-            echo "portable not on latest yet — smoke fallback: ${prev}"
+          # Release-race discipline (0.8.5 triage): resolving through the
+          # moving `latest` alias is unsound — the tag run publishes the
+          # release mid-smoke and the alias flips between probe and
+          # download (observed live in run 40052429151: probe 200 against
+          # v0.8.4, download 404 against the freshly-published v0.8.5
+          # before its portable upload). Resolve ONCE from the newest
+          # published release that actually carries the asset.
+          tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=6" \
+            --jq '.[] | select(.draft == false)
+                  | select([.assets[].name] | index("syspeek-portable.tar.gz"))
+                  | .tag_name' | head -1)"
+          if [ -n "${tag}" ]; then
+            export SYSPEEK_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/syspeek-portable.tar.gz"
+            echo "smoke bundle from: ${tag}"
           fi
           sh install.sh --no-bridge --no-autostart
           test -x "$HOME/.local/opt/syspeek/syspeek"
