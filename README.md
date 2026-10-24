@@ -269,7 +269,13 @@ Both are optional. If the tool isn't installed or reachable, the overlay shows a
 status instead of failing.
 
 - **Docker** — shows running count and flags unhealthy, restarting, and recently
-  exited containers.
+  exited containers. When the Docker Engine socket is reachable
+  (`/var/run/docker.sock`, Docker Desktop's socket on macOS, the named pipe on
+  Windows — override with `[docker] socket=`), the Containers page also reads
+  per-container depth straight from the Engine API: CPU %, memory usage vs
+  limit, network I/O, and process count — the same numbers `docker stats`
+  prints, without spawning the CLI. Without the socket the page falls back to
+  the plain `docker ps` fields.
 - **Kubernetes** — flags problem pods (`CrashLoopBackOff`, image-pull failures,
   `OOMKilled`) and deployments with too few ready replicas, using your current
   `kubectl` context.

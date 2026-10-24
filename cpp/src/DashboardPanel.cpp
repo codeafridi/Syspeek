@@ -1722,15 +1722,21 @@ QWidget *DashboardPanel::buildContainersView() {
 
     m_dockerTable = new QTreeWidget(view);
     m_dockerTable->setObjectName(QStringLiteral("ddDockerTable"));
-    m_dockerTable->setColumnCount(3);
+    m_dockerTable->setColumnCount(8);
     m_dockerTable->setHeaderLabels({QStringLiteral("Container"),
+                                    QStringLiteral("Image"),
                                     QStringLiteral("State"),
-                                    QStringLiteral("Status")});
+                                    QStringLiteral("Status"),
+                                    QStringLiteral("CPU %"),
+                                    QStringLiteral("MEM USAGE"),
+                                    QStringLiteral("NET I/O"),
+                                    QStringLiteral("PIDS")});
     m_dockerTable->setRootIsDecorated(false);
     m_dockerTable->setSelectionMode(QAbstractItemView::NoSelection);
     m_dockerTable->setFocusPolicy(Qt::NoFocus);
     m_dockerTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 3; ++i) {
+    m_dockerTable->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    for (int i = 2; i < 8; ++i) {
         m_dockerTable->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
 
@@ -4009,13 +4015,39 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
         auto *item = new QTreeWidgetItem(m_dockerTable);
         item->setText(0, container.name.isEmpty() ? container.id
                                                   : container.name);
-        item->setText(1, container.state);
-        item->setText(2, container.status);
+        item->setText(1, container.image);
+        item->setText(2, container.state);
+        item->setText(3, container.status);
+        if (container.hasDepth) {
+            const DockerDepth &depth = container.depth;
+            if (depth.cpuPercent >= 0.0) {
+                item->setText(4,
+                              QStringLiteral("%1 %").arg(depth.cpuPercent, 0,
+                                                         'f', 1));
+            }
+            if (depth.hasMem) {
+                const QString limit =
+                    depth.memLimitBytes > 0
+                        ? formatBytesCompact(depth.memLimitBytes)
+                        : QStringLiteral("unlimited");
+                item->setText(5, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.memUsedBytes),
+                                          limit));
+            }
+            if (depth.hasNet) {
+                item->setText(6, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.netRxBytes),
+                                          formatBytesCompact(depth.netTxBytes)));
+            }
+            if (depth.pids >= 0) {
+                item->setText(7, QString::number(depth.pids));
+            }
+        }
         const bool bad = container.crashed
             || container.health == QLatin1String("unhealthy")
             || (container.state != QLatin1String("running")
                 && container.state != QLatin1String("healthy"));
-        item->setForeground(1, QBrush(QColor(
+        item->setForeground(2, QBrush(QColor(
             bad ? ui_theme::crit() : ui_theme::ok())));
     }
 

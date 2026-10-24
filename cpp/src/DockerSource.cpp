@@ -1,4 +1,5 @@
 #include "DockerSource.h"
+#include "DockerEngineClient.h"
 
 #include <QDateTime>
 #include <QStandardPaths>
@@ -85,6 +86,13 @@ void DockerSource::beginQuery() {
 
     if (m_running) {
         m_refreshPending = true;
+        return;
+    }
+
+    QList<DockerContainer> engineRows;
+    QString engineError;
+    if (queryViaEngine(&engineRows, &engineError)) {
+        finishOk(engineRows);
         return;
     }
 
@@ -214,6 +222,88 @@ void DockerSource::onFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     const int issues = dockerIssueCount(containers);
     emitSnapshot(DockerState::Ok, QString(), containers, true);
     scheduleNext(nextIntervalMs(DockerState::Ok, issues > 0));
+}
+
+void DockerSource::finishOk(const QList<DockerContainer> &containers) {
+    const int issues = dockerIssueCount(containers);
+    emitSnapshot(DockerState::Ok, QString(), containers, true);
+    scheduleNext(nextIntervalMs(DockerState::Ok, issues > 0));
+}
+
+QString DockerSource::engineSocketPath() const {
+    if (!m_config.socketPath.isEmpty()) {
+        return m_config.socketPath;
+    }
+#if defined(Q_OS_WIN)
+    return QStringLiteral("//./pipe/docker_engine");
+#else
+    const QByteArray dockerHost = qgetenv("DOCKER_HOST");
+    if (!dockerHost.isEmpty()) {
+        const QString host = QString::fromUtf8(dockerHost);
+        if (host.startsWith(QLatin1String("unix://"))) {
+            return host.mid(7);
+        }
+        return QString();
+    }
+    return QStringLiteral("/var/run/docker.sock");
+#endif
+}
+
+bool DockerSource::queryViaEngine(QList<DockerContainer> *out,
+                                  QString *error) {
+    const QString socketPath = engineSocketPath();
+    if (socketPath.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("non-local docker host");
+        }
+        return false;
+    }
+
+    DockerEngineClient client(socketPath, m_config.timeoutMs);
+    QByteArray body;
+    QString localError;
+    if (!client.get(QStringLiteral("/containers/json?all=1"), &body,
+                    &localError)) {
+        if (error != nullptr) {
+            *error = localError;
+        }
+        return false;
+    }
+
+    QList<DockerContainer> containers =
+        parseDockerContainersJson(body, &localError);
+    if (!localError.isEmpty()) {
+        if (error != nullptr) {
+            *error = localError;
+        }
+        return false;
+    }
+
+    const qint64 started = QDateTime::currentMSecsSinceEpoch();
+    for (DockerContainer &container : containers) {
+        if (container.state.compare(QStringLiteral("running"),
+                                    Qt::CaseInsensitive)
+            != 0) {
+            continue;
+        }
+        if (QDateTime::currentMSecsSinceEpoch() - started
+            > m_config.timeoutMs) {
+            break;
+        }
+        if (client.get(QStringLiteral("/containers/%1/stats?stream=false")
+                           .arg(container.id),
+                       &body, &localError)
+            && parseDockerStatsJson(body, &container.depth)) {
+            container.hasDepth = true;
+        } else {
+            container.hasDepth = false;
+        }
+    }
+
+    if (out != nullptr) {
+        *out = containers;
+    }
+    return true;
 }
 
 void DockerSource::emitSnapshot(DockerState state,

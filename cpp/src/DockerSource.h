@@ -35,6 +35,9 @@ private slots:
 private:
     void beginQuery();
     void scheduleNext(int intervalMs);
+    bool queryViaEngine(QList<DockerContainer> *out, QString *error);
+    void finishOk(const QList<DockerContainer> &containers);
+    QString engineSocketPath() const;
     void emitSnapshot(DockerState state,
                       const QString &message,
                       const QList<DockerContainer> &containers,

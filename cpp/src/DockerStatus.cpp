@@ -1,5 +1,8 @@
 #include "DockerStatus.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStringList>
 
 namespace {
@@ -21,6 +24,11 @@ QString parseHealth(const QString &status) {
 
 QString issueText(int issues) {
     return issues == 1 ? QStringLiteral("issue") : QStringLiteral("issues");
+}
+
+void applyDockerRowSemantics(DockerContainer *container) {
+    container->health = parseHealth(container->status);
+    container->exitCode = parseDockerExitCode(container->status);
 }
 
 } // namespace
@@ -108,6 +116,146 @@ int dockerIssueCount(const QList<DockerContainer> &containers) {
         }
     }
     return issues;
+}
+
+QList<DockerContainer> parseDockerContainersJson(const QByteArray &payload,
+                                                 QString *error) {
+    const QJsonDocument doc = QJsonDocument::fromJson(payload);
+    if (!doc.isArray()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("engine response is not a container list");
+        }
+        return {};
+    }
+
+    QList<DockerContainer> containers;
+    for (const QJsonValue &value : doc.array()) {
+        const QJsonObject obj = value.toObject();
+        DockerContainer container;
+        container.id = obj.value(QLatin1String("Id")).toString();
+        if (container.id.isEmpty()) {
+            continue;
+        }
+        const QJsonArray names = obj.value(QLatin1String("Names")).toArray();
+        if (!names.isEmpty()) {
+            container.name = names.at(0).toString();
+            while (container.name.startsWith(QLatin1Char('/'))) {
+                container.name = container.name.mid(1);
+            }
+        }
+        container.image = obj.value(QLatin1String("Image")).toString();
+        container.state = obj.value(QLatin1String("State")).toString();
+        container.status = obj.value(QLatin1String("Status")).toString();
+        applyDockerRowSemantics(&container);
+        containers.append(container);
+    }
+
+    return containers;
+}
+
+bool parseDockerStatsJson(const QByteArray &payload, DockerDepth *out) {
+    const QJsonDocument doc = QJsonDocument::fromJson(payload);
+    if (!doc.isObject()) {
+        return false;
+    }
+    const QJsonObject root = doc.object();
+    if (root.contains(QLatin1String("message"))) {
+        return false;
+    }
+
+    DockerDepth depth;
+
+    const QJsonObject cpu = root.value(QLatin1String("cpu_stats")).toObject();
+    const QJsonObject preCpu =
+        root.value(QLatin1String("precpu_stats")).toObject();
+    const QJsonObject cpuUsage =
+        cpu.value(QLatin1String("cpu_usage")).toObject();
+    const QJsonObject preCpuUsage =
+        preCpu.value(QLatin1String("cpu_usage")).toObject();
+    const double total =
+        cpuUsage.value(QLatin1String("total_usage")).toDouble();
+    const double prevTotal =
+        preCpuUsage.value(QLatin1String("total_usage")).toDouble();
+    const double system = cpu.value(QLatin1String("system_cpu_usage")).toDouble();
+    const double prevSystem =
+        preCpu.value(QLatin1String("system_cpu_usage")).toDouble();
+    depth.cpuCores = cpu.value(QLatin1String("online_cpus")).toInt();
+
+    const double cpuDelta = total - prevTotal;
+    const double systemDelta = system - prevSystem;
+    if (systemDelta > 0.0 && cpuDelta >= 0.0 && depth.cpuCores > 0) {
+        depth.cpuPercent =
+            (cpuDelta / systemDelta) * static_cast<double>(depth.cpuCores)
+            * 100.0;
+    }
+
+    const QJsonObject mem = root.value(QLatin1String("memory_stats")).toObject();
+    if (mem.contains(QLatin1String("usage"))) {
+        depth.memUsedBytes =
+            static_cast<unsigned long long>(
+                mem.value(QLatin1String("usage")).toDouble());
+        depth.memLimitBytes =
+            static_cast<unsigned long long>(
+                mem.value(QLatin1String("limit")).toDouble());
+        depth.hasMem = depth.memUsedBytes > 0;
+    }
+
+    const QJsonObject networks =
+        root.value(QLatin1String("networks")).toObject();
+    if (!networks.isEmpty()) {
+        unsigned long long rx = 0;
+        unsigned long long tx = 0;
+        bool any = false;
+        for (QJsonObject::const_iterator it = networks.constBegin();
+             it != networks.constEnd(); ++it) {
+            const QJsonObject iface = it.value().toObject();
+            rx += static_cast<unsigned long long>(
+                iface.value(QLatin1String("rx_bytes")).toDouble());
+            tx += static_cast<unsigned long long>(
+                iface.value(QLatin1String("tx_bytes")).toDouble());
+            any = true;
+        }
+        if (any) {
+            depth.hasNet = true;
+            depth.netRxBytes = rx;
+            depth.netTxBytes = tx;
+        }
+    }
+
+    const QJsonObject blkio =
+        root.value(QLatin1String("blkio_stats")).toObject();
+    const QJsonArray ioBytes =
+        blkio.value(QLatin1String("io_service_bytes_recursive")).toArray();
+    if (!ioBytes.isEmpty()) {
+        unsigned long long read = 0;
+        unsigned long long write = 0;
+        for (const QJsonValue &entry : ioBytes) {
+            const QJsonObject item = entry.toObject();
+            const QString op =
+                item.value(QLatin1String("op")).toString().toLower();
+            const unsigned long long value =
+                static_cast<unsigned long long>(
+                    item.value(QLatin1String("value")).toDouble());
+            if (op == QLatin1String("read")) {
+                read += value;
+            } else if (op == QLatin1String("write")) {
+                write += value;
+            }
+        }
+        depth.hasBlk = read > 0 || write > 0;
+        depth.blkReadBytes = read;
+        depth.blkWriteBytes = write;
+    }
+
+    const QJsonObject pids = root.value(QLatin1String("pids_stats")).toObject();
+    if (pids.contains(QLatin1String("current"))) {
+        depth.pids = pids.value(QLatin1String("current")).toInt();
+    }
+
+    if (out != nullptr) {
+        *out = depth;
+    }
+    return true;
 }
 
 DockerState classifyDockerFailure(const QByteArray &payload) {

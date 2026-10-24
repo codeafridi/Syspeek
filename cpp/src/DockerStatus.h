@@ -7,6 +7,21 @@
 #include <QString>
 #include <QtGlobal>
 
+struct DockerDepth {
+    double cpuPercent = -1.0;
+    int cpuCores = -1;
+    unsigned long long memUsedBytes = 0;
+    unsigned long long memLimitBytes = 0;
+    bool hasMem = false;
+    unsigned long long netRxBytes = 0;
+    unsigned long long netTxBytes = 0;
+    bool hasNet = false;
+    unsigned long long blkReadBytes = 0;
+    unsigned long long blkWriteBytes = 0;
+    bool hasBlk = false;
+    int pids = -1;
+};
+
 struct DockerContainer {
     QString id;
     QString name;
@@ -15,6 +30,9 @@ struct DockerContainer {
     QString health;
     int exitCode = -1;
     bool crashed = false;
+    QString image;
+    DockerDepth depth;
+    bool hasDepth = false;
 };
 
 enum class DockerState {
@@ -40,6 +58,13 @@ struct DockerSnapshot {
 };
 
 QList<DockerContainer> parseDockerPs(const QByteArray &payload, bool *ok);
+
+// Docker Engine API payloads (/containers/json?all=1 and
+// /containers/{id}/stats?stream=false) parsed into the same row model.
+QList<DockerContainer> parseDockerContainersJson(const QByteArray &payload,
+                                                 QString *error);
+
+bool parseDockerStatsJson(const QByteArray &payload, DockerDepth *out);
 
 int parseDockerExitCode(const QString &status);
 

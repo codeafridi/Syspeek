@@ -19,6 +19,7 @@ struct DockerConfig {
     int absentMs = 300000;
     int timeoutMs = 3000;
     int killGraceMs = 500;
+    QString socketPath;
 };
 
 struct KubeConfig {
