@@ -122,11 +122,11 @@ h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); margin: 0 0 16px; font-weight: 800; 
 .dots { display: flex; gap: 5px; }
 .dots i { width: 8px; height: 8px; border-radius: 50%; background: #4b5563; }
 .terminal-title { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
-.terminal-body { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.terminal-body code { flex: 1; background: transparent; border: none; padding: 0; color: var(--code-text); }
+.terminal-body { padding: 10px 14px; }
+.terminal-body code { display: block; background: transparent; border: none; padding: 0; color: var(--code-text); white-space: pre-wrap; word-break: break-all; }
 .prompt { color: var(--muted); padding-right: 6px; }
-.copy { padding: 6px 14px; font-size: 0.78rem; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--code-text); cursor: pointer; font-family: var(--mono); }
-.copy:hover { border-color: var(--text); }
+.copy { margin-top: 10px; width: 100%; padding: 10px 14px; font-size: 0.85rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); color: var(--text); cursor: pointer; font-family: var(--mono); text-align: left; }
+.copy:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg-2)); }
 .ospanel p { margin: 10px 0 0; color: var(--muted); font-size: 0.92rem; }
 .alts { margin: 8px 0 0; color: var(--muted); font-size: 0.85rem; }
 .alts a { color: var(--accent); text-decoration: underline; }
@@ -143,8 +143,7 @@ h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); margin: 0 0 16px; font-weight: 800; 
   .grid { grid-template-columns: 1fr; }
   .hero { padding: 56px 0 36px; }
   .ostabs { flex-wrap: wrap; }
-  .terminal-body { flex-direction: column; align-items: stretch; gap: 8px; }
-  .copy { align-self: flex-start; width: 100%; }
+  .copy { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
