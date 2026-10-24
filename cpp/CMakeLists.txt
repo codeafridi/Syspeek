@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(syspeek
-    VERSION 0.8.4
+    VERSION 0.8.5
     DESCRIPTION "Syspeek HUD (Qt 6 Widgets)"
     LANGUAGES CXX)
 
