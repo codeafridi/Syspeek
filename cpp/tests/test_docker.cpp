@@ -1,8 +1,21 @@
 #include "DockerEngineClient.h"
 #include "DockerStatus.h"
 
+#include <QElapsedTimer>
 #include <QFileInfo>
+#include <QHash>
+#include <QStringList>
 #include <cstdio>
+
+static QString liveNamesCellValue(const QList<DockerContainer> &rows,
+                                  const QString &id) {
+    for (const DockerContainer &row : rows) {
+        if (row.id == id) {
+            return row.name;
+        }
+    }
+    return id;
+}
 
 namespace {
 
@@ -290,24 +303,35 @@ int main() {
                   "live engine containers json parses");
             std::printf("live engine ok: %lld rows\n",
                         static_cast<long long>(rows.size()));
-            int liveStatsProven = 0;
+            QStringList runningIds;
             for (const DockerContainer &row : rows) {
-                if (row.state != QLatin1String("running")
-                    || liveStatsProven >= 2) {
-                    continue;
+                if (row.state == QLatin1String("running") && runningIds.size() < 3) {
+                    runningIds.append(row.id);
                 }
-                ++liveStatsProven;
-                DockerDepth liveDepth;
-                if (client.get(QStringLiteral(
-                                   "/containers/%1/stats?stream=false")
-                                   .arg(row.id),
-                               &fetched, &liveError)
-                    && parseDockerStatsJson(fetched, &liveDepth)) {
-                    std::printf(
-                        "live stats ok: %s cpu=%.1f cores=%d pids=%d\n",
-                        row.name.toLatin1().constData(), liveDepth.cpuPercent,
-                        liveDepth.cpuCores, liveDepth.pids);
+            }
+            if (!runningIds.isEmpty()) {
+                QElapsedTimer statsClock;
+                statsClock.start();
+                const QHash<QString, QByteArray> statsBodies =
+                    client.statsMulti(runningIds, 6000, &liveError);
+                const qint64 wallMs = statsClock.elapsed();
+                for (const QString &id : runningIds) {
+                    const QByteArray raw = statsBodies.value(id);
+                    if (raw.isEmpty()) {
+                        continue;
+                    }
+                    DockerDepth liveDepth;
+                    if (parseDockerStatsJson(raw, &liveDepth)) {
+                        std::printf(
+                            "live stats ok (multi): %s cpu=%.1f cores=%d pids=%d\n",
+                            liveNamesCellValue(rows, id).toLatin1().constData(),
+                            liveDepth.cpuPercent, liveDepth.cpuCores,
+                            liveDepth.pids);
+                    }
                 }
+                std::printf(
+                    "multiplexed stats wall: %lld ms for %lld requests\n",
+                    wallMs, static_cast<long long>(runningIds.size()));
             }
         } else if (liveError.contains(QStringLiteral("Permission denied"))) {
             std::printf("SKIP live engine: permission denied in CI\n");

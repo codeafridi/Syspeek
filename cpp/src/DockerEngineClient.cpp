@@ -1,5 +1,6 @@
 #include "DockerEngineClient.h"
 
+#include <QDateTime>
 #include <QLocalSocket>
 #include <QTimer>
 
@@ -180,4 +181,104 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
                         : (hasLength ? payload.left(contentLength) : payload);
     }
     return true;
+}
+
+QHash<QString, QByteArray>
+DockerEngineClient::statsMulti(const QStringList &ids, qint64 budgetMs,
+                               QString *error) {
+    m_lastError.clear();
+    if (error != nullptr) {
+        error->clear();
+    }
+
+    QHash<QString, QByteArray> bodies;
+    if (ids.isEmpty()) {
+        return bodies;
+    }
+
+    struct Session {
+        QLocalSocket socket;
+        QString id;
+        QByteArray frame;
+        QByteArray header;
+        int bodyStart = -1;
+        bool headerDone = false;
+        bool chunked = false;
+        bool hasLength = false;
+        int contentLength = 0;
+        QByteArray payload;
+        bool complete = false;
+    };
+
+    QList<Session *> sessions;
+    for (const QString &id : ids) {
+        Session *s = new Session{};
+        sessions.append(s);
+        s->id = id;
+        s->socket.connectToServer(m_socketPath);
+        if (s->socket.waitForConnected(m_timeoutMs)) {
+            s->socket.write(requestBytes(
+                QStringLiteral("/containers/%1/stats?stream=false").arg(id)));
+            s->socket.waitForBytesWritten(m_timeoutMs);
+        } else {
+            s->complete = true;
+        }
+    }
+
+    const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
+    while (QDateTime::currentMSecsSinceEpoch() - startedMs < budgetMs) {
+        bool anyOpen = false;
+        for (Session *s : sessions) {
+            if (s->complete) {
+                continue;
+            }
+            anyOpen = true;
+            const qint64 remaining =
+                budgetMs - (QDateTime::currentMSecsSinceEpoch() - startedMs);
+            s->socket.waitForReadyRead(int(qMin<qint64>(remaining, 200)));
+            s->frame += s->socket.readAll();
+
+            if (!s->headerDone) {
+                const int sep = s->frame.indexOf("\r\n\r\n");
+                if (sep < 0) {
+                    continue;
+                }
+                s->header = s->frame.left(sep);
+                s->bodyStart = sep + 4;
+                s->headerDone = true;
+                const int status = statusFromHeader(s->header);
+                if (status != 200) {
+                    s->complete = true;
+                    continue;
+                }
+                s->chunked = chunkedFromHeader(s->header);
+                s->contentLength = contentLengthFromHeader(s->header,
+                                                           &s->hasLength);
+            }
+
+            s->payload = s->frame.mid(s->bodyStart);
+            if (s->chunked) {
+                if (s->payload.endsWith(QByteArrayLiteral("\r\n0\r\n\r\n"))) {
+                    s->complete = true;
+                    bodies.insert(s->id, dechunk(s->payload));
+                }
+            } else if (s->hasLength
+                       && s->payload.size() >= s->contentLength) {
+                s->complete = true;
+                bodies.insert(s->id, s->payload.left(s->contentLength));
+            }
+        }
+        if (!anyOpen) {
+            break;
+        }
+    }
+
+    for (Session *s : sessions) {
+        delete s;
+    }
+
+    if (bodies.isEmpty() && error != nullptr) {
+        *error = QStringLiteral("no engine stats completed within budget");
+    }
+    return bodies;
 }

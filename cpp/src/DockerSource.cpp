@@ -279,24 +279,20 @@ bool DockerSource::queryViaEngine(QList<DockerContainer> *out,
         return false;
     }
 
-    const qint64 started = QDateTime::currentMSecsSinceEpoch();
-    for (DockerContainer &container : containers) {
+    QStringList runningIds;
+    for (const DockerContainer &container : containers) {
         if (container.state.compare(QStringLiteral("running"),
-                                    Qt::CaseInsensitive)
-            != 0) {
-            continue;
+                                    Qt::CaseInsensitive) == 0) {
+            runningIds.append(container.id);
         }
-        if (QDateTime::currentMSecsSinceEpoch() - started
-            > m_config.timeoutMs) {
-            break;
-        }
-        if (client.get(QStringLiteral("/containers/%1/stats?stream=false")
-                           .arg(container.id),
-                       &body, &localError)
-            && parseDockerStatsJson(body, &container.depth)) {
+    }
+    const QHash<QString, QByteArray> stats =
+        client.statsMulti(runningIds, qint64(m_config.timeoutMs) * 2,
+                          &localError);
+    for (DockerContainer &container : containers) {
+        const QByteArray raw = stats.value(container.id);
+        if (!raw.isEmpty() && parseDockerStatsJson(raw, &container.depth)) {
             container.hasDepth = true;
-        } else {
-            container.hasDepth = false;
         }
     }
 
