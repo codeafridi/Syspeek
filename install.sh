@@ -332,9 +332,9 @@ win_install() {
   shimDirUnix="$(dirname "$appdir")/Microsoft/WindowsApps"
   shimDirWin="$(cygpath -w "$shimDirUnix")"
   mkdir -p "$shimDirUnix" 2>/dev/null || true
-  printf '@echo off\r\n"%%LOCALAPPDATA%%\\Syspeek\\syspeek.exe" %%*\r\n' \
+  printf '@echo off\r\nif "%%~1"=="" (\r\n  start "" /b "%%LOCALAPPDATA%%\\Syspeek\\syspeek.exe"\r\n  exit /b 0\r\n)\r\n"%%LOCALAPPDATA%%\\Syspeek\\syspeek.exe" %%*\r\n' \
     > "$shimDirUnix/syspeek.cmd" 2>/dev/null || true
-  printf '#!/bin/sh\nexec "$LOCALAPPDATA/Syspeek/syspeek.exe" "$@"\n' \
+  printf '#!/bin/sh\nif [ "$#" -eq 0 ]; then\n  cmd.exe //c start "" /b "$LOCALAPPDATA\\Syspeek\\syspeek.exe" >/dev/null 2>&1\n  exit 0\nfi\nexec "$LOCALAPPDATA/Syspeek/syspeek.exe" "$@"\n' \
     > "$shimDirUnix/syspeek" 2>/dev/null || true
   chmod 0755 "$shimDirUnix/syspeek" 2>/dev/null || true
   if [ ! -f "$shimDirUnix/syspeek.cmd" ] && [ ! -f "$shimDirUnix/syspeek" ]; then
@@ -353,7 +353,7 @@ win_install() {
 
   cat <<'EOF' >&2
 Control it:
-  syspeek                  run the HUD (any new shell; shim on PATH)
+  syspeek                  launch the HUD and return to the prompt
   syspeek --autostart=on|off|status   login autostart (HKCU Run key)
   syspeek --dump           JSON snapshot of the machine (headless check)
   update                   re-run this installer

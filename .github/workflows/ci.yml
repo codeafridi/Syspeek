@@ -398,6 +398,22 @@ jobs:
           Write-Host "shim: $shim"
           $exe = "$env:LOCALAPPDATA\Syspeek\syspeek.exe"
           cmd /c "`"$exe`" stop"
+          # A bare shim must detach its GUI child. This catches cmd.exe's
+          # direct-GUI-exe behavior, which otherwise holds the terminal until
+          # the HUD exits.
+          $bareStart = [Diagnostics.Stopwatch]::StartNew()
+          & $shim
+          $bareStart.Stop()
+          if ($LASTEXITCODE -ne 0 -or $bareStart.Elapsed.TotalSeconds -gt 5) {
+            throw "bare syspeek did not return promptly (rc=$LASTEXITCODE, $($bareStart.Elapsed.TotalSeconds)s)"
+          }
+          Start-Sleep -Seconds 2
+          cmd /c "`"$exe`" status > bare-status.out 2>&1"
+          $bareStatus = Get-Content bare-status.out -Raw
+          if ($bareStatus -notmatch 'other instances: [1-9]\d*') {
+            throw "bare syspeek did not launch the HUD ($bareStatus)"
+          }
+          cmd /c "`"$exe`" stop"
           cmd /c "`"$exe`" start > start.out 2>&1"
           Write-Host "start rc=$LASTEXITCODE"
           $startOut = Get-Content start.out -Raw
