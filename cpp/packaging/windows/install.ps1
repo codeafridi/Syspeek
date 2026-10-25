@@ -115,15 +115,30 @@ try {
 
     New-Item -ItemType Directory -Path $ShimDir -Force | Out-Null
     $shimCmd = Join-Path $ShimDir 'syspeek.cmd'
+    # A bare `syspeek` must return the prompt immediately. Calling a GUI
+    # executable directly from cmd.exe waits for the HUD to exit; verbs with
+    # arguments stay synchronous so their output/exit status remains useful.
+    $shimCmdContents = (@(
+        '@echo off',
+        'if "%~1"=="" (',
+        '  start "" /b "%LOCALAPPDATA%\Syspeek\syspeek.exe"',
+        '  exit /b 0',
+        ')',
+        '"%LOCALAPPDATA%\Syspeek\syspeek.exe" %*'
+    ) -join "`r`n") + "`r`n"
     [IO.File]::WriteAllBytes($shimCmd,
-        # A bare `syspeek` must return the prompt immediately. Calling a GUI
-        # executable directly from cmd.exe waits for the HUD to exit; verbs
-        # with arguments stay synchronous so their output/exit status remains
-        # useful to people and to the installer smoke.
-        [Text.Encoding]::ASCII.GetBytes("@echo off`r`nif \"%~1\"==\"\" (`r`n  start \"\" /b \"%LOCALAPPDATA%\Syspeek\syspeek.exe\"`r`n  exit /b 0`r`n)`r`n\"%LOCALAPPDATA%\Syspeek\syspeek.exe\" %*`r`n"))
+        [Text.Encoding]::ASCII.GetBytes($shimCmdContents))
     $shimPosix = Join-Path $ShimDir 'syspeek'
+    $shimPosixContents = (@(
+        '#!/bin/sh',
+        'if [ "$#" -eq 0 ]; then',
+        '  cmd.exe //c start "" /b "$LOCALAPPDATA\Syspeek\syspeek.exe" >/dev/null 2>&1',
+        '  exit 0',
+        'fi',
+        'exec "$LOCALAPPDATA/Syspeek/syspeek.exe" "$@"'
+    ) -join "`n") + "`n"
     [IO.File]::WriteAllBytes($shimPosix,
-        [Text.Encoding]::ASCII.GetBytes("#!/bin/sh`nif [ `"`$#`" -eq 0 ]; then`n  cmd.exe //c start \"\" /b \"`$LOCALAPPDATA\\Syspeek\\syspeek.exe\" >/dev/null 2>&1`n  exit 0`nfi`nexec `"`$LOCALAPPDATA/Syspeek/syspeek.exe`" `"`$@`"`n"))
+        [Text.Encoding]::ASCII.GetBytes($shimPosixContents))
 
     if ($NoAutostart) {
         Info 'not started - open a NEW shell and type: syspeek'
