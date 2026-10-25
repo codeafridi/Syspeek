@@ -100,7 +100,13 @@ void JournalSource::onFinished(int exitCode, QProcess::ExitStatus status) {
         return;
     }
     m_running = false;
-    m_stdout += m_process->readAllStandardOutput();
+    // macOS and Windows can complete this path from their native log APIs;
+    // in that case no child process was started, so QProcess is not an open
+    // QIODevice to read from.  Reading it emits Qt's "device not open"
+    // warning on every fresh HUD launch.
+    if (m_process != nullptr && m_process->isOpen()) {
+        m_stdout += m_process->readAllStandardOutput();
+    }
 
     JournalSnapshot snapshot;
     snapshot.sampledAtMs = QDateTime::currentMSecsSinceEpoch();

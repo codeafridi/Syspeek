@@ -95,6 +95,22 @@ void writeSignalByte(int) {
 }
 #endif
 
+#if defined(Q_OS_WIN)
+static bool g_windowsCtrlHandlerInstalled = false;
+
+// Windows console control handler: Ctrl+C, Ctrl+Break, and close events.
+// Posts a quit to the QApplication event loop so the HUD exits cleanly
+// instead of leaving the terminal hanging and requiring Task Manager.
+static BOOL WINAPI windowsConsoleCtrlHandler(DWORD dwCtrlType) {
+    if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_CLOSE_EVENT ||
+        dwCtrlType == CTRL_BREAK_EVENT) {
+        QCoreApplication::quit();
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 void logLine(const QString &message) {
 
     const QString path =
@@ -396,6 +412,13 @@ int main(int argc, char *argv[]) {
     QApplication::setApplicationVersion(
         QString::fromLatin1(SYSPEEK_APP_VERSION));
 
+#if defined(Q_OS_WIN)
+    if (!g_windowsCtrlHandlerInstalled) {
+        SetConsoleCtrlHandler(windowsConsoleCtrlHandler, TRUE);
+        g_windowsCtrlHandlerInstalled = true;
+    }
+#endif
+
     // Single-instance gate: a second HUD would stack two overlays.
     const QString instanceKey = QStringLiteral("syspeek-hud-")
         + instanceUserKey();
@@ -406,9 +429,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     instanceProbe.abort();
-#if !defined(Q_OS_WIN)
     QLocalServer::removeServer(instanceKey);
-#endif
     auto *instanceLock = new QLocalServer(&app);
     if (!instanceLock->listen(instanceKey)) {
         instanceLock->deleteLater();
@@ -786,6 +807,12 @@ int main(int argc, char *argv[]) {
     thread->quit();
     thread->wait();
     delete thread;
+
+    // Remove the single-instance named pipe so a subsequent launch (even
+    // after an abnormal exit) can bind to it cleanly. On Windows the OS
+    // reclaims named pipes on process exit, but an explicit removeServer
+    // avoids stale-pipe warnings on the next launch.
+    QLocalServer::removeServer(instanceKey);
 
     logLine(QStringLiteral("stopped"));
 
