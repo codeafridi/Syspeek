@@ -2023,7 +2023,7 @@ int main(int argc, char *argv[]) {
         check(ok, "webhook: live delivery 200 ok");
         check(received.startsWith("POST /hook HTTP/1.1"),
               "webhook: live request POST path");
-        check(received.contains("Content-Type: application/json"),
+        check(received.toLower().contains("content-type: application/json"),
               "webhook: live request content type");
         check(received.contains("\"version\":\"4\""),
               "webhook: live body carries v4 payload");
