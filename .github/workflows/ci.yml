@@ -379,10 +379,15 @@ jobs:
               "$out" panel "$index" || {
               local rc=$?
               echo "::error::screenshot render failed: page ${index} rc=${rc}"
+              if ! command -v gdb >/dev/null 2>&1; then
+                sudo apt-get update -qq >/dev/null 2>&1 || true
+                sudo apt-get install -y -qq gdb >/dev/null 2>&1 || true
+              fi
               if command -v gdb >/dev/null 2>&1; then
-                gdb -batch -ex run -ex bt --args \
+                gdb -batch -ex "set confirm off" -ex run \
+                  -ex "thread apply all bt 20" --args \
                   ./cpp/build/syspeek_screenshot "$out" panel "$index" \
-                  2>&1 | tail -40 || true
+                  2>&1 | tail -80 || true
               fi
               exit 2
             }

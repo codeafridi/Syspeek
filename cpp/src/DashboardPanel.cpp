@@ -4195,12 +4195,15 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             .arg(snapshot.focusInvolCtx)
             .arg(formatRate(snapshot.focusIoReadPerSec))
             .arg(formatRate(snapshot.focusIoWritePerSec))
-            .arg(snapshot.focusNetRxPerSec < 0.0
-                     ? (m_osProcessNet ? QStringLiteral("--")
-                                       : unsupportedOsText())
-                     : QStringLiteral("%1 down / %2 up")
-                           .arg(formatNetRate(snapshot.focusNetRxPerSec),
-                                formatNetRate(snapshot.focusNetTxPerSec))));
+            .arg(!m_osProcessNet
+                     ? unsupportedOsText()
+                     : (snapshot.focusNetRxPerSec < 0.0
+                            ? QStringLiteral("--")
+                            : QStringLiteral("%1 down / %2 up")
+                                  .arg(formatNetRate(
+                                           snapshot.focusNetRxPerSec),
+                                       formatNetRate(
+                                           snapshot.focusNetTxPerSec)))));
 
     QString files;
     int fileCount = 0;
