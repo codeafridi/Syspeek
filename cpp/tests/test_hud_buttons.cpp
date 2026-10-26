@@ -1,5 +1,6 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
+#include "platform/PlatformFactory.h"
 
 #include <QApplication>
 #include <QFile>
@@ -269,9 +270,13 @@ int main(int argc, char *argv[]) {
     check(focusDetail != nullptr
               && focusDetail->text().contains(QStringLiteral("ctx sw")),
           "panel shows focused process detail");
+    const bool perProcNet = systemBackend().capabilities().perProcessNet;
     check(focusDetail != nullptr
-              && focusDetail->text().contains(
-                  QStringLiteral("net tcp  2 KB/s down / 512 B/s up")),
+              && (perProcNet
+                      ? focusDetail->text().contains(
+                            QStringLiteral("net tcp  2 KB/s down / 512 B/s up"))
+                      : focusDetail->text().contains(
+                            QStringLiteral("net tcp  not supported on this OS"))),
           "panel focus detail carries the app tcp rate");
     auto *openFiles = hud.findChild<QLabel *>(QStringLiteral("ddOpenFiles"));
     check(openFiles != nullptr
@@ -297,21 +302,38 @@ int main(int argc, char *argv[]) {
           "panel shows interfaces");
 
     auto *netNote = hud.findChild<QLabel *>(QStringLiteral("ddProcNetNote"));
-    check(netNote != nullptr
-              && netNote->text().contains(QStringLiteral("11 tracked"))
-              && netNote->text().contains(QStringLiteral("35 other users")),
-          "panel states tcp attribution honesty");
     auto *talkers = hud.findChild<QLabel *>(QStringLiteral("ddTalkers"));
-    check(talkers != nullptr
-              && talkers->text().contains(QStringLiteral("alpha"))
-              && talkers->text().contains(QStringLiteral("rx 2 KB/s"))
-              && talkers->text().contains(QStringLiteral(":8080")),
-          "panel lists top talkers with their ports");
     auto *talkerSummary =
         hud.findChild<QLabel *>(QStringLiteral("ddTalkerSummary"));
-    check(talkerSummary != nullptr
-              && talkerSummary->text().contains(QStringLiteral("tcp sockets")),
-          "panel talker card carries the socket summary");
+    if (perProcNet) {
+        check(netNote != nullptr
+                  && netNote->text().contains(QStringLiteral("11 tracked"))
+                  && netNote->text().contains(
+                      QStringLiteral("35 other users")),
+              "panel states tcp attribution honesty");
+        check(talkers != nullptr
+                  && talkers->text().contains(QStringLiteral("alpha"))
+                  && talkers->text().contains(QStringLiteral("rx 2 KB/s"))
+                  && talkers->text().contains(QStringLiteral(":8080")),
+              "panel lists top talkers with their ports");
+        check(talkerSummary != nullptr
+                  && talkerSummary->text().contains(
+                      QStringLiteral("tcp sockets")),
+              "panel talker card carries the socket summary");
+    } else {
+        check(netNote != nullptr
+                  && netNote->text().contains(
+                      QStringLiteral("not supported on this OS")),
+              "panel gates the net columns on this OS");
+        check(talkers != nullptr
+                  && talkers->text().contains(
+                      QStringLiteral("not supported on this OS")),
+              "panel talker card is gated instead of empty");
+        check(talkerSummary != nullptr
+                  && talkerSummary->text().contains(
+                      QStringLiteral("not supported on this OS")),
+              "panel talker summary is gated instead of empty");
+    }
 
     auto *dashDeps = hud.findChild<QLabel *>(QStringLiteral("ddDeps"));
     check(dashDeps != nullptr

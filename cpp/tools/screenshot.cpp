@@ -286,6 +286,11 @@ DisplaySnapshot demoSnapshot(int tick) {
     return s;
 }
 
+void tracePhase(const char *what) {
+    std::fprintf(stderr, "[shot] %s\n", what);
+    std::fflush(stderr);
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -308,6 +313,7 @@ int main(int argc, char *argv[]) {
     }
 
     DashboardPanel panel;
+    tracePhase("panel constructed");
     auto driveHistory = [&app, &panel]() {        // Synthetic alert lifecycle: quiet -> warning -> +critical ->
         // resolve -> clear -> refire, so tiles/chart/timeline all move.
         const qint64 baseMs = QDateTime::currentMSecsSinceEpoch()
@@ -342,6 +348,10 @@ int main(int argc, char *argv[]) {
         // 240 synthetic ticks: fills the chart rings so the panels show
         // plausible series instead of two-point stubs.
         for (int i = 0; i < 240; ++i) {
+            if (i % 20 == 0) {
+                std::fprintf(stderr, "[shot] history tick %d\n", i);
+                std::fflush(stderr);
+            }
             panel.setSnapshot(demoSnapshot(i));
             panel.setAlerts(alertsFor(i));
             app.processEvents();
@@ -881,8 +891,11 @@ int main(int argc, char *argv[]) {
     }
     const QString out = argc > 1 ? QString::fromUtf8(argv[1])
                                  : QStringLiteral("panel.png");
+    tracePhase("drive history");
     driveHistory();
+    tracePhase("drive statsd");
     driveStatsd();
+    tracePhase("grab");
     QScrollArea *grabScroll = nullptr;
     if (argc > 4
         && QString::fromUtf8(argv[4]) == QStringLiteral("full")) {
