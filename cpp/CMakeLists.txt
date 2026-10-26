@@ -185,6 +185,8 @@ add_library(syspeek_core STATIC
     src/ProcessDiskStatus.h
     src/GpuStatus.cpp
     src/GpuStatus.h
+    src/HistoryLog.cpp
+    src/HistoryLog.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
     src/KubeStatus.cpp

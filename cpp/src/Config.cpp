@@ -350,6 +350,21 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("history"));
+    {
+        bool ok = false;
+        const bool enabled =
+            settings.value(QStringLiteral("enabled"), true).toBool();
+        config.history.enabled = enabled;
+        ok = false;
+        const int samples =
+            settings.value(QStringLiteral("samples")).toString().toInt(&ok);
+        if (ok) {
+            config.history.samples = clampInt(samples, 60, 100000);
+        }
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("metrics"));
     {
         if (settings.contains(QStringLiteral("enabled"))) {

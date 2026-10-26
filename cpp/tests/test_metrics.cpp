@@ -30,6 +30,7 @@
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
 #include "GpuStatus.h"
+#include "HistoryLog.h"
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "platform/mac/MacFimStream.h"
@@ -2751,6 +2752,187 @@ int main(int argc, char *argv[]) {
               "gpu: prometheus omits gpu lines when no reading exists");
     }
 
+
+    {
+        HistoryRecord record;
+        record.atMs = 1793000000123LL;
+        record.appName = QStringLiteral("firefox");
+        record.pid = 4242;
+        record.appCpuPercent = 12.5;
+        record.appRssKb = 524288;
+        record.hostCpuPercent = 33.25;
+        record.hostStealPercent = 0.5;
+        record.hostMemAvailableKb = 5242880;
+        record.hostMemTotalKb = 8064000;
+        record.load1 = 1.75;
+        record.diskReadKbPerSec = 128.0;
+        record.diskWriteKbPerSec = 512.0;
+        record.diskUtilPercent = 7.0;
+        record.netRxKbPerSec = 64.0;
+        record.netTxKbPerSec = 16.0;
+        record.tcpInSegsPerSec = 120.0;
+        record.tcpOutSegsPerSec = 90.0;
+        record.tcpRetransPerSec = 1.0;
+        record.tcpRetransPercent = 0.42;
+        record.tcpCurrEstab = 17;
+
+        const QByteArray raw = encodeHistoryRecord(record);
+        check(raw.size() == kHistoryRecordBytes,
+              "history: one record is exactly the fixed width");
+        HistoryRecord decoded;
+        check(decodeHistoryRecord(raw, decoded) && decoded.atMs == record.atMs
+                  && decoded.appName == QStringLiteral("firefox")
+                  && decoded.pid == 4242
+                  && qAbs(decoded.appCpuPercent - 12.5) < 0.01
+                  && qAbs(decoded.hostCpuPercent - 33.25) < 0.01
+                  && decoded.hostMemAvailableKb == 5242880
+                  && qAbs(decoded.load1 - 1.75) < 0.01
+                  && qAbs(decoded.tcpRetransPercent - 0.42) < 0.01,
+              "history: record encode/decode round-trips every column");
+
+        HistoryRecord missing;
+        HistoryRecord blank;
+        check(!decodeHistoryRecord(QByteArray(8, '\0'), missing)
+                  && !decodeHistoryRecord(encodeHistoryRecord(blank), missing),
+              "history: an unset timestamp is rejected, never read as a sample");
+
+        HistoryRecord longName;
+        longName.atMs = 5;
+        longName.appName = QStringLiteral("a-very-long-process-name-over-23");
+        HistoryRecord truncated;
+        decodeHistoryRecord(encodeHistoryRecord(longName), truncated);
+        check(truncated.appName.size() == 23,
+              "history: long app names truncate to the fixed field");
+
+        HistoryRecord sentinel;
+        sentinel.atMs = 9;
+        HistoryRecord sentinelBack;
+        decodeHistoryRecord(encodeHistoryRecord(sentinel), sentinelBack);
+        check(sentinelBack.appCpuPercent == -1.0 && sentinelBack.pid == -1
+                  && sentinelBack.tcpCurrEstab == -1 && sentinelBack.appName.isEmpty(),
+              "history: missing values keep the -1 sentinel");
+
+        ExportRow row;
+        row.atMs = 1793000000456LL;
+        row.appName = QStringLiteral("node");
+        row.pid = QStringLiteral("777");
+        row.appCpuPercent = 4.5;
+        row.hostMemAvailableKb = 1024;
+        row.tcpCurrEstab = 3;
+        const HistoryRecord viaRow = historyRecordFrom(row);
+        const ExportRow back = exportRowFromHistory(viaRow);
+        check(viaRow.pid == 777 && back.pid == QStringLiteral("777")
+                  && back.appName == QStringLiteral("node")
+                  && qAbs(back.appCpuPercent - 4.5) < 0.01
+                  && back.tcpCurrEstab == 3,
+              "history: export rows and ring records share one vocabulary");
+
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("ring.bin"));
+        HistoryLog log;
+        check(log.open(path, 4), "history: ring opens and creates its file");
+        check(log.fileBytes() == 64 + qint64(4) * kHistoryRecordBytes,
+              "history: the byte budget is header + capacity * record");
+        int appended = 0;
+        for (int i = 0; i < 6; ++i) {
+            HistoryRecord sample = record;
+            sample.atMs = 1000 + i * 1000;
+            sample.hostCpuPercent = 10.0 + i;
+            sample.appName = QStringLiteral("s%1").arg(i);
+            if (log.append(sample)) {
+                ++appended;
+            }
+        }
+        check(appended == 6 && log.count() == 4 && log.totalWritten() == 6,
+              "history: a full ring wraps in place and keeps its total");
+        HistoryRecord oldest;
+        HistoryRecord newest;
+        check(log.oldest(oldest) && log.newest(newest)
+                  && oldest.atMs == 3000 && newest.atMs == 6000,
+              "history: after the wrap the oldest sample is the 3rd append");
+        check(log.spanMs() == 3000,
+              "history: span covers the stored window only");
+
+        HistoryRecord at;
+        check(log.readAt(0, at) && at.atMs == 3000
+                  && log.readAt(3, at) && at.atMs == 6000
+                  && !log.readAt(-1, at) && !log.readAt(4, at),
+              "history: random access is index based and bounded");
+
+        QList<HistoryRecord> last;
+        check(log.readLast(2, last) && last.size() == 2
+                  && last.at(0).atMs == 5000 && last.at(1).atMs == 6000,
+              "history: readLast returns the newest samples in order");
+        QList<HistoryRecord> range;
+        check(log.readRange(1, 2, range) && range.size() == 2
+                  && range.at(0).atMs == 4000,
+              "history: readRange starts at the requested index");
+
+        log.close();
+        HistoryLog resumed;
+        HistoryRecord resumedOldest;
+        check(resumed.open(path, 4) && resumed.count() == 4
+                  && resumed.totalWritten() == 6
+                  && resumed.oldest(resumedOldest)
+                  && resumedOldest.atMs == 3000,
+              "history: reopening a ring resumes the stored window in order");
+
+        HistoryLog resized;
+        check(resized.open(path, 8) && resized.count() == 0,
+              "history: a capacity change re-creates the file instead of "
+              "misreading it");
+        resized.close();
+
+        const QString junkPath = dir.filePath(QStringLiteral("junk.bin"));
+        {
+            QFile junk(junkPath);
+            junk.open(QIODevice::WriteOnly);
+            junk.write(QByteArray(256, 'x'));
+        }
+        HistoryLog junkLog;
+        check(junkLog.open(junkPath, 4) && junkLog.count() == 0,
+              "history: a corrupt file is reset, never decoded blind");
+        junkLog.close();
+
+        HistoryLog unusable;
+        check(!unusable.open(QString(), 4) && !unusable.open(path, 0)
+                  && !unusable.isOpen(),
+              "history: an empty path or zero capacity stays closed");
+
+        check(historyDefaultPath().endsWith(QStringLiteral("history.ring")),
+              "history: default ring lives in the cache directory");
+        check(historySummaryText(0, 0, 0, 0, 1000)
+                  == QStringLiteral("history: disabled")
+                  && historySummaryText(0, 3600, 0, 0, 1000)
+                         .contains(QStringLiteral("no samples stored yet"))
+                  && historySummaryText(1800, 3600, 1800000, 200000, 1000)
+                         .contains(QStringLiteral("1800/3600 samples (50%)"))
+                  && historySummaryText(1800, 3600, 1800000, 200000, 1000)
+                         .contains(QStringLiteral("span 30 min")),
+              "history: summary states capacity, fill, span and disk use");
+
+        HistoryRecord pos = record;
+        pos.atMs = QDateTime(QDate(2026, 10, 26), QTime(12, 42, 43))
+                       .toMSecsSinceEpoch();
+        check(historyPositionText(1799, 1800, pos, true)
+                  .contains(QStringLiteral("1800/1800"))
+                  && historyPositionText(1799, 1800, pos, true)
+                         .contains(QStringLiteral("LIVE"))
+                  && historyPositionText(10, 1800, pos, false)
+                         .contains(QStringLiteral("rewound")),
+              "history: position text separates live from rewound");
+
+        const QString detail = historyRecordText(pos);
+        check(detail.contains(QStringLiteral("firefox"))
+                  && detail.contains(QStringLiteral("0.42%"))
+                  && detail.contains(QStringLiteral("estab 17"))
+                  && !detail.contains(QStringLiteral("%1")),
+              "history: record text renders the columns without placeholders");
+        HistoryRecord emptyRecord;
+        emptyRecord.atMs = 1;
+        check(historyRecordText(emptyRecord).contains(QStringLiteral("--")),
+              "history: an empty sample renders dashes, never zeros");
+    }
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

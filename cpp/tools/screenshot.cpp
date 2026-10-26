@@ -1,5 +1,6 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
+#include "HistoryLog.h"
 
 #include <QApplication>
 #include <QListWidget>
@@ -927,12 +928,66 @@ int main(int argc, char *argv[]) {
     settingsInfo.exportLine =
         QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
                        "syspeek-history-20261026-174210.csv");
+    settingsInfo.historyLine =
+        QStringLiteral("3600 samples max - ~/.cache/dev.syspeek/syspeek/"
+                       "history.ring");
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;
     settingsInfo.rssWarnGb = 1.0;
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
+
+    auto driveHistoryLog = [&app, &panel]() {
+        // Local history ring (M74): a full hour of 1 s samples with a
+        // rewound selection so the tiles, card, scrubber, detail line and
+        // stored-window charts all render from real records.
+        const qint64 baseMs = QDateTime::currentMSecsSinceEpoch() - 900 * 1000;
+        HistoryViewInfo info;
+        info.enabled = true;
+        info.path = QStringLiteral("/home/dev/.cache/dev.syspeek/syspeek/"
+                                   "history.ring");
+        info.count = 900;
+        info.capacity = 3600;
+        info.bytes = 97264;
+        info.intervalMs = 1000;
+        info.spanMs = 899000;
+        for (int i = 0; i < 240; ++i) {
+            const double wave = std::sin(double(i) / 9.0);
+            ExportRow row;
+            row.atMs = baseMs + i * 1000;
+            row.appName = QStringLiteral("cursor");
+            row.pid = QStringLiteral("508637");
+            row.appCpuPercent = 22.0 + wave * 9.0;
+            row.appRssKb = 4194304;
+            row.hostCpuPercent = 28.0 + wave * 12.0;
+            row.hostStealPercent = 0.4;
+            row.hostMemAvailableKb = 5242880 - qint64(wave * 262144.0);
+            row.hostMemTotalKb = 16659456;
+            row.load1 = 1.8 + wave * 0.6;
+            row.diskReadKbPerSec = 380.0 + wave * 120.0;
+            row.diskWriteKbPerSec = 940.0 - wave * 300.0;
+            row.diskUtilPercent = 12.0 + wave * 4.0;
+            row.netRxKbPerSec = 240.0 + wave * 90.0;
+            row.netTxKbPerSec = 64.0;
+            row.tcpInSegsPerSec = 420.0;
+            row.tcpOutSegsPerSec = 380.0;
+            row.tcpRetransPerSec = 1.4;
+            row.tcpRetransPercent = 0.31;
+            row.tcpCurrEstab = 34;
+            info.window.append(row);
+        }
+        info.newestMs = info.window.last().atMs;
+        panel.setHistoryView(info);
+
+        HistoryRecord selected = historyRecordFrom(info.window.at(180));
+        selected.appName = QStringLiteral("cursor");
+        selected.pid = 508637;
+        panel.setHistorySelection(
+            historyPositionText(660, info.count, selected, false),
+            historyRecordText(selected));
+        app.processEvents();
+    };
 
     panel.resize(1020, 1040);
     panel.show();
@@ -952,6 +1007,8 @@ int main(int argc, char *argv[]) {
     driveHistory();
     tracePhase("drive statsd");
     driveStatsd();
+    tracePhase("drive history log");
+    driveHistoryLog();
     tracePhase("grab");
     QScrollArea *grabScroll = nullptr;
     if (argc > 4

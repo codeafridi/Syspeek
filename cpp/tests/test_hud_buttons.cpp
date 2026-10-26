@@ -1,5 +1,6 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
+#include "HistoryLog.h"
 #include "platform/PlatformFactory.h"
 
 #include <QApplication>
@@ -9,6 +10,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QSlider>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTreeWidget>
@@ -398,6 +400,148 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    {
+        auto *railForHistory =
+            hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
+        check(railForHistory != nullptr
+                  && railForHistory->count() > 26
+                  && railForHistory->item(26)->text()
+                         == QStringLiteral("History")
+                  && railForHistory->item(27)->text()
+                         == QStringLiteral("Cost"),
+              "rail inserts the History page before Cost");
+
+        auto *histSamples =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistTileSamples"));
+        auto *histSpan =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistTileSpan"));
+        auto *histDisk =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistTileDisk"));
+        auto *histInterval =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistTileInterval"));
+        auto *histSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistSummary"));
+        auto *histPos = hud.findChild<QLabel *>(QStringLiteral("ddHistPos"));
+        auto *histDetail =
+            hud.findChild<QLabel *>(QStringLiteral("ddHistDetail"));
+        auto detailText = [&hud]() {
+            QString joined;
+            for (QLabel *label : hud.findChildren<QLabel *>()) {
+                if (label->objectName().startsWith(
+                        QStringLiteral("ddHistDetail"))) {
+                    joined += label->text() + QLatin1Char(' ');
+                }
+            }
+            return joined;
+        };
+        auto *histSlider =
+            hud.findChild<QSlider *>(QStringLiteral("ddHistSlider"));
+        check(histSamples != nullptr && histSpan != nullptr
+                  && histDisk != nullptr && histInterval != nullptr
+                  && histSummary != nullptr && histPos != nullptr
+                  && histDetail != nullptr && histSlider != nullptr,
+              "panel builds the history tiles, card and rewind scrubber");
+
+        QList<int> seeks;
+        QObject::connect(panel, &DashboardPanel::historySeekRequested,
+                         [&seeks](int index) { seeks.append(index); });
+
+        HistoryViewInfo view;
+        view.enabled = true;
+        view.path = QStringLiteral("/tmp/history.ring");
+        view.count = 900;
+        view.capacity = 3600;
+        view.bytes = 97264;
+        view.spanMs = 900000;
+        view.intervalMs = 1000;
+        view.newestMs = 1793000900000LL;
+        for (int i = 0; i < 4; ++i) {
+            ExportRow row;
+            row.atMs = 1793009000000LL + i * 1000;
+            row.hostCpuPercent = 20.0 + i;
+            row.hostMemAvailableKb = 4194304;
+            view.window.append(row);
+        }
+        panel->setHistoryView(view);
+        check(histSamples->text().contains(QStringLiteral("900"))
+                  && histSamples->text().contains(QStringLiteral("/3600"))
+                  && histSpan->text() == QStringLiteral("15 min")
+                  && histInterval->text() == QStringLiteral("1 s"),
+              "panel history tiles state samples, span and interval");
+        check(!histDisk->text().isEmpty() && histDisk->text() != QStringLiteral("--"),
+              "panel history tile states the on-disk footprint");
+        check(histSummary->text().contains(QStringLiteral("900/3600 samples (25%)"))
+                  && histSummary->text().contains(QStringLiteral("15 min"))
+                  && histSummary->text().contains(QStringLiteral("history.ring")) == false,
+              "panel history card summarizes the stored ring");
+        check(histSlider->maximum() == 899 && histSlider->value() == 899
+                  && histSlider->isEnabled(),
+              "panel scrubber spans the stored window and rests on the newest");
+
+        histSlider->setValue(10);
+        check(!seeks.isEmpty() && seeks.last() == 10,
+              "panel scrubber asks the owner for a rewound sample");
+
+        HistoryViewInfo disabledView;
+        panel->setHistoryView(disabledView);
+        check(histSummary->text().contains(QStringLiteral("history: disabled"))
+                  && histSamples->text() == QStringLiteral("--")
+                  && !histSlider->isEnabled(),
+              "panel states a disabled history honestly");
+
+        panel->setHistoryView(view);
+        panel->setHistorySelection(
+            historyPositionText(10, 900, HistoryRecord{}, false),
+            historyRecordText(HistoryRecord{}));
+        check(histPos->text().contains(QStringLiteral("11/900"))
+                  && detailText().contains(QStringLiteral("--")),
+              "panel renders the selected sample position and detail");
+
+        HistoryRecord selected;
+        selected.atMs = 1793009010000LL;
+        selected.appName = QStringLiteral("firefox");
+        selected.pid = 4242;
+        selected.hostCpuPercent = 41.5;
+        selected.hostMemAvailableKb = 4194304;
+        selected.tcpCurrEstab = 12;
+        panel->setHistorySelection(
+            historyPositionText(10, 900, selected, false),
+            historyRecordText(selected));
+        check(histPos->text().contains(QStringLiteral("rewound"))
+                  && detailText().contains(QStringLiteral("firefox"))
+                  && detailText().contains(QStringLiteral("estab 12"))
+                  && !detailText().contains(QStringLiteral("%1")),
+              "panel renders a rewound sample without placeholders");
+
+        seeks.clear();
+        auto *firstButton =
+            hud.findChild<QPushButton *>(QStringLiteral("ddHistFirst"));
+        auto *prevButton =
+            hud.findChild<QPushButton *>(QStringLiteral("ddHistPrev"));
+        auto *nextButton =
+            hud.findChild<QPushButton *>(QStringLiteral("ddHistNext"));
+        auto *lastButton =
+            hud.findChild<QPushButton *>(QStringLiteral("ddHistLast"));
+        check(firstButton != nullptr && prevButton != nullptr
+                  && nextButton != nullptr && lastButton != nullptr,
+              "panel offers first/prev/next/latest rewind controls");
+        histSlider->setValue(400);
+        seeks.clear();
+        nextButton->click();
+        check(!seeks.isEmpty() && seeks.last() == 401
+                  && histSlider->value() == 401,
+              "next step walks one stored sample forward");
+        prevButton->click();
+        check(!seeks.isEmpty() && seeks.last() == 400,
+              "prev step walks one stored sample back");
+        firstButton->click();
+        check(!seeks.isEmpty() && seeks.last() == 0,
+              "first jumps to the oldest stored sample");
+        lastButton->click();
+        check(!seeks.isEmpty() && seeks.last() == 899,
+              "latest jumps back to the live sample");
+    }
+
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));
     check(focusDetail != nullptr
               && focusDetail->text().contains(QStringLiteral("ctx sw")),
@@ -671,7 +815,7 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 28;
+            constexpr int kRailCount = 29;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
             rail->setCurrentRow(settingsRow);

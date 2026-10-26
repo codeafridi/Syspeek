@@ -1,5 +1,7 @@
 #include "DumpReport.h"
 
+#include "HistoryLog.h"
+
 #include "ProcessDiskStatus.h"
 
 #include "DiskStatus.h"
@@ -8,6 +10,9 @@
 #include "HostInfoStatus.h"
 #include "platform/PlatformFactory.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -23,6 +28,14 @@
 #endif
 
 namespace {
+
+int dumpPid() {
+#if defined(Q_OS_WIN)
+    return static_cast<int>(::_getpid());
+#else
+    return static_cast<int>(::getpid());
+#endif
+}
 
 constexpr int kSampleIntervalMs = 200;
 
@@ -457,6 +470,67 @@ QString dumpReportJson(int maxProcs) {
         }
         gpu.insert(QStringLiteral("processes"), processes);
         root.insert(QStringLiteral("gpu"), gpu);
+    }
+
+    {
+        QJsonObject history;
+        const QString probePath =
+            QDir::tempPath()
+            + QStringLiteral("/syspeek-history-probe-%1.ring").arg(dumpPid());
+        HistoryLog log;
+        constexpr int kCap = 8;
+        const qint64 base = QDateTime::currentMSecsSinceEpoch();
+        bool appended = log.open(probePath, kCap);
+        history.insert(QStringLiteral("capacity"), kCap);
+        if (appended) {
+            for (int i = 0; i < 11; ++i) {
+                HistoryRecord record;
+                record.atMs = base + i * 1000;
+                record.appName = QStringLiteral("probe");
+                record.pid = 4242;
+                record.hostCpuPercent = 10.0 + i;
+                record.hostMemAvailableKb = 100000 + i;
+                record.load1 = 1.25;
+                if (!log.append(record)) {
+                    appended = false;
+                    break;
+                }
+            }
+        }
+        history.insert(QStringLiteral("ok"), appended && log.isOpen());
+        history.insert(QStringLiteral("count"), log.count());
+        history.insert(QStringLiteral("total"), double(log.totalWritten()));
+        history.insert(QStringLiteral("bytes"), double(log.fileBytes()));
+        history.insert(QStringLiteral("wrapped"), log.totalWritten() > kCap);
+        HistoryRecord oldest;
+        HistoryRecord newest;
+        if (log.oldest(oldest) && log.newest(newest)) {
+            history.insert(QStringLiteral("oldestAt"), double(oldest.atMs));
+            history.insert(QStringLiteral("newestAt"), double(newest.atMs));
+            history.insert(QStringLiteral("spanMs"), double(log.spanMs()));
+            history.insert(QStringLiteral("oldestCpu"), oldest.hostCpuPercent);
+            history.insert(QStringLiteral("newestCpu"), newest.hostCpuPercent);
+            history.insert(QStringLiteral("ordered"),
+                           oldest.atMs < newest.atMs);
+            history.insert(QStringLiteral("app"), oldest.appName);
+            history.insert(QStringLiteral("pid"), oldest.pid);
+        }
+        log.close();
+
+        HistoryLog reopened;
+        const bool resumed = reopened.open(probePath, kCap);
+        history.insert(QStringLiteral("reopened"), resumed);
+        history.insert(QStringLiteral("reopenedCount"), reopened.count());
+        HistoryRecord resumedOldest;
+        history.insert(QStringLiteral("resumedOrdered"),
+                       resumed && reopened.oldest(resumedOldest)
+                           && resumedOldest.atMs == oldest.atMs);
+        const bool differentCapacity = reopened.open(probePath, kCap + 4);
+        history.insert(QStringLiteral("capacityChangeResets"),
+                       differentCapacity && reopened.count() == 0);
+        reopened.close();
+        QFile::remove(probePath);
+        root.insert(QStringLiteral("history"), history);
     }
 
     QJsonObject services;

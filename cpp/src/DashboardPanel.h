@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DisplaySnapshot.h"
+#include "MetricsExport.h"
 #include "DockerStatus.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
@@ -26,6 +27,7 @@ class QLabel;
 class QListWidget;
 class QStackedWidget;
 class QTreeWidget;
+class QSlider;
 class QPushButton;
 class QDoubleSpinBox;
 class QSpinBox;
@@ -35,6 +37,21 @@ class TimeseriesChart;
 // Data for the Settings view - static shell facts the sampler does not
 // own (version, paths, thresholds from the loaded config, autostart
 // across installers). Filled by main.cpp after startup succeeds.
+// Local history ring summary (M74): the panel renders the storage facts and
+// the stored window; rewinding to a specific sample is answered by the owner
+// (HudWindow) through setHistorySelection, so the panel never touches files.
+struct HistoryViewInfo {
+    bool enabled = false;
+    QString path;
+    int count = 0;
+    int capacity = 0;
+    qint64 bytes = 0;
+    qint64 spanMs = 0;
+    qint64 intervalMs = 1000;
+    qint64 newestMs = 0;
+    QList<ExportRow> window;
+};
+
 struct SettingsInfo {
     QString version;
     QString configPath;
@@ -45,6 +62,7 @@ struct SettingsInfo {
     QString metricsLine;
     QString webhookLine;
     QString exportLine;
+    QString historyLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -75,6 +93,8 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+    void setHistoryView(const HistoryViewInfo &view);
+    void setHistorySelection(const QString &position, const QString &detail);
 
     void setWebhookLine(const QString &line);
 
@@ -89,6 +109,7 @@ signals:
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
     void historyExportRequested(const QString &format);
+    void historySeekRequested(int index);
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
@@ -110,6 +131,7 @@ private:
     QWidget *buildSyntheticView();
     QWidget *buildInstrumentationView();
     QWidget *buildDatabasesView();
+    QWidget *buildHistoryView();
     QWidget *buildCostView();
     QWidget *buildDisksView();
     QWidget *buildGpuView();
@@ -366,6 +388,25 @@ private:
     QLabel *m_diskTilePsi = nullptr;
     TimeseriesChart *m_chartIoRw = nullptr;
     TimeseriesChart *m_chartIoUtil = nullptr;
+
+    // History page (M74): bounded on-disk ring + rewind scrubber.
+    QLabel *m_histTileSamples = nullptr;
+    QLabel *m_histTileSpan = nullptr;
+    QLabel *m_histTileDisk = nullptr;
+    QLabel *m_histTileInterval = nullptr;
+    QLabel *m_histSummary = nullptr;
+    QLabel *m_histPos = nullptr;
+    QLabel *m_histDetail = nullptr;
+    QList<QLabel *> m_histDetailLines;
+    QSlider *m_histSlider = nullptr;
+    QPushButton *m_histFirst = nullptr;
+    QPushButton *m_histPrev = nullptr;
+    QPushButton *m_histNext = nullptr;
+    QPushButton *m_histLast = nullptr;
+    TimeseriesChart *m_chartHistCpu = nullptr;
+    TimeseriesChart *m_chartHistMem = nullptr;
+    HistoryViewInfo m_historyView;
+    qint64 m_histWindowNewest = 0;
 
     // GPU page (M73): device utilization/memory/sensors + gpu processes.
     QLabel *m_gpuTileUtil = nullptr;

@@ -29,6 +29,10 @@ public:
 
     void push(double value);
     void pushB(double value);
+    // Replaces the whole series in one shot (history rewind: the stored
+    // window is rendered as-is instead of being appended tick by tick).
+    void setValues(const QList<double> &valuesA,
+                   const QList<double> &valuesB = QList<double>());
 
     // Center big-number overlay (Grafana style, img2 "Containers Running").
     void setOverlayOn(bool on);

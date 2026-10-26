@@ -16,6 +16,7 @@
 #include "DbmSource.h"
 #include "MetricsServer.h"
 #include "DumpReport.h"
+#include "HistoryLog.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
 #include "ExportRun.h"
@@ -516,6 +517,12 @@ int main(int argc, char *argv[]) {
                       .arg(config.metrics.port)
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
+        settingsInfo.historyLine =
+            config.history.enabled
+                ? QStringLiteral("%1 samples max - %2")
+                      .arg(config.history.samples)
+                      .arg(historyDefaultPath())
+                : QStringLiteral("disabled ([history] enabled=false)");
         settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
         settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
         settingsInfo.cpuHighPercent = config.health.cpuHighPercent;
@@ -527,6 +534,8 @@ int main(int argc, char *argv[]) {
                             : config.alertRules);
         hud.setWebhookConfig(config.webhook);
         hud.setExportIntervalMs(config.sampleIntervalMs);
+        hud.setHistoryStore(historyDefaultPath(),
+                            config.history.enabled ? config.history.samples : 0);
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);

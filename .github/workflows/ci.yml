@@ -138,6 +138,20 @@ jobs:
                                len(gpu.get("processes", []))))
                   else:
                       print("gpu not detectable here:", gpu.get("note"))
+              hist = d.get("history", {})
+              assert hist.get("ok") is True, hist
+              assert hist["count"] == 8 and hist["total"] == 11, hist
+              assert hist["wrapped"] is True, hist
+              assert hist["bytes"] == 64 + 8 * 108, hist
+              assert hist["ordered"] is True, hist
+              assert hist["capacityChangeResets"] is True, hist
+              assert hist["reopened"] is True and hist["reopenedCount"] == 8, hist
+              assert hist["resumedOrdered"] is True, hist
+              assert hist["oldestCpu"] == 13 and hist["newestCpu"] == 20, hist
+              assert hist["spanMs"] == 7000, hist
+              print("history ok: %d/%d samples, total %d, %d bytes, span %d ms"
+                    % (hist["count"], hist["capacity"], hist["total"],
+                       hist["bytes"], hist["spanMs"]))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
@@ -296,6 +310,16 @@ jobs:
                     % (len(gpu["devices"]), len(gpu.get("processes", []))))
           else:
               print("gpu not exposed here:", gpu.get("note"))
+          hist = d.get("history", {})
+          assert hist.get("ok") is True, hist
+          assert hist["count"] == 8 and hist["total"] == 11, hist
+          assert hist["wrapped"] is True and hist["ordered"] is True, hist
+          assert hist["bytes"] == 64 + 8 * 108, hist
+          assert hist["reopened"] is True and hist["resumedOrdered"] is True, hist
+          assert hist["capacityChangeResets"] is True, hist
+          print("history ok: %d/%d samples, total %d, %d bytes"
+                % (hist["count"], hist["capacity"], hist["total"],
+                   hist["bytes"]))
           depth = d.get("selfDepth", {})
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth
@@ -428,14 +452,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 27); do
+          for i in $(seq 0 28); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 28, files
+          assert len(files) == 29, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",

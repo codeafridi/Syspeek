@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
+#include "HistoryLog.h"
 #include "LogParser.h"
 #include "MemoryFormat.h"
 #include "ProcessNetStatus.h"
@@ -26,6 +27,7 @@
 #include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QSlider>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -332,7 +334,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Instrumentation"),
                       QStringLiteral("Traces"), QStringLiteral("Profiles"),
                       QStringLiteral("Databases"), QStringLiteral("Security"),
-                      QStringLiteral("Cost"), QStringLiteral("Settings")});
+                      QStringLiteral("History"), QStringLiteral("Cost"),
+                      QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
 
     m_views = new QStackedWidget(body);
@@ -362,7 +365,9 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildTracesView());
     m_views->addWidget(buildProfilesView());
     m_views->addWidget(buildDatabasesView());
-    m_views->addWidget(buildSecurityView());    m_views->addWidget(buildCostView());
+    m_views->addWidget(buildSecurityView());
+    m_views->addWidget(buildHistoryView());
+    m_views->addWidget(buildCostView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
@@ -434,7 +439,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
-        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote { color: %MUTED%; }"
+        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,\n        #ddHistDetail { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
@@ -470,6 +475,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
         "#ddGpuTileUtil, #ddGpuTileMem, #ddGpuTileTemp, #ddGpuTileProcs,"
+        " #ddHistTileSamples, #ddHistTileSpan, #ddHistTileDisk,"
+        " #ddHistTileInterval,"
         " #ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
         " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
         " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx,"
@@ -506,6 +513,20 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "  border: 1px solid %BORDER%; border-radius: 2px;"
         "  padding: 2px 10px; font-size: 9px; }"
         "#ddCopy:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddHistFirst, #ddHistPrev, #ddHistNext, #ddHistLast {"
+        "  color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  padding: 3px 12px; font-size: 9px; }"
+        "#ddHistFirst:hover, #ddHistPrev:hover, #ddHistNext:hover,"
+        " #ddHistLast:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddHistFirst:disabled, #ddHistPrev:disabled, #ddHistNext:disabled,"
+        " #ddHistLast:disabled { color: %MUTED%; }"
+        "#ddHistSlider::groove:horizontal { background-color: %BORDER%;"
+        "  height: 4px; border-radius: 2px; }"
+        "#ddHistSlider::handle:horizontal { background-color: %ACCENT%;"
+        "  width: 10px; margin: -4px 0; border-radius: 2px; }"
+        "#ddHistSlider::sub-page:horizontal { background-color: %ACCENT%;"
+        "  height: 4px; border-radius: 2px; }"
         "QTreeWidget { background-color: transparent; border: none;"
         "  color: %DIM%; font-size: 11px; }"
         "QTreeWidget::item { padding: 2px 0px; }"
@@ -2871,6 +2892,10 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.exportLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.exportLine);
+    general += QStringLiteral("history&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.historyLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.historyLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);
@@ -2886,6 +2911,108 @@ void DashboardPanel::applySettingsInfo() {
                  ? QStringLiteral("start stop restart status uninstall")
                  : m_settings.verbsLine);
     m_settingsDiagnostics->setText(diagnostics);
+}
+
+void DashboardPanel::setHistoryView(const HistoryViewInfo &view) {
+    m_historyView = view;
+    if (m_histSummary == nullptr) {
+        return;
+    }
+    m_histSummary->setText(
+        view.enabled
+            ? historySummaryText(view.count, view.capacity, view.spanMs,
+                                 view.bytes, view.intervalMs)
+            : QStringLiteral("history: disabled ([history] enabled=false)"));
+    m_histTileSamples->setText(
+        view.enabled
+            ? QStringLiteral("%1<span style=\"font-size:15px;color:%2;\">"
+                             "/%3</span>")
+                  .arg(view.count)
+                  .arg(ui_theme::muted())
+                  .arg(view.capacity)
+            : QStringLiteral("--"));
+    const qint64 seconds = view.spanMs / 1000;
+    m_histTileSpan->setText(
+        !view.enabled || view.count <= 1
+            ? QStringLiteral("--")
+            : (seconds < 90
+                   ? QStringLiteral("%1 s").arg(seconds)
+                   : (seconds < 5400
+                          ? QStringLiteral("%1 min").arg(seconds / 60)
+                          : QStringLiteral("%1 h").arg(seconds / 3600))));
+    m_histTileDisk->setText(
+        view.enabled && view.bytes > 0
+            ? formatBytesCompact(quint64(view.bytes))
+            : QStringLiteral("--"));
+    m_histTileInterval->setText(
+        view.enabled && view.intervalMs > 0
+            ? QStringLiteral("%1 s").arg(view.intervalMs / 1000)
+            : QStringLiteral("--"));
+
+    if (m_histSlider != nullptr) {
+        const int last = qMax(0, view.count - 1);
+        const bool atEnd = m_histSlider->value() >= m_histSlider->maximum();
+        const QSignalBlocker blocker(m_histSlider);
+        m_histSlider->setRange(0, last);
+        m_histSlider->setValue(atEnd ? last
+                                     : qMin(m_histSlider->value(), last));
+        m_histSlider->setEnabled(view.enabled && view.count > 1);
+    }
+
+    const qint64 step = qMax<qint64>(1000, view.intervalMs);
+    const bool rebuild = m_histWindowNewest == 0
+        || view.newestMs < m_histWindowNewest
+        || view.newestMs - m_histWindowNewest >= step * 5
+        || view.count <= 1;
+    if (!rebuild) {
+        return;
+    }
+    m_histWindowNewest = view.newestMs;
+    QList<double> cpu;
+    QList<double> mem;
+    cpu.reserve(view.window.size());
+    mem.reserve(view.window.size());
+    for (const ExportRow &row : view.window) {
+        if (row.hostCpuPercent >= 0.0) {
+            cpu.append(row.hostCpuPercent);
+        }
+        if (row.hostMemAvailableKb >= 0) {
+            mem.append(double(row.hostMemAvailableKb) / (1024.0 * 1024.0));
+        }
+    }
+    if (m_chartHistCpu != nullptr) {
+        m_chartHistCpu->setValues(cpu);
+    }
+    if (m_chartHistMem != nullptr) {
+        m_chartHistMem->setValues(mem);
+    }
+}
+
+void DashboardPanel::setHistorySelection(const QString &position,
+                                         const QString &detail) {
+    if (m_histPos != nullptr) {
+        m_histPos->setText(position);
+    }
+    if (m_histDetail != nullptr) {
+        // One column group per line: the record text separates the app /
+        // host / disk / net / tcp groups with " | " for logs, which reads
+        // as a wall in a narrow card.
+        const QStringList groups = detail.split(QStringLiteral(" | "));
+        const QString joined = detail;
+        QStringList lines;
+        if (groups.size() >= 5) {
+            lines << groups.at(0) + QStringLiteral(" | ") + groups.at(1)
+                  << groups.at(2) + QStringLiteral(" | ") + groups.at(3)
+                  << groups.mid(4).join(QStringLiteral(" | "));
+        } else if (!joined.isEmpty()) {
+            lines << joined;
+        }
+        for (int i = 0; i < m_histDetailLines.size(); ++i) {
+            m_histDetailLines.at(i)->setText(
+                i < lines.size() ? lines.at(i) : QString());
+            m_histDetailLines.at(i)->setVisible(i < lines.size());
+        }
+    }
 }
 
 void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
@@ -2925,6 +3052,164 @@ void DashboardPanel::copySettingCommand() {
     if (!command.isEmpty()) {
         QApplication::clipboard()->setText(command);
     }
+}
+
+QWidget *DashboardPanel::buildHistoryView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_histTileSamples = new QLabel(QStringLiteral("--"), view);
+    m_histTileSamples->setObjectName(QStringLiteral("ddHistTileSamples"));
+    m_histTileSpan = new QLabel(QStringLiteral("--"), view);
+    m_histTileSpan->setObjectName(QStringLiteral("ddHistTileSpan"));
+    m_histTileDisk = new QLabel(QStringLiteral("--"), view);
+    m_histTileDisk->setObjectName(QStringLiteral("ddHistTileDisk"));
+    m_histTileInterval = new QLabel(QStringLiteral("--"), view);
+    m_histTileInterval->setObjectName(QStringLiteral("ddHistTileInterval"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("SAMPLES"), m_histTileSamples,
+                              nullptr, view), 1);
+    m_histTileSamples->setTextFormat(Qt::RichText);
+    tiles->addWidget(makeTile(QStringLiteral("SPAN"), m_histTileSpan,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ON DISK"), m_histTileDisk,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("INTERVAL"), m_histTileInterval,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_histSummary = new QLabel(QStringLiteral("--"), view);
+    m_histSummary->setObjectName(QStringLiteral("ddHistSummary"));
+    m_histSummary->setFont(monoFont(10));
+    m_histSummary->setMinimumWidth(1);
+    layout->addWidget(makeBanner(QStringLiteral("HISTORY"), ui_theme::accent(),
+                                 view));
+    layout->addWidget(makeCard(QStringLiteral("HISTORY"), m_histSummary, view));
+
+    m_histPos = new QLabel(QStringLiteral("--"), view);
+    m_histPos->setObjectName(QStringLiteral("ddHistPos"));
+    m_histPos->setFont(monoFont(12, true));
+    m_histPos->setMinimumWidth(1);
+    // The record text carries five column groups; one QLabel per screen
+    // line keeps every line at its natural single-line height instead of
+    // relying on a multi-line size hint the layout does not reserve.
+    m_histDetailLines.clear();
+    for (int i = 0; i < 3; ++i) {
+        auto *line = new QLabel(QStringLiteral("--"), view);
+        line->setObjectName(i == 0
+                                ? QStringLiteral("ddHistDetail")
+                                : QStringLiteral("ddHistDetail%1").arg(i + 1));
+        line->setFont(monoFont(9));
+        line->setMinimumWidth(1);
+        m_histDetailLines.append(line);
+        if (i == 0) {
+            m_histDetail = line;
+        }
+    }
+
+    m_histSlider = new QSlider(Qt::Horizontal, view);
+    m_histSlider->setObjectName(QStringLiteral("ddHistSlider"));
+    m_histSlider->setRange(0, 0);
+    m_histSlider->setSingleStep(1);
+    m_histSlider->setPageStep(10);
+    connect(m_histSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_historyView.enabled || m_historyView.count <= 0) {
+            return;
+        }
+        emit historySeekRequested(value);
+    });
+
+    m_histFirst = new QPushButton(QStringLiteral("|< FIRST"), view);
+    m_histFirst->setObjectName(QStringLiteral("ddHistFirst"));
+    m_histPrev = new QPushButton(QStringLiteral("< PREV"), view);
+    m_histPrev->setObjectName(QStringLiteral("ddHistPrev"));
+    m_histNext = new QPushButton(QStringLiteral("NEXT >"), view);
+    m_histNext->setObjectName(QStringLiteral("ddHistNext"));
+    m_histLast = new QPushButton(QStringLiteral("LATEST >|"), view);
+    m_histLast->setObjectName(QStringLiteral("ddHistLast"));
+    connect(m_histFirst, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(0);
+        }
+    });
+    connect(m_histPrev, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(qMax(0, m_histSlider->value() - 1));
+        }
+    });
+    connect(m_histNext, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(
+                qMin(m_histSlider->maximum(), m_histSlider->value() + 1));
+        }
+    });
+    connect(m_histLast, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(m_histSlider->maximum());
+        }
+    });
+
+    auto *controls = new QHBoxLayout();
+    controls->setSpacing(6);
+    controls->addWidget(m_histFirst);
+    controls->addWidget(m_histPrev);
+    controls->addWidget(m_histNext);
+    controls->addWidget(m_histLast);
+
+    auto *rewindBox = new QWidget(view);
+    auto *rewindLayout = new QVBoxLayout(rewindBox);
+    rewindLayout->setContentsMargins(0, 0, 0, 0);
+    rewindLayout->setSpacing(6);
+    rewindLayout->addWidget(m_histPos);
+    rewindLayout->addWidget(m_histSlider);
+    rewindLayout->addLayout(controls);
+    for (QLabel *line : m_histDetailLines) {
+        rewindLayout->addWidget(line);
+    }
+    layout->addWidget(makeBanner(QStringLiteral("REWIND"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("REWIND"), rewindBox, view));
+
+    m_chartHistCpu = new TimeseriesChart(view);
+    m_chartHistCpu->setUnit(QStringLiteral("Percent"));
+    m_chartHistCpu->setSeriesName(QStringLiteral("syspeek.history.cpu"));
+    m_chartHistMem = new TimeseriesChart(view);
+    m_chartHistMem->setUnit(QStringLiteral("GB"));
+    m_chartHistMem->setSeriesName(QStringLiteral("syspeek.history.mem"));
+    m_chartHistMem->setSeriesColors(QColor(60, 202, 170), QColor(127, 92, 255));
+
+    auto *charts = new QHBoxLayout();
+    charts->setSpacing(10);
+    charts->addWidget(makeChartCard(QStringLiteral("stored host cpu"),
+                                    m_chartHistCpu, view), 1);
+    charts->addWidget(makeChartCard(QStringLiteral("stored mem available"),
+                                    m_chartHistMem, view), 1);
+    layout->addWidget(makeBanner(QStringLiteral("STORED WINDOW"),
+                                 ui_theme::warn(), view));
+    layout->addLayout(charts);
+    layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
 }
 
 QWidget *DashboardPanel::buildCostView() {

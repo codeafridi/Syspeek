@@ -67,6 +67,11 @@ struct StatsdConfig {
     int emitIntervalMs = 1000;
 };
 
+struct HistoryConfig {
+    bool enabled = true;
+    int samples = 3600;
+};
+
 struct MetricsConfig {
     bool enabled = true;
     int port = 9107;
@@ -144,6 +149,7 @@ struct Config {
     PathConfig path;
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
+    HistoryConfig history;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;

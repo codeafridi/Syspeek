@@ -100,6 +100,20 @@ void TimeseriesChart::clear() {
     update();
 }
 
+void TimeseriesChart::setValues(const QList<double> &valuesA,
+                               const QList<double> &valuesB) {
+    m_valuesA = valuesA;
+    while (m_valuesA.size() > kMaxSamples) {
+        m_valuesA.removeFirst();
+    }
+    m_valuesB = valuesB;
+    while (m_valuesB.size() > kMaxSamples) {
+        m_valuesB.removeFirst();
+    }
+    m_lastPush = QDateTime::currentDateTime();
+    update();
+}
+
 void TimeseriesChart::push(double value) {
     if (m_paused) {
         return;

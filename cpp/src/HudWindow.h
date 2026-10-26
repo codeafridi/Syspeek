@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DisplaySnapshot.h"
+#include "HistoryLog.h"
 #include "DockerStatus.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
@@ -80,6 +81,7 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+    void setHistoryStore(const QString &path, int capacity);
 
     bool isExpanded() const { return m_detailsExpanded; }
 
@@ -120,6 +122,13 @@ private:
     QString m_kubeDetailsText;
     bool m_kubeOpen = false;
     DashboardPanel *m_panel = nullptr;
+    HistoryLog m_historyLog;
+    int m_historyCapacity = 0;
+    int m_historySeek = -1;
+    int m_historyTick = 0;
+    int m_historyWindowCount = -1;
+    qint64 m_historySpanMs = 0;
+    void publishHistory();
     QWidget *m_pages = nullptr;
     QWidget *m_compactPage = nullptr;
     QRect m_savedGeometry;
@@ -134,6 +143,7 @@ private:
     QList<ExportRow> m_exportRows;
     int m_exportIntervalMs = 1000;
     void exportHistory(const QString &format);
+    void seekHistory(int index);
     void evaluateAlerts();
     QPushButton *m_moreButton = nullptr;
     QPushButton *m_showHideButton = nullptr;

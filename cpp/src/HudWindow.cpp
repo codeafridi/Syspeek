@@ -249,6 +249,8 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::resetMonitors);
     connect(m_panel, &DashboardPanel::historyExportRequested, this,
             &HudWindow::exportHistory);
+    connect(m_panel, &DashboardPanel::historySeekRequested, this,
+            &HudWindow::seekHistory);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -291,6 +293,10 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
         exportRowFrom(snapshot, QDateTime::currentMSecsSinceEpoch()));
     while (m_exportRows.size() > 1800) {
         m_exportRows.removeFirst();
+    }
+    if (m_historyLog.isOpen()) {
+        m_historyLog.append(historyRecordFrom(m_exportRows.last()));
+        publishHistory();
     }
 
     if (m_appValue->text() != snapshot.appName) {
@@ -594,6 +600,91 @@ void HudWindow::setFimSnapshot(const FimSnapshot &snapshot) {
     if (m_panel != nullptr) {
         m_panel->setFimSnapshot(snapshot);
     }
+}
+
+void HudWindow::setHistoryStore(const QString &path, int capacity) {
+    m_historySeek = -1;
+    m_historyTick = 0;
+    m_historyWindowCount = -1;
+    m_historySpanMs = 0;
+    m_historyCapacity = capacity;
+    if (capacity <= 0) {
+        m_historyLog.close();
+        publishHistory();
+        return;
+    }
+    if (!m_historyLog.open(path, capacity)) {
+        qWarning() << "history: could not open the ring at" << path
+                   << "- rewinding stays unavailable";
+    }
+    publishHistory();
+}
+
+void HudWindow::publishHistory() {
+    if (m_panel == nullptr) {
+        return;
+    }
+    HistoryViewInfo info;
+    info.enabled = m_historyLog.isOpen();
+    info.path = m_historyLog.path();
+    info.count = m_historyLog.count();
+    info.capacity = m_historyLog.capacity();
+    info.bytes = m_historyLog.isOpen() ? m_historyLog.fileBytes() : 0;
+    info.intervalMs = m_historyLog.isOpen() ? m_historyLog.intervalMs() : 1000;
+    info.spanMs = m_historySpanMs;
+    // The stored window is read off disk on a slow cadence (every 5th tick
+    // or when the sample count jumps): one append per tick is the only
+    // steady disk traffic the history costs.
+    ++m_historyTick;
+    if (info.count > 0
+        && (m_historyWindowCount < 0 || m_historyTick % 5 == 0
+            || info.count != m_historyWindowCount)) {
+        QList<HistoryRecord> window;
+        m_historyLog.readLast(240, window);
+        for (const HistoryRecord &record : window) {
+            info.window.append(exportRowFromHistory(record));
+        }
+        m_historyWindowCount = info.count;
+        m_historySpanMs = m_historyLog.spanMs();
+        info.spanMs = m_historySpanMs;
+        if (!info.window.isEmpty()) {
+            info.newestMs = info.window.last().atMs;
+        }
+    }
+    m_panel->setHistoryView(info);
+    if (!info.enabled || info.count <= 0) {
+        m_panel->setHistorySelection(QStringLiteral("history: disabled"),
+                                     QStringLiteral("--"));
+        return;
+    }
+    const int last = info.count - 1;
+    if (m_historySeek < 0 || m_historySeek > last) {
+        m_historySeek = last;
+    }
+    if (m_historySeek == last) {
+        if (m_exportRows.isEmpty()) {
+            return;
+        }
+        const HistoryRecord newest = historyRecordFrom(m_exportRows.last());
+        m_panel->setHistorySelection(
+            historyPositionText(last, info.count, newest, true),
+            historyRecordText(newest));
+        return;
+    }
+    HistoryRecord record;
+    if (m_historyLog.readAt(m_historySeek, record)) {
+        m_panel->setHistorySelection(
+            historyPositionText(m_historySeek, info.count, record, false),
+            historyRecordText(record));
+    }
+}
+
+void HudWindow::seekHistory(int index) {
+    if (!m_historyLog.isOpen()) {
+        return;
+    }
+    m_historySeek = index;
+    publishHistory();
 }
 
 void HudWindow::setSettingsInfo(const SettingsInfo &info) {
