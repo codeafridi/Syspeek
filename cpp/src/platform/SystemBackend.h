@@ -23,6 +23,8 @@ struct PlatformCapabilities {
     bool psi = false;
     bool namespaces = false;
     bool perProcessNet = false;
+    bool perProcessDisk = false;
+    bool perProcessDiskScan = false;
 };
 
 class SystemBackend {
@@ -138,6 +140,16 @@ public:
     virtual int countFds(int pid) {
         Q_UNUSED(pid);
         return -1;
+    }
+    // Cumulative block-i/o bytes of one process. readBytes is device traffic
+    // (Linux /proc/<pid>/io read_bytes); writeBytes already has
+    // cancelled_write_bytes subtracted where the platform reports it.
+    virtual bool processDiskCounters(int pid, long long &readBytes,
+                                     long long &writeBytes) {
+        Q_UNUSED(pid);
+        Q_UNUSED(readBytes);
+        Q_UNUSED(writeBytes);
+        return false;
     }
     virtual QList<QString> fdTargets(int pid) {
         Q_UNUSED(pid);

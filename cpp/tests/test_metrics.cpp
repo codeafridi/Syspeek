@@ -29,6 +29,7 @@
 #include "FimStatus.h"
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
+#include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "platform/mac/MacFimStream.h"
 #include <QFile>
@@ -569,6 +570,27 @@ int main(int argc, char *argv[]) {
         check(!text.contains(
                   QStringLiteral("syspeek_process_net_bytes_per_second")),
               "prometheus: talker block omitted when no traffic");
+
+        ProcessDiskConsumer consumer;
+        consumer.pid = 4242;
+        consumer.name = QStringLiteral("dd");
+        consumer.readPerSec = 1024.0;
+        consumer.writePerSec = 8192.0;
+        s.processDiskTop.append(consumer);
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_disk_bytes_per_second{process=\"dd\","
+                  "pid=\"4242\",direction=\"read\"} 1024.000")),
+              "prometheus: per-process disk read gauge");
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_disk_bytes_per_second{process=\"dd\","
+                  "pid=\"4242\",direction=\"write\"} 8192.000")),
+              "prometheus: per-process disk write gauge");
+        s.processDiskTop.clear();
+        text = prometheusText(s);
+        check(!text.contains(
+                  QStringLiteral("syspeek_process_disk_bytes_per_second")),
+              "prometheus: disk block omitted when no traffic");
     }
 
     int status = 0;
@@ -2455,6 +2477,86 @@ int main(int argc, char *argv[]) {
         check(map.size() == 3 && map.value(111) == 700
                   && map.value(222) == 700 && map.value(333) == 701,
               "net: inode map skips zero inodes and unreadable pids");
+    }
+
+    {
+        // M72: iotop-style per-process block i/o deltas.
+        QHash<int, ProcessDiskCounters> counters;
+        counters.insert(100, ProcessDiskCounters{1000, 500});
+        counters.insert(200, ProcessDiskCounters{-1, -1});
+        QHash<int, ProcessDiskCounters> prior;
+        QHash<int, ProcessDiskRate> rates =
+            processDiskRates(counters, 1000, prior);
+        check(rates.value(100).readPerSec < 0.0
+                  && rates.value(100).writePerSec < 0.0,
+              "disk: first tick per pid is warming (no rate)");
+        check(rates.value(200).readPerSec < 0.0,
+              "disk: unreadable pids never report a rate");
+
+        counters.insert(100, ProcessDiskCounters{11000, 1000});
+        rates = processDiskRates(counters, 1000, prior);
+        check(rates.value(100).readPerSec == 10000.0
+                  && rates.value(100).writePerSec == 500.0,
+              "disk: counter delta over the window yields bytes/s");
+
+        counters.insert(100, ProcessDiskCounters{10, 10});
+        rates = processDiskRates(counters, 1000, prior);
+        check(rates.value(100).readPerSec == 0.0
+                  && rates.value(100).writePerSec == 0.0,
+              "disk: recycled pid rebases to zero, never negative");
+
+        check(processDiskTotal(rates, true) == 0.0,
+              "disk: fleet total sums known rates");
+
+        rates = processDiskRates(counters, 0, prior);
+        check(rates.value(100).readPerSec < 0.0,
+              "disk: a zero-length window yields no rate");
+        QHash<int, ProcessDiskRate> emptyRates;
+        check(processDiskTotal(emptyRates, true) < 0.0,
+              "disk: fleet total is unknown when nothing was read");
+
+        QHash<int, ProcessDiskRate> consumerRates;
+        ProcessDiskRate idle;
+        idle.readPerSec = 0.0;
+        idle.writePerSec = 0.0;
+        consumerRates.insert(300, idle);
+        ProcessDiskRate reader;
+        reader.readPerSec = 4096.0;
+        reader.writePerSec = 0.0;
+        consumerRates.insert(301, reader);
+        ProcessDiskRate writer;
+        writer.readPerSec = 0.0;
+        writer.writePerSec = 8192.0;
+        consumerRates.insert(302, writer);
+        consumerRates.insert(303, ProcessDiskRate{});
+        QHash<int, QString> names;
+        names.insert(301, QStringLiteral("dd"));
+        const QList<ProcessDiskConsumer> top =
+            processDiskTopConsumers(consumerRates, names, 2);
+        check(top.size() == 2 && top.first().pid == 302
+                  && top.at(1).pid == 301,
+              "disk: consumers sorted by combined throughput, limited");
+        check(top.at(1).name == QStringLiteral("dd"),
+              "disk: consumer names come from the caller map");
+        const QList<ProcessDiskConsumer> allTop =
+            processDiskTopConsumers(consumerRates, {}, 8);
+        check(allTop.size() == 2 && allTop.first().name
+                                          == QStringLiteral("pid 302"),
+              "disk: idle and warming pids filtered, fallback name used");
+
+        check(processDiskSummaryText(0, 0, -1.0, -1.0)
+                  == QStringLiteral("no process block i/o this tick")
+                  && processDiskSummaryText(12, 40, 2048.0, 1024.0)
+                         == QStringLiteral("12 processes tracked - read "
+                                           "2 KB/s / write 1 KB/s, "
+                                           "40 other users"),
+              "disk: summary states tracking and unreadable honesty");
+        check(processDiskConsumerText({}).contains(QStringLiteral("no block")),
+              "disk: empty consumer list is stated, not blank");
+        const QString consumerText = processDiskConsumerText(top);
+        check(consumerText.contains(QStringLiteral("pid 302"))
+                  && consumerText.contains(QStringLiteral("KB/s")),
+              "disk: consumer text renders one row per pid");
     }
 
     std::printf("%d failure(s)\n", failures);

@@ -12,6 +12,23 @@
 
 #include <algorithm>
 
+namespace {
+
+// iotop's DISK WRITE column is write_bytes - cancelled_write_bytes, clamped
+// at zero (ui.py format_stats). Windows and macOS report the net figure
+// already, so only Linux carries the cancelled counter.
+long long diskWriteBytes(const linuxproc::ProcDetail &detail) {
+    if (detail.writeBytes < 0) {
+        return -1;
+    }
+    if (detail.cancelledWriteBytes > 0) {
+        return qMax(0LL, detail.writeBytes - detail.cancelledWriteBytes);
+    }
+    return detail.writeBytes;
+}
+
+}  // namespace
+
 SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
                              const Config &config,
                              std::unique_ptr<SystemBackend> backend,
@@ -128,6 +145,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     unsigned long long swapTotal = 0;
     unsigned long long sharedTotal = 0;
     QList<ProcessRow> rows;
+    m_rowDiskCounters.clear();
     linuxproc::ProcDetail rootDetail;
     int rootPid = -1;
     for (const ProcNode &node : tree) {
@@ -145,6 +163,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
             rootPid = node.pid;
             rootDetail = detail;
         }
+
+        m_rowDiskCounters.insert(
+            node.pid,
+            ProcessDiskCounters{detail.readBytes, diskWriteBytes(detail)});
 
         ProcessRow row;
         row.pid = node.pid;
@@ -452,6 +474,8 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
     snapshot.ioPressureAvailable = disk.pressure.available;
     snapshot.diskIntervalMs = disk.intervalMs;
 
+    fillProcessDisk(snapshot);
+
     const TcpHealth tcp = m_tcpSampler.sample();
     snapshot.tcpHealth = tcp;
     snapshot.tcpHealthAvailable = tcp.available;
@@ -563,4 +587,90 @@ void SamplerWorker::fillProcessNet(
             processNetListenPorts(sockets, inodesOfPid.value(talker.pid));
     }
     snapshot.processNetTalkers = talkers;
+}
+
+void SamplerWorker::fillProcessDisk(DisplaySnapshot &snapshot) {
+    if (!m_backend->capabilities().perProcessDisk) {
+        return;
+    }
+    snapshot.processDiskAvailable = true;
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Per-row rates: the counters came out of procSample() in this same
+    // tick, so the window is the time since the previous tick.
+    if (!m_rowDiskCounters.isEmpty()) {
+        if (!snapshot.processes.isEmpty()) {
+            qint64 windowMs = m_intervalMs;
+            if (m_rowDiskStampMs > 0) {
+                windowMs = qBound<qint64>(qint64(50),
+                                          now - m_rowDiskStampMs,
+                                          qint64(60000));
+            }
+            m_rowDiskStampMs = now;
+            const QHash<int, ProcessDiskRate> rates =
+                processDiskRates(m_rowDiskCounters, windowMs, m_rowDiskPrior);
+            for (ProcessRow &row : snapshot.processes) {
+                const auto it = rates.constFind(row.pid);
+                if (it != rates.constEnd()) {
+                    row.diskReadPerSec = it->readPerSec;
+                    row.diskWritePerSec = it->writePerSec;
+                }
+            }
+        } else {
+            m_rowDiskStampMs = 0;
+        }
+        m_rowDiskCounters.clear();
+    }
+
+    // Machine-wide consumers need one /proc/<pid>/io read per pid, so the
+    // scan rides a 2 s cadence (the same cost argument as M71's inode map)
+    // and every tick just re-publishes the cached rows.
+    if (m_backend->capabilities().perProcessDiskScan
+        && (m_scanDiskStampMs == 0 || now - m_scanDiskStampMs >= 2000)) {
+        const QList<int> pids = m_backend->allPids();
+        QHash<int, ProcessDiskCounters> counters;
+        counters.reserve(pids.size());
+        int unreadable = 0;
+        for (int pid : pids) {
+            long long readBytes = -1;
+            long long writeBytes = -1;
+            if (m_backend->processDiskCounters(pid, readBytes, writeBytes)) {
+                counters.insert(pid, ProcessDiskCounters{readBytes, writeBytes});
+            } else {
+                ++unreadable;
+            }
+        }
+        qint64 windowMs = m_intervalMs;
+        if (m_scanDiskStampMs > 0) {
+            windowMs = qBound<qint64>(qint64(100), now - m_scanDiskStampMs,
+                                      qint64(60000));
+        }
+        m_scanDiskStampMs = now;
+        const QHash<int, ProcessDiskRate> rates =
+            processDiskRates(counters, windowMs, m_scanDiskPrior);
+        QList<ProcessDiskConsumer> top = processDiskTopConsumers(rates, {}, 8);
+        for (ProcessDiskConsumer &consumer : top) {
+            consumer.name = m_backend->comm(consumer.pid);
+            if (consumer.name.isEmpty()) {
+                consumer.name = QStringLiteral("pid %1").arg(consumer.pid);
+            }
+        }
+        m_scanDiskTop = top;
+        m_scanDiskReadPerSec = processDiskTotal(rates, true);
+        m_scanDiskWritePerSec = processDiskTotal(rates, false);
+        m_scanDiskTracked = counters.size();
+        m_scanDiskUnreadable = unreadable;
+        snapshot.processDiskScanning = true;
+    }
+
+    if (m_backend->capabilities().perProcessDiskScan) {
+        snapshot.processDiskScanning = true;
+        snapshot.processDiskTop = m_scanDiskTop;
+        snapshot.processDiskReadPerSec = m_scanDiskReadPerSec;
+        snapshot.processDiskWritePerSec = m_scanDiskWritePerSec;
+        snapshot.processDiskTracked = m_scanDiskTracked;
+        snapshot.processDiskUnreadable = m_scanDiskUnreadable;
+        snapshot.processDiskWarming = m_scanDiskTracked == 0;
+    }
 }

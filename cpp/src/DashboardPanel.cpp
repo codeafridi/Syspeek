@@ -230,6 +230,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osFim = osCaps.fim;
     m_osSecurity = osCaps.namespaces;
     m_osProcessNet = osCaps.perProcessNet;
+    m_osProcessDisk = osCaps.perProcessDisk;
+    m_osProcessDiskScan = osCaps.perProcessDiskScan;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -427,7 +429,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
-        "#ddProcNetNote, #ddTalkers { color: %MUTED%; }"
+        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
@@ -1310,17 +1312,18 @@ QWidget *DashboardPanel::buildProcessesView() {
 
     m_procs = new QTreeWidget(view);
     m_procs->setObjectName(QStringLiteral("ddProcs"));
-    m_procs->setColumnCount(9);
+    m_procs->setColumnCount(11);
     m_procs->setHeaderLabels({QStringLiteral("Process"), QStringLiteral("PID"),
                               QStringLiteral("CPU%"), QStringLiteral("NET ↓"),
-                              QStringLiteral("NET ↑"), QStringLiteral("Threads"),
+                              QStringLiteral("NET ↑"), QStringLiteral("DISK ↓"),
+                              QStringLiteral("DISK ↑"), QStringLiteral("Threads"),
                               QStringLiteral("FDs"), QStringLiteral("RSS"),
                               QStringLiteral("PORTS")});
     m_procs->setRootIsDecorated(true);
     m_procs->setSelectionMode(QAbstractItemView::NoSelection);
     m_procs->setFocusPolicy(Qt::NoFocus);
     m_procs->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 9; ++i) {
+    for (int i = 1; i < 11; ++i) {
         m_procs->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
     connect(m_procs, &QTreeWidget::itemExpanded, this,
@@ -1346,8 +1349,13 @@ QWidget *DashboardPanel::buildProcessesView() {
     m_procNetNote->setObjectName(QStringLiteral("ddProcNetNote"));
     m_procNetNote->setFont(monoFont(10));
     m_procNetNote->setMinimumWidth(1);
+    m_procDiskNote = new QLabel(QStringLiteral("--"), procBox);
+    m_procDiskNote->setObjectName(QStringLiteral("ddProcDiskNote"));
+    m_procDiskNote->setFont(monoFont(10));
+    m_procDiskNote->setMinimumWidth(1);
     procBoxLayout->addWidget(m_procs, 1);
     procBoxLayout->addWidget(m_procNetNote);
+    procBoxLayout->addWidget(m_procDiskNote);
     layout->addWidget(makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
 
     // --- CPU / load history (Syspeek-own fleet counters).
@@ -3003,6 +3011,26 @@ QWidget *DashboardPanel::buildDisksView() {
     layout->addWidget(
         makeCard(QStringLiteral("DISK I/O"), m_diskSummary, view));
 
+    m_diskTopNote = new QLabel(QStringLiteral("--"), view);
+    m_diskTopNote->setObjectName(QStringLiteral("ddDiskTopNote"));
+    m_diskTopNote->setFont(monoFont(10));
+    m_diskTopNote->setMinimumWidth(1);
+    m_diskTop = new QLabel(QStringLiteral("--"), view);
+    m_diskTop->setObjectName(QStringLiteral("ddDiskTop"));
+    m_diskTop->setFont(monoFont(10));
+    m_diskTop->setMinimumWidth(1);
+    auto *diskTopBox = new QWidget(view);
+    auto *diskTopLayout = new QVBoxLayout(diskTopBox);
+    diskTopLayout->setContentsMargins(0, 0, 0, 0);
+    diskTopLayout->setSpacing(4);
+    diskTopLayout->addWidget(m_diskTopNote);
+    diskTopLayout->addWidget(m_diskTop);
+
+    layout->addWidget(makeBanner(QStringLiteral("TOP DISK"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("processes by block i/o"),
+                               diskTopBox, view), 1);
+
     m_disks = new QTreeWidget(view);
     m_disks->setObjectName(QStringLiteral("ddDisks"));
     m_disks->setColumnCount(7);
@@ -3477,6 +3505,44 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 QStringLiteral("%1 (tcp only)")
                     .arg(processNetSummaryText(snapshot.processNetTracked,
                                                snapshot.processNetUnattributed)));
+        }
+    }
+
+    if (m_procDiskNote != nullptr) {
+        if (!m_osProcessDisk) {
+            m_procDiskNote->setText(
+                QStringLiteral("disk: %1").arg(unsupportedOsText()));
+        } else if (snapshot.processes.isEmpty()) {
+            m_procDiskNote->setText(
+                QStringLiteral("disk: no focused process group"));
+        } else {
+            bool warming = false;
+            for (const ProcessRow &row : snapshot.processes) {
+                if (row.diskReadPerSec < 0.0 && row.diskWritePerSec < 0.0) {
+                    warming = true;
+                } else {
+                    warming = false;
+                    break;
+                }
+            }
+            m_procDiskNote->setText(
+                warming ? QStringLiteral("disk: warming up (block i/o)")
+                        : QStringLiteral(
+                              "disk: block i/o per process "
+                              "(physical bytes; iotop semantics)"));
+        }
+    }
+    if (m_diskTopNote != nullptr && m_diskTop != nullptr) {
+        if (!m_osProcessDiskScan) {
+            m_diskTopNote->setText(
+                QStringLiteral("block i/o per process: %1")
+                    .arg(unsupportedOsText()));
+            m_diskTop->setText(QStringLiteral("--"));
+        } else {
+            m_diskTopNote->setText(processDiskSummaryText(
+                snapshot.processDiskTracked, snapshot.processDiskUnreadable,
+                snapshot.processDiskReadPerSec, snapshot.processDiskWritePerSec));
+            m_diskTop->setText(processDiskConsumerText(snapshot.processDiskTop));
         }
     }
 
@@ -4265,13 +4331,15 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                              : QStringLiteral("--"));
         item->setText(3, formatNetRate(row.netRxPerSec));
         item->setText(4, formatNetRate(row.netTxPerSec));
-        item->setText(5, row.threads > 0 ? QString::number(row.threads)
+        item->setText(5, formatNetRate(row.diskReadPerSec));
+        item->setText(6, formatNetRate(row.diskWritePerSec));
+        item->setText(7, row.threads > 0 ? QString::number(row.threads)
                                          : QStringLiteral("--"));
-        item->setText(6, row.fds < 0 ? QStringLiteral("--")
+        item->setText(8, row.fds < 0 ? QStringLiteral("--")
                                      : QString::number(row.fds));
-        item->setText(7, row.memory);
-        item->setText(8, formatListenPorts(row.listenPorts));
-        for (int c = 1; c < 9; ++c) {
+        item->setText(9, row.memory);
+        item->setText(10, formatListenPorts(row.listenPorts));
+        for (int c = 1; c < 11; ++c) {
             item->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
         }
 

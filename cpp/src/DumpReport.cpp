@@ -1,5 +1,7 @@
 #include "DumpReport.h"
 
+#include "ProcessDiskStatus.h"
+
 #include "DiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
@@ -314,6 +316,64 @@ QString dumpReportJson(int maxProcs) {
 #endif
         }
         root.insert(QStringLiteral("processNet"), processNet);
+    }
+
+    {
+        QJsonObject processDisk;
+        const bool supported = backend.capabilities().perProcessDisk;
+        processDisk.insert(QStringLiteral("available"), supported);
+        processDisk.insert(QStringLiteral("scan"),
+                           backend.capabilities().perProcessDiskScan);
+        if (supported) {
+            QHash<int, ProcessDiskCounters> counterSet;
+            const QList<int> diskPids = backend.allPids();
+            int readable = 0;
+            for (int pid : diskPids) {
+                long long readBytes = -1;
+                long long writeBytes = -1;
+                if (backend.processDiskCounters(pid, readBytes, writeBytes)) {
+                    counterSet.insert(
+                        pid, ProcessDiskCounters{readBytes, writeBytes});
+                    ++readable;
+                }
+            }
+            processDisk.insert(QStringLiteral("readable"), readable);
+            processDisk.insert(QStringLiteral("pids"), diskPids.size());
+            QHash<int, ProcessDiskCounters> prior;
+            processDiskRates(counterSet, 250, prior);
+            QThread::msleep(250);
+            QHash<int, ProcessDiskCounters> second;
+            for (int pid : diskPids) {
+                long long readBytes = -1;
+                long long writeBytes = -1;
+                if (backend.processDiskCounters(pid, readBytes, writeBytes)) {
+                    second.insert(pid, ProcessDiskCounters{readBytes, writeBytes});
+                }
+            }
+            const QHash<int, ProcessDiskRate> rates =
+                processDiskRates(second, 250, prior);
+            QList<ProcessDiskConsumer> top =
+                processDiskTopConsumers(rates, {}, 5);
+            QJsonArray rows;
+            for (ProcessDiskConsumer &consumer : top) {
+                QJsonObject row;
+                row.insert(QStringLiteral("pid"), consumer.pid);
+                QString name = backend.comm(consumer.pid);
+                if (name.isEmpty()) {
+                    name = QStringLiteral("pid %1").arg(consumer.pid);
+                }
+                row.insert(QStringLiteral("name"), name);
+                row.insert(QStringLiteral("readBps"), consumer.readPerSec);
+                row.insert(QStringLiteral("writeBps"), consumer.writePerSec);
+                rows.append(row);
+            }
+            processDisk.insert(QStringLiteral("top"), rows);
+            processDisk.insert(QStringLiteral("readBps"),
+                               processDiskTotal(rates, true));
+            processDisk.insert(QStringLiteral("writeBps"),
+                               processDiskTotal(rates, false));
+        }
+        root.insert(QStringLiteral("processDisk"), processDisk);
     }
 
     QJsonObject services;

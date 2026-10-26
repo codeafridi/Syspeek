@@ -369,6 +369,7 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     caps.journal = true;
     caps.tcpCounters = m_tcpCountersOk;
     caps.sbom = true;
+    caps.perProcessDisk = true;
     return caps;
 }
 
@@ -646,6 +647,24 @@ bool WindowsBackend::procMem(int pid, linuxproc::MemInfo &out) {
                           >> 10
                     : 0;
     return out.rssKb > 0;
+}
+
+bool WindowsBackend::processDiskCounters(int pid, long long &readBytes,
+                                         long long &writeBytes) {
+    HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                  static_cast<DWORD>(pid));
+    if (handle == nullptr) {
+        return false;
+    }
+    IO_COUNTERS io = {};
+    const bool ok = ::GetProcessIoCounters(handle, &io) != FALSE;
+    ::CloseHandle(handle);
+    if (!ok) {
+        return false;
+    }
+    readBytes = static_cast<long long>(io.ReadTransferCount);
+    writeBytes = static_cast<long long>(io.WriteTransferCount);
+    return true;
 }
 
 bool WindowsBackend::procSample(int pid, linuxproc::MemInfo &mem,

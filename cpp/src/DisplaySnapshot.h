@@ -2,6 +2,7 @@
 
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
+#include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "SecurityStatus.h"
@@ -25,6 +26,8 @@ struct ProcessRow {
     double cpuPercent = 0.0;
     double netRxPerSec = -1.0;
     double netTxPerSec = -1.0;
+    double diskReadPerSec = -1.0;
+    double diskWritePerSec = -1.0;
     QList<quint16> listenPorts;
     QString name;
     QString memory;
@@ -95,6 +98,14 @@ struct DisplaySnapshot {
     double focusNetRxPerSec = -1.0;
     double focusNetTxPerSec = -1.0;
     QList<ProcessNetTalker> processNetTalkers;
+    bool processDiskAvailable = false;
+    bool processDiskWarming = false;
+    bool processDiskScanning = false;
+    int processDiskTracked = 0;
+    int processDiskUnreadable = 0;
+    double processDiskReadPerSec = -1.0;
+    double processDiskWritePerSec = -1.0;
+    QList<ProcessDiskConsumer> processDiskTop;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;
     QList<EndpointRow> endpoints;

@@ -34,6 +34,8 @@ public:
     bool procMem(int pid, linuxproc::MemInfo &out) override;
     bool procSample(int pid, linuxproc::MemInfo &mem,
                     linuxproc::ProcDetail &detail) override;
+    bool processDiskCounters(int pid, long long &readBytes,
+                             long long &writeBytes) override;
     int countFds(int pid) override;
     QList<QString> fdTargets(int pid) override;
     QByteArray processEnv(int pid) override;

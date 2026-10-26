@@ -158,6 +158,8 @@ int main(int argc, char *argv[]) {
     root.name = QStringLiteral("alpha");
     root.memory = QStringLiteral("8 MB");
     root.netRxPerSec = 2048.0;
+    root.diskReadPerSec = 4096.0;
+    root.diskWritePerSec = 1048576.0;
     root.listenPorts = {8080};
     ProcessRow child;
     child.pid = 124;
@@ -224,6 +226,18 @@ int main(int argc, char *argv[]) {
     talker.txPerSec = 512.0;
     talker.listenPorts = {8080};
     withProcs.processNetTalkers = {talker};
+    withProcs.processDiskAvailable = true;
+    withProcs.processDiskScanning = true;
+    withProcs.processDiskTracked = 9;
+    withProcs.processDiskUnreadable = 41;
+    withProcs.processDiskReadPerSec = 8192.0;
+    withProcs.processDiskWritePerSec = 2097152.0;
+    ProcessDiskConsumer diskConsumer;
+    diskConsumer.pid = 321;
+    diskConsumer.name = QStringLiteral("dd");
+    diskConsumer.readPerSec = 0.0;
+    diskConsumer.writePerSec = 2097152.0;
+    withProcs.processDiskTop = {diskConsumer};
     hud.setSnapshot(withProcs);
 
     auto *dashApp = hud.findChild<QLabel *>(QStringLiteral("ddApp"));
@@ -252,19 +266,56 @@ int main(int argc, char *argv[]) {
                      == QStringLiteral("alpha-child"),
           "panel process tree nests child");
     check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
-              && dashProcs->topLevelItem(0)->text(5) == QStringLiteral("5")
-              && dashProcs->topLevelItem(0)->text(6) == QStringLiteral("12"),
+              && dashProcs->topLevelItem(0)->text(7) == QStringLiteral("5")
+              && dashProcs->topLevelItem(0)->text(8) == QStringLiteral("12"),
           "panel process tree shows threads and fds");
     check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
               && dashProcs->topLevelItem(0)->text(2) == QStringLiteral("12.5%"),
           "panel process tree shows cpu percent");
-    check(dashProcs != nullptr && dashProcs->columnCount() == 9,
-          "panel process tree has the m71 net + ports columns");
+    check(dashProcs != nullptr && dashProcs->columnCount() == 11,
+          "panel process tree has net + disk + ports columns");
     check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
               && dashProcs->topLevelItem(0)->text(3) == QStringLiteral("2 KB/s")
               && dashProcs->topLevelItem(0)->text(4) == QStringLiteral("--")
-              && dashProcs->topLevelItem(0)->text(8) == QStringLiteral("8080"),
+              && dashProcs->topLevelItem(0)->text(10) == QStringLiteral("8080"),
           "panel process tree shows net rates and listening ports");
+    check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
+              && dashProcs->topLevelItem(0)->text(5) == QStringLiteral("4 KB/s")
+              && dashProcs->topLevelItem(0)->text(6)
+                     == QStringLiteral("1.0 MB/s"),
+          "panel process tree shows block i/o rates per process");
+
+    const bool perProcDisk = systemBackend().capabilities().perProcessDisk;
+    const bool perProcDiskScan =
+        systemBackend().capabilities().perProcessDiskScan;
+    auto *procDiskNote = hud.findChild<QLabel *>(QStringLiteral("ddProcDiskNote"));
+    check(procDiskNote != nullptr
+              && (perProcDisk
+                      ? procDiskNote->text().contains(QStringLiteral("block i/o"))
+                      : procDiskNote->text().contains(
+                            QStringLiteral("not supported on this OS"))),
+          "panel states the block i/o attribution surface per OS");
+    auto *diskTopNote = hud.findChild<QLabel *>(QStringLiteral("ddDiskTopNote"));
+    auto *diskTop = hud.findChild<QLabel *>(QStringLiteral("ddDiskTop"));
+    if (perProcDiskScan) {
+        check(diskTopNote != nullptr
+                  && diskTopNote->text().contains(QStringLiteral("9 processes"))
+                  && diskTopNote->text().contains(
+                      QStringLiteral("41 other users")),
+              "panel disk card states tracking honesty");
+        check(diskTop != nullptr
+                  && diskTop->text().contains(QStringLiteral("dd"))
+                  && diskTop->text().contains(QStringLiteral("pid 321"))
+                  && diskTop->text().contains(QStringLiteral("write 2.0 MB/s")),
+              "panel disk card lists top block i/o consumers");
+    } else {
+        check(diskTopNote != nullptr
+                  && diskTopNote->text().contains(
+                      QStringLiteral("not supported on this OS"))
+                  && diskTop != nullptr
+                  && diskTop->text() == QStringLiteral("--"),
+              "panel gates the top disk card on this OS");
+    }
 
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));
     check(focusDetail != nullptr

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -112,6 +112,16 @@ jobs:
                     "%d talkers"
                     % (pn["tracked"], pn["unattributed"],
                        len(pn.get("talkers", []))))
+              pd = d.get("processDisk", {})
+              assert pd.get("available") is True, pd
+              assert pd["scan"] is True, pd
+              assert pd["readable"] >= 0 and pd["pids"] >= pd["readable"], pd
+              assert pd["readBps"] >= 0 and pd["writeBps"] >= 0, pd
+              for c in pd.get("top", []):
+                  assert c["readBps"] >= 0 and c["writeBps"] >= 0, c
+              print("processDisk ok: %d read/%d pids, %d top, r %d B/s"
+                    % (pd["readable"], pd["pids"], len(pd.get("top", [])),
+                       int(pd["readBps"])))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):

@@ -133,6 +133,8 @@ private:
     bool m_osFim = true;
     bool m_osSecurity = true;
     bool m_osProcessNet = true;
+    bool m_osProcessDisk = true;
+    bool m_osProcessDiskScan = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
@@ -161,6 +163,7 @@ private:
     QLabel *m_memDetail = nullptr;
     QTreeWidget *m_procs = nullptr;
     QLabel *m_procNetNote = nullptr;
+    QLabel *m_procDiskNote = nullptr;
     QLabel *m_focusDetail = nullptr;
     QLabel *m_openFiles = nullptr;
     QLabel *m_net = nullptr;
@@ -184,6 +187,8 @@ private:
     QTreeWidget *m_costNamespaces = nullptr;
     QTreeWidget *m_costWorkloads = nullptr;
     QLabel *m_diskSummary = nullptr;
+    QLabel *m_diskTopNote = nullptr;
+    QLabel *m_diskTop = nullptr;
     QLabel *m_diskPressure = nullptr;
     QTreeWidget *m_disks = nullptr;
     QLabel *m_hostInfoSummary = nullptr;

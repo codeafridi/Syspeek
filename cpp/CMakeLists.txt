@@ -181,6 +181,8 @@ add_library(syspeek_core STATIC
     src/MetricsExport.h
     src/ExportRun.cpp
     src/ExportRun.h
+    src/ProcessDiskStatus.cpp
+    src/ProcessDiskStatus.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
     src/KubeStatus.cpp

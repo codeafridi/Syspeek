@@ -27,6 +27,7 @@ struct ProcDetail {
     long long wchar = -1;
     long long readBytes = -1;
     long long writeBytes = -1;
+    long long cancelledWriteBytes = -1;
 };
 
 struct SocketInfo {
@@ -130,6 +131,7 @@ bool procMem(int pid, MemInfo &out);
 bool procSample(int pid, MemInfo &mem, ProcDetail &detail);
 bool parseStatusDetail(const QByteArray &statusContent, ProcDetail &out);
 bool parseProcIo(const QByteArray &content, ProcDetail &out);
+bool procDiskCounters(int pid, long long &readBytes, long long &writeBytes);
 QList<QString> fdTargets(int pid);
 bool sharedLibraries(int pid, QList<QString> &out);
 int countFds(int pid);

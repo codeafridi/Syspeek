@@ -230,6 +230,8 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.tcpCounters = readTcpSysctl(probe)
         && (probe.tcps_rcvtotal != 0 || probe.tcps_sndtotal != 0
             || probe.tcps_connattempt != 0);
+    caps.perProcessDisk = true;
+    caps.perProcessDiskScan = true;
     return caps;
 }
 
@@ -836,6 +838,18 @@ bool MacBackend::procSample(int pid, linuxproc::MemInfo &mem,
         detail.readBytes = static_cast<long long>(ri.ri_diskio_bytesread);
         detail.writeBytes = static_cast<long long>(ri.ri_diskio_byteswritten);
     }
+    return true;
+}
+
+bool MacBackend::processDiskCounters(int pid, long long &readBytes,
+                                     long long &writeBytes) {
+    struct rusage_info_v6 ri{};
+    if (proc_pid_rusage(pid, RUSAGE_INFO_V6,
+                        reinterpret_cast<rusage_info_t *>(&ri)) != 0) {
+        return false;
+    }
+    readBytes = static_cast<long long>(ri.ri_diskio_bytesread);
+    writeBytes = static_cast<long long>(ri.ri_diskio_byteswritten);
     return true;
 }
 

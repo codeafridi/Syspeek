@@ -180,6 +180,28 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    if (!s.processDiskTop.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_process_disk_bytes_per_second Per-process block i/o "
+            "throughput."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_process_disk_bytes_per_second gauge"));
+        for (const ProcessDiskConsumer &consumer : s.processDiskTop) {
+            const QString labels =
+                QStringLiteral("process=\"%1\",pid=\"%2\"")
+                    .arg(escapeLabel(consumer.name))
+                    .arg(consumer.pid);
+            lines.append(
+                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                               "direction=\"read\"} %2")
+                    .arg(labels, num(consumer.readPerSec)));
+            lines.append(
+                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                               "direction=\"write\"} %2")
+                    .arg(labels, num(consumer.writePerSec)));
+        }
+    }
+
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
             "# HELP syspeek_net_rx_bytes_total Network receive bytes."));

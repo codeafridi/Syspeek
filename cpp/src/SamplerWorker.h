@@ -12,6 +12,7 @@
 #include "LinuxProcess.h"
 #include "NetRateTracker.h"
 #include "ProcessIdentity.h"
+#include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomSource.h"
 #include "TcpSampler.h"
@@ -48,6 +49,7 @@ private:
                       const QList<linuxproc::SocketInfo> &sockets);
     void fillProcessNet(DisplaySnapshot &snapshot,
                         const QList<linuxproc::SocketInfo> &sockets);
+    void fillProcessDisk(DisplaySnapshot &snapshot);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -77,6 +79,16 @@ private:
     QHash<unsigned long long, int> m_netInodePid;
     qint64 m_netMapStampMs = 0;
     qint64 m_netRateStampMs = 0;
+    QHash<int, ProcessDiskCounters> m_rowDiskCounters;
+    QHash<int, ProcessDiskCounters> m_rowDiskPrior;
+    qint64 m_rowDiskStampMs = 0;
+    QHash<int, ProcessDiskCounters> m_scanDiskPrior;
+    qint64 m_scanDiskStampMs = 0;
+    QList<ProcessDiskConsumer> m_scanDiskTop;
+    double m_scanDiskReadPerSec = -1.0;
+    double m_scanDiskWritePerSec = -1.0;
+    int m_scanDiskTracked = 0;
+    int m_scanDiskUnreadable = 0;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

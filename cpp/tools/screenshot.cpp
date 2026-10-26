@@ -84,6 +84,8 @@ DisplaySnapshot demoSnapshot(int tick) {
     proc.cpuPercent = 12.4;
     proc.netRxPerSec = 1'258'291.0;
     proc.netTxPerSec = 196'608.0;
+    proc.diskReadPerSec = 3'145'728.0;
+    proc.diskWritePerSec = 524'288.0;
     proc.listenPorts = {9222};
     proc.name = QStringLiteral("cursor");
     proc.memory = QStringLiteral("612.4 MB");
@@ -105,9 +107,13 @@ DisplaySnapshot demoSnapshot(int tick) {
     }
     s.processes[1].netRxPerSec = 262'144.0;
     s.processes[1].netTxPerSec = 65'536.0;
+    s.processes[1].diskReadPerSec = 65'536.0;
+    s.processes[1].diskWritePerSec = 1'048'576.0;
     s.processes[1].listenPorts = {3000, 3001};
     s.processes.last().netRxPerSec = 0.0;
     s.processes.last().netTxPerSec = 0.0;
+    s.processes.last().diskReadPerSec = 0.0;
+    s.processes.last().diskWritePerSec = 0.0;
     s.processNetAvailable = true;
     s.processNetTracked = 14;
     s.processNetUnattributed = 39;
@@ -134,6 +140,29 @@ DisplaySnapshot demoSnapshot(int tick) {
     talkerC.txPerSec = 40'960.0;
     talkerC.name = QStringLiteral("rsync");
     s.processNetTalkers = {talkerA, talkerB, talkerC};
+
+    s.processDiskAvailable = true;
+    s.processDiskScanning = true;
+    s.processDiskTracked = 11;
+    s.processDiskUnreadable = 42;
+    s.processDiskReadPerSec = 3'211'264.0;
+    s.processDiskWritePerSec = 5'242'880.0;
+    ProcessDiskConsumer diskA;
+    diskA.pid = 8842;
+    diskA.name = QStringLiteral("rsync");
+    diskA.readPerSec = 2'097'152.0;
+    diskA.writePerSec = 4'194'304.0;
+    ProcessDiskConsumer diskB;
+    diskB.pid = 2092708;
+    diskB.name = QStringLiteral("node");
+    diskB.readPerSec = 1'048'576.0;
+    diskB.writePerSec = 524'288.0;
+    ProcessDiskConsumer diskC;
+    diskC.pid = 611;
+    diskC.name = QStringLiteral("postgres");
+    diskC.readPerSec = 65'536.0;
+    diskC.writePerSec = 524'288.0;
+    s.processDiskTop = {diskA, diskB, diskC};
 
     ConnectionRow conn;
     conn.proto = QStringLiteral("tcp");

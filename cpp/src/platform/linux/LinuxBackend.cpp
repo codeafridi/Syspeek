@@ -20,6 +20,8 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.psi = true;
     caps.namespaces = true;
     caps.perProcessNet = true;
+    caps.perProcessDisk = true;
+    caps.perProcessDiskScan = true;
     return caps;
 }
 
@@ -151,6 +153,11 @@ bool LinuxBackend::kernelLimits(linuxproc::KernelLimits &out) {
 
 bool LinuxBackend::processOom(int pid, linuxproc::OomInfo &out) {
     return linuxproc::processOom(pid, out);
+}
+
+bool LinuxBackend::processDiskCounters(int pid, long long &readBytes,
+                                       long long &writeBytes) {
+    return linuxproc::procDiskCounters(pid, readBytes, writeBytes);
 }
 
 bool LinuxBackend::sumRssKb(const QList<int> &pids, unsigned long long &out) {
