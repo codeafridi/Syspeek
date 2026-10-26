@@ -208,6 +208,40 @@ int main(int argc, char *argv[]) {
               || qEnvironmentVariableIsSet("SYSPEEK_CONFIG"),
           "default config path shape");
 #endif
+    {
+        QTemporaryDir webhookDir;
+        const QString path = writeConfig(webhookDir, QByteArrayLiteral(
+            "[webhook]\n"
+            "enabled = true\n"
+            "url = https://hooks.slack.com/services/T000/B000/xxxx\n"
+            "format = slack\n"
+            "timeout_ms = 2500\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(error.isEmpty(), "webhook config -> no error");
+        check(c.webhook.enabled, "webhook enabled loaded");
+        check(c.webhook.url
+                  == QStringLiteral("https://hooks.slack.com/services/T000/B000/xxxx"),
+              "webhook url loaded");
+        check(c.webhook.format == QStringLiteral("slack"),
+              "webhook format loaded");
+        check(c.webhook.timeoutMs == 2500, "webhook timeout loaded");
+    }
+
+    {
+        QTemporaryDir badDir;
+        const QString path = writeConfig(badDir, QByteArrayLiteral(
+            "[webhook]\n"
+            "format = carrier-pigeon\n"
+            "timeout_ms = 9999999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.webhook.enabled, "webhook default off");
+        check(c.webhook.format == QStringLiteral("generic"),
+              "unknown webhook format ignored");
+        check(c.webhook.timeoutMs == 60000, "webhook timeout clamped");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

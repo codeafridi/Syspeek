@@ -2761,6 +2761,10 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.metricsLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.metricsLine);
+    general += QStringLiteral("webhook&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.webhookLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.webhookLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);
@@ -2780,6 +2784,11 @@ void DashboardPanel::applySettingsInfo() {
 
 void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
     m_settings = info;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setWebhookLine(const QString &line) {
+    m_settings.webhookLine = line;
     applySettingsInfo();
 }
 

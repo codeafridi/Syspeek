@@ -27,8 +27,15 @@
 #include "platform/null/NullBackend.h"
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
+#include "AlertWebhook.h"
 #include "platform/mac/MacFimStream.h"
 #include <QFile>
+#include <QEventLoop>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -1807,6 +1814,259 @@ int main(int argc, char *argv[]) {
             check(!stream.running(), "fim: non-mac stream stub inert");
         }
 #endif
+    }
+
+    // --- alert webhooks (M69): payload schema grounded on Alertmanager 0.34.1
+    {
+        WebhookEvent firing;
+        firing.id = QStringLiteral("app_cpu");
+        firing.title = QStringLiteral("Focused app CPU 96% (high)");
+        firing.detail = QStringLiteral("cursor cpu 96.0% >= 90%");
+        firing.severity = QStringLiteral("critical");
+        firing.status = QStringLiteral("firing");
+        firing.startsAtMs = 1700000000000LL;
+
+        const QJsonObject generic =
+            QJsonDocument::fromJson(alertmanagerWebhookPayload({firing}))
+                .object();
+        check(generic.value(QStringLiteral("version")).toString()
+                  == QStringLiteral("4"),
+              "webhook: generic payload version 4");
+        check(!generic.value(QStringLiteral("groupKey")).toString().isEmpty(),
+              "webhook: generic groupKey present");
+        check(generic.value(QStringLiteral("truncatedAlerts")).toInt() == 0,
+              "webhook: generic truncatedAlerts 0");
+        check(generic.value(QStringLiteral("receiver")).toString()
+                  == QStringLiteral("syspeek"),
+              "webhook: generic receiver");
+        check(generic.value(QStringLiteral("status")).toString()
+                  == QStringLiteral("firing"),
+              "webhook: generic status");
+        check(generic.contains(QStringLiteral("commonLabels"))
+                  && generic.contains(QStringLiteral("commonAnnotations"))
+                  && generic.contains(QStringLiteral("externalURL")),
+              "webhook: generic template fields present");
+        const QJsonArray alerts =
+            generic.value(QStringLiteral("alerts")).toArray();
+        check(alerts.size() == 1, "webhook: generic one alert");
+        const QJsonObject alert = alerts.first().toObject();
+        const QJsonObject labels =
+            alert.value(QStringLiteral("labels")).toObject();
+        const QJsonObject annotations =
+            alert.value(QStringLiteral("annotations")).toObject();
+        check(labels.value(QStringLiteral("alertname")).toString()
+                  == QStringLiteral("app_cpu"),
+              "webhook: label alertname = rule id");
+        check(labels.value(QStringLiteral("severity")).toString()
+                  == QStringLiteral("critical"),
+              "webhook: label severity");
+        check(annotations.value(QStringLiteral("summary")).toString()
+                  == firing.title
+                  && annotations.value(QStringLiteral("description")).toString()
+                         == firing.detail,
+              "webhook: annotations summary/description");
+        check(alert.value(QStringLiteral("startsAt")).toString()
+                  == QStringLiteral("2023-11-14T22:13:20Z"),
+              "webhook: startsAt ISO");
+        check(alert.value(QStringLiteral("endsAt")).toString()
+                  == QStringLiteral("0001-01-01T00:00:00Z"),
+              "webhook: firing endsAt epoch");
+        check(alert.value(QStringLiteral("fingerprint")).toString()
+                  == QStringLiteral("app_cpu"),
+              "webhook: fingerprint");
+
+        WebhookEvent resolved = firing;
+        resolved.status = QStringLiteral("resolved");
+        resolved.endsAtMs = 1700000060000LL;
+        const QJsonObject genericResolved =
+            QJsonDocument::fromJson(alertmanagerWebhookPayload({resolved}))
+                .object();
+        check(genericResolved.value(QStringLiteral("status")).toString()
+                  == QStringLiteral("resolved"),
+              "webhook: generic resolved status");
+        check(genericResolved.value(QStringLiteral("alerts"))
+                      .toArray()
+                      .first()
+                      .toObject()
+                      .value(QStringLiteral("endsAt"))
+                      .toString()
+                  == QStringLiteral("2023-11-14T22:14:20Z"),
+              "webhook: resolved endsAt ISO");
+
+        const QJsonObject slack =
+            QJsonDocument::fromJson(slackWebhookPayload({firing})).object();
+        check(slack.value(QStringLiteral("text")).toString().contains(
+                  QStringLiteral("firing")),
+              "webhook: slack text mentions firing");
+        const QJsonArray attachments =
+            slack.value(QStringLiteral("attachments")).toArray();
+        check(attachments.size() == 1, "webhook: slack one attachment");
+        const QJsonObject attachment = attachments.first().toObject();
+        check(attachment.value(QStringLiteral("color")).toString()
+                  == QStringLiteral("d1685f"),
+              "webhook: slack critical color");
+        check(attachment.value(QStringLiteral("title")).toString()
+                  == firing.title,
+              "webhook: slack attachment title");
+        check(attachment.value(QStringLiteral("fallback")).toString().contains(
+                  QStringLiteral("firing")),
+              "webhook: slack fallback");
+        const QJsonArray fields =
+            attachment.value(QStringLiteral("fields")).toArray();
+        check(fields.size() == 2
+                  && fields.first().toObject().value(QStringLiteral("short"))
+                         .toBool(),
+              "webhook: slack fields short");
+        check(attachment.value(QStringLiteral("mrkdwn_in"))
+                      .toArray()
+                      .contains(QJsonValue(QStringLiteral("text"))),
+              "webhook: slack mrkdwn_in text");
+
+        const QJsonObject slackResolved =
+            QJsonDocument::fromJson(slackWebhookPayload({resolved})).object();
+        check(slackResolved.value(QStringLiteral("attachments"))
+                      .toArray()
+                      .first()
+                      .toObject()
+                      .value(QStringLiteral("color"))
+                      .toString()
+                  == QStringLiteral("36a64f"),
+              "webhook: slack resolved color");
+
+        WebhookConfig off;
+        check(webhookConfigLine(off)
+                  == QStringLiteral("off ([webhook] enabled=false)"),
+              "webhook: config line off by default");
+        WebhookConfig noUrl;
+        noUrl.enabled = true;
+        check(webhookConfigLine(noUrl).startsWith(QStringLiteral("no url")),
+              "webhook: config line missing url");
+        WebhookConfig slackCfg;
+        slackCfg.enabled = true;
+        slackCfg.url = QStringLiteral("https://example.test/hook");
+        slackCfg.format = QStringLiteral("slack");
+        check(webhookConfigLine(slackCfg)
+                  == QStringLiteral("slack -> https://example.test/hook"),
+              "webhook: config line enabled");
+    }
+
+    // --- alert webhooks (M69): live loopback delivery
+    {
+        QTcpServer server;
+        const bool listening = server.listen(QHostAddress::LocalHost, 0);
+        check(listening, "webhook: loopback receiver listening");
+        QByteArray received;
+        bool statusOk = true;
+        QObject::connect(
+            &server, &QTcpServer::newConnection, &server, [&]() {
+                QTcpSocket *socket = server.nextPendingConnection();
+                QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                                 [&, socket]() {
+                                     received += socket->readAll();
+                                     if (!received.contains("\r\n\r\n")) {
+                                         return;
+                                     }
+                                     const QByteArray reply =
+                                         statusOk
+                                             ? QByteArrayLiteral(
+                                                   "HTTP/1.1 200 OK\r\n"
+                                                   "Content-Length: 2\r\n"
+                                                   "Connection: close\r\n\r\nok")
+                                             : QByteArrayLiteral(
+                                                   "HTTP/1.1 500 Error\r\n"
+                                                   "Content-Length: 3\r\n"
+                                                   "Connection: close\r\n\r\nerr");
+                                     socket->write(reply);
+                                     socket->flush();
+                                 });
+            });
+
+        auto waitDelivery = [&app](AlertWebhook &hook, bool &ok,
+                                   QString &error) {
+            QEventLoop loop;
+            bool done = false;
+            QObject::connect(&hook, &AlertWebhook::deliveryFinished, &loop,
+                             [&](bool delivered, const QString &err) {
+                                 ok = delivered;
+                                 error = err;
+                                 done = true;
+                                 loop.quit();
+                             });
+            for (int i = 0; i < 200 && !done; ++i) {
+                QThread::msleep(25);
+                app.processEvents();
+            }
+            return done;
+        };
+
+        WebhookConfig config;
+        config.enabled = true;
+        config.url = QStringLiteral("http://127.0.0.1:%1/hook")
+                         .arg(server.serverPort());
+        config.timeoutMs = 3000;
+
+        AlertWebhook hook;
+        hook.setConfig(config);
+
+        Alert alert;
+        alert.id = QStringLiteral("host_cpu");
+        alert.title = QStringLiteral("Host CPU 97% (critical)");
+        alert.detail = QStringLiteral("host cpu 97.2% >= 95%");
+        alert.severity = QStringLiteral("critical");
+        alert.atMs = 1700000000000LL;
+
+        bool ok = false;
+        QString error;
+        hook.processEvents({alert}, {alert}, 1700000000000LL);
+        const bool delivered = waitDelivery(hook, ok, error);
+        check(delivered, "webhook: live delivery finished");
+        check(ok, "webhook: live delivery 200 ok");
+        check(received.startsWith("POST /hook HTTP/1.1"),
+              "webhook: live request POST path");
+        check(received.contains("Content-Type: application/json"),
+              "webhook: live request content type");
+        check(received.contains("\"version\":\"4\""),
+              "webhook: live body carries v4 payload");
+        check(hook.statusLine().contains(QStringLiteral("1 sent, 0 failed")),
+              "webhook: live status line counts sent");
+
+        statusOk = false;
+        Alert second;
+        second.id = QStringLiteral("app_rss");
+        second.title = QStringLiteral("Focused app RSS 2.4 GB (warn)");
+        second.detail = QStringLiteral("cursor rss 2400 MB >= 1024 MB");
+        second.severity = QStringLiteral("warning");
+        second.atMs = 1700000000000LL;
+
+        ok = true;
+        error.clear();
+        hook.processEvents({second}, {alert, second}, 1700000060000LL);
+        const bool failedDelivery = waitDelivery(hook, ok, error);
+        check(failedDelivery, "webhook: failing delivery finished");
+        check(!ok && error.contains(QStringLiteral("500")),
+              "webhook: non-2xx reported as failure");
+        check(hook.statusLine().contains(QStringLiteral("1 failed")),
+              "webhook: failure counted");
+
+        hook.processEvents({}, {alert}, 1700000120000LL);
+        const bool resolvedDelivery = waitDelivery(hook, ok, error);
+        check(resolvedDelivery, "webhook: resolved delivery finished");
+        check(received.contains("\"status\":\"resolved\""),
+              "webhook: resolved event posted when alert vanishes");
+
+        AlertWebhook disabledHook;
+        bool disabledDelivered = false;
+        QObject::connect(&disabledHook, &AlertWebhook::deliveryFinished,
+                         &disabledHook,
+                         [&](bool, const QString &) {
+                             disabledDelivered = true;
+                         });
+        disabledHook.processEvents({alert}, {alert}, 1700000180000LL);
+        for (int i = 0; i < 8; ++i) {
+            QThread::msleep(25);
+            app.processEvents();
+        }
+        check(!disabledDelivered, "webhook: disabled by default sends nothing");
     }
 
     std::printf("%d failure(s)\n", failures);

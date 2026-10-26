@@ -40,6 +40,8 @@ add_library(syspeek_core STATIC
     src/CpuSampler.h
     src/AlertEngine.cpp
     src/AlertEngine.h
+    src/AlertWebhook.cpp
+    src/AlertWebhook.h
     src/Notifier.cpp
     src/Notifier.h
     src/HostSampler.cpp

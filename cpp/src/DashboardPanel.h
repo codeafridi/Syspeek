@@ -43,6 +43,7 @@ struct SettingsInfo {
     QString autostartLine;
     QString verbsLine;
     QString metricsLine;
+    QString webhookLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -73,6 +74,8 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+
+    void setWebhookLine(const QString &line);
 
     // M66: editable monitors — populates the threshold/cycles editors and
     // refreshes them without re-emitting editor signals (block during fill).

@@ -63,6 +63,13 @@ HudWindow::HudWindow(QWidget *parent)
     setObjectName(QStringLiteral("hudRoot"));
 
     m_notifier = createNotifier();
+    m_webhook = new AlertWebhook(this);
+    connect(m_webhook, &AlertWebhook::deliveryFinished, this,
+            [this](bool, const QString &) {
+                if (m_panel != nullptr) {
+                    m_panel->setWebhookLine(m_webhook->statusLine());
+                }
+            });
 
     m_pages = new QWidget(this);
     auto *pagesLayout = new QVBoxLayout(m_pages);
@@ -482,6 +489,13 @@ void HudWindow::setNotifier(std::unique_ptr<Notifier> notifier) {
     m_notifier = std::move(notifier);
 }
 
+void HudWindow::setWebhookConfig(const WebhookConfig &config) {
+    if (m_webhook != nullptr) {
+        m_webhook->setConfig(config);
+    }
+}
+
+
 void HudWindow::setSyntheticSnapshot(const SyntheticSnapshot &snapshot) {
     if (m_panel != nullptr) {
         m_panel->setSyntheticSnapshot(snapshot);
@@ -557,6 +571,9 @@ void HudWindow::evaluateAlerts() {
         }
     }
     const QList<Alert> active = m_alerts.active();
+    if (m_webhook != nullptr) {
+        m_webhook->processEvents(fired, active, now);
+    }
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
         m_incidents.update(active, now);

@@ -72,6 +72,13 @@ struct MetricsConfig {
     int port = 9107;
 };
 
+struct WebhookConfig {
+    bool enabled = false;
+    QString url;
+    QString format = QStringLiteral("generic");
+    int timeoutMs = 5000;
+};
+
 struct SloConfig {
     QString name = QStringLiteral("focused-app availability");
     double objective = 0.999;
@@ -137,6 +144,7 @@ struct Config {
     PathConfig path;
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
+    WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;
     TlsConfig tls;

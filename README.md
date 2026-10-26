@@ -291,6 +291,27 @@ Prometheus text exposition format — point your scraper or Grafana agent config
 at it (nothing leaves your machine unless you do). Disable with
 `[metrics] enabled=false` or move it with `port=`.
 
+**Alert webhooks** — off by default. Point `[webhook]` at your own endpoint to
+POST fired/resolved alert events out of the HUD (nothing is sent until you set
+`enabled=true` and a `url`):
+
+```ini
+[webhook]
+enabled = true
+url = https://alerts.example.com/syspeek
+format = generic        ; generic | slack
+timeout_ms = 5000
+```
+
+`format=generic` sends the Prometheus Alertmanager webhook **v4** schema
+(`version`, `groupKey`, `truncatedAlerts`, `status`, `alerts[]` with
+`labels`/`annotations`/`startsAt`/`endsAt`/`fingerprint`), so any receiver that
+understands Alertmanager webhooks works unchanged. `format=slack` sends a Slack
+incoming-webhook message (`text` + `attachments[]` with `color`, `title`,
+`fields`, `mrkdwn_in`). One POST per tick per group (firing batch, resolved
+batch); alerts that clear between ticks produce a `resolved` event. The Settings
+view shows the configured target and the last delivery result.
+
 Handy environment variables:
 
 - `SYSPEEK_PROBE=1 ./syspeek` — print the detected focus provider and

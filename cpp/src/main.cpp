@@ -510,6 +510,7 @@ int main(int argc, char *argv[]) {
                 ? QStringLiteral("http://127.0.0.1:%1/metrics")
                       .arg(config.metrics.port)
                 : QStringLiteral("disabled ([metrics] enabled=false)");
+        settingsInfo.webhookLine = webhookConfigLine(config.webhook);
         settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
         settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
         settingsInfo.cpuHighPercent = config.health.cpuHighPercent;
@@ -519,6 +520,7 @@ int main(int argc, char *argv[]) {
         hud.setMonitors(config.alertRules.isEmpty()
                             ? defaultAlertRules()
                             : config.alertRules);
+        hud.setWebhookConfig(config.webhook);
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);
