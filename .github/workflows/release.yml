@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: jurplel/install-qt-action@v4
         with:
@@ -34,7 +34,7 @@ jobs:
           SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
 
       - name: Upload macos artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages-macos
           path: |
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Qt 6
         run: |
@@ -81,7 +81,7 @@ jobs:
           python3 -c "import xml.dom.minidom; xml.dom.minidom.parse('cpp/packaging/obs/_service'); print('obs _service: valid XML')"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages
           path: |
@@ -92,7 +92,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: jurplel/install-qt-action@v4
         with:
@@ -139,7 +139,7 @@ jobs:
           winget validate "cpp/packaging/windows/manifests/$version"
 
       - name: Upload windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages-windows
           path: |
@@ -150,7 +150,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload manifests artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: syspeek-winget-manifests
           path: cpp/packaging/windows/manifests/
@@ -160,20 +160,20 @@ jobs:
     needs: [build, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: dist-ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages-macos
           path: dist-macos
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages-windows
           path: dist-windows
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist-ci/*.deb
