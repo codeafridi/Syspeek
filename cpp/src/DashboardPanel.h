@@ -132,6 +132,7 @@ private:
     bool m_osDpkgSbom = true;
     bool m_osFim = true;
     bool m_osSecurity = true;
+    bool m_osProcessNet = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
@@ -159,6 +160,7 @@ private:
     QLabel *m_runtime = nullptr;
     QLabel *m_memDetail = nullptr;
     QTreeWidget *m_procs = nullptr;
+    QLabel *m_procNetNote = nullptr;
     QLabel *m_focusDetail = nullptr;
     QLabel *m_openFiles = nullptr;
     QLabel *m_net = nullptr;
@@ -364,12 +366,13 @@ private:
     TimeseriesChart *m_chartHostPage = nullptr;
 
     // Datadog-style Network page (M61l): socket tiles + throughput.
-    QLabel *m_netTileConns = nullptr;
-    QLabel *m_netTileEstab = nullptr;
+    QLabel *m_netTileConns = nullptr;    QLabel *m_netTileEstab = nullptr;
     QLabel *m_netTileRetrans = nullptr;
     QLabel *m_netTileTx = nullptr;
     TimeseriesChart *m_chartNetPage = nullptr;
     TimeseriesChart *m_chartConnRtt = nullptr;
+    QLabel *m_talkers = nullptr;
+    QLabel *m_talkerSummary = nullptr;
 
     // Datadog-style Network Path page (M61m): probe tiles + RTT history.
     QLabel *m_pathTileTargets = nullptr;

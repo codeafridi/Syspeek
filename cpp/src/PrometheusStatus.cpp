@@ -159,6 +159,27 @@ QString prometheusText(const DisplaySnapshot &s) {
                              pair.first, pair.second));
     }
 
+    if (!s.processNetTalkers.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_process_net_bytes_per_second Per-process tcp throughput."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_process_net_bytes_per_second gauge"));
+        for (const ProcessNetTalker &talker : s.processNetTalkers) {
+            const QString labels =
+                QStringLiteral("process=\"%1\",pid=\"%2\"")
+                    .arg(escapeLabel(talker.name))
+                    .arg(talker.pid);
+            lines.append(
+                QStringLiteral("syspeek_process_net_bytes_per_second{%1,"
+                               "direction=\"rx\"} %2")
+                    .arg(labels, num(talker.rxPerSec)));
+            lines.append(
+                QStringLiteral("syspeek_process_net_bytes_per_second{%1,"
+                               "direction=\"tx\"} %2")
+                    .arg(labels, num(talker.txPerSec)));
+        }
+    }
+
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
             "# HELP syspeek_net_rx_bytes_total Network receive bytes."));

@@ -156,6 +156,8 @@ int main(int argc, char *argv[]) {
     root.cpuPercent = 12.5;
     root.name = QStringLiteral("alpha");
     root.memory = QStringLiteral("8 MB");
+    root.netRxPerSec = 2048.0;
+    root.listenPorts = {8080};
     ProcessRow child;
     child.pid = 124;
     child.depth = 1;
@@ -208,6 +210,19 @@ int main(int argc, char *argv[]) {
     ifaceRow.rxPerSec = 2048.0;
     ifaceRow.txPerSec = 1024.0;
     withProcs.interfaces = {ifaceRow};
+    withProcs.processNetAvailable = true;
+    withProcs.processNetTracked = 11;
+    withProcs.processNetUnattributed = 35;
+    withProcs.focusNetRxPerSec = 2048.0;
+    withProcs.focusNetTxPerSec = 512.0;
+    ProcessNetTalker talker;
+    talker.pid = 123;
+    talker.sockets = 2;
+    talker.name = QStringLiteral("alpha");
+    talker.rxPerSec = 2048.0;
+    talker.txPerSec = 512.0;
+    talker.listenPorts = {8080};
+    withProcs.processNetTalkers = {talker};
     hud.setSnapshot(withProcs);
 
     auto *dashApp = hud.findChild<QLabel *>(QStringLiteral("ddApp"));
@@ -236,17 +251,28 @@ int main(int argc, char *argv[]) {
                      == QStringLiteral("alpha-child"),
           "panel process tree nests child");
     check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
-              && dashProcs->topLevelItem(0)->text(3) == QStringLiteral("5")
-              && dashProcs->topLevelItem(0)->text(4) == QStringLiteral("12"),
+              && dashProcs->topLevelItem(0)->text(5) == QStringLiteral("5")
+              && dashProcs->topLevelItem(0)->text(6) == QStringLiteral("12"),
           "panel process tree shows threads and fds");
     check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
               && dashProcs->topLevelItem(0)->text(2) == QStringLiteral("12.5%"),
           "panel process tree shows cpu percent");
+    check(dashProcs != nullptr && dashProcs->columnCount() == 9,
+          "panel process tree has the m71 net + ports columns");
+    check(dashProcs != nullptr && dashProcs->topLevelItem(0) != nullptr
+              && dashProcs->topLevelItem(0)->text(3) == QStringLiteral("2 KB/s")
+              && dashProcs->topLevelItem(0)->text(4) == QStringLiteral("--")
+              && dashProcs->topLevelItem(0)->text(8) == QStringLiteral("8080"),
+          "panel process tree shows net rates and listening ports");
 
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));
     check(focusDetail != nullptr
               && focusDetail->text().contains(QStringLiteral("ctx sw")),
           "panel shows focused process detail");
+    check(focusDetail != nullptr
+              && focusDetail->text().contains(
+                  QStringLiteral("net tcp  2 KB/s down / 512 B/s up")),
+          "panel focus detail carries the app tcp rate");
     auto *openFiles = hud.findChild<QLabel *>(QStringLiteral("ddOpenFiles"));
     check(openFiles != nullptr
               && openFiles->text().contains(QStringLiteral("socket:[999]")),
@@ -269,6 +295,23 @@ int main(int argc, char *argv[]) {
     check(dashIfaces != nullptr
               && dashIfaces->text().contains(QStringLiteral("eth0")),
           "panel shows interfaces");
+
+    auto *netNote = hud.findChild<QLabel *>(QStringLiteral("ddProcNetNote"));
+    check(netNote != nullptr
+              && netNote->text().contains(QStringLiteral("11 tracked"))
+              && netNote->text().contains(QStringLiteral("35 other users")),
+          "panel states tcp attribution honesty");
+    auto *talkers = hud.findChild<QLabel *>(QStringLiteral("ddTalkers"));
+    check(talkers != nullptr
+              && talkers->text().contains(QStringLiteral("alpha"))
+              && talkers->text().contains(QStringLiteral("rx 2 KB/s"))
+              && talkers->text().contains(QStringLiteral(":8080")),
+          "panel lists top talkers with their ports");
+    auto *talkerSummary =
+        hud.findChild<QLabel *>(QStringLiteral("ddTalkerSummary"));
+    check(talkerSummary != nullptr
+              && talkerSummary->text().contains(QStringLiteral("tcp sockets")),
+          "panel talker card carries the socket summary");
 
     auto *dashDeps = hud.findChild<QLabel *>(QStringLiteral("ddDeps"));
     check(dashDeps != nullptr

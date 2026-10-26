@@ -29,6 +29,7 @@
 #include "FimStatus.h"
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
+#include "ProcessNetStatus.h"
 #include "platform/mac/MacFimStream.h"
 #include <QFile>
 #include <QEventLoop>
@@ -546,6 +547,28 @@ int main(int argc, char *argv[]) {
               "prometheus: oom kill counter");
         check(text.contains(QStringLiteral("syspeek_cgroup_pids 148")),
               "prometheus: cgroup pids gauge");
+
+        ProcessNetTalker talker;
+        talker.pid = 508637;
+        talker.name = QStringLiteral("cursor");
+        talker.sockets = 7;
+        talker.rxPerSec = 2048.0;
+        talker.txPerSec = 512.0;
+        s.processNetTalkers.append(talker);
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "pid=\"508637\",direction=\"rx\"} 2048.000")),
+              "prometheus: per-process rx gauge");
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "pid=\"508637\",direction=\"tx\"} 512.000")),
+              "prometheus: per-process tx gauge");
+        s.processNetTalkers.clear();
+        text = prometheusText(s);
+        check(!text.contains(
+                  QStringLiteral("syspeek_process_net_bytes_per_second")),
+              "prometheus: talker block omitted when no traffic");
     }
 
     int status = 0;
@@ -2278,6 +2301,160 @@ int main(int argc, char *argv[]) {
             exportCsv({}, meta);
         check(emptyCsv.count(QLatin1Char('\n')) == 1,
               "csv: header-only file when no samples exist");
+    }
+
+    {
+        // M71: per-socket tcp_info byte deltas become per-pid rates.
+        linuxproc::TcpDiagInfo a;
+        a.inode = 111;
+        a.hasInfo = true;
+        a.bytesReceived = 1000;
+        a.bytesSent = 500;
+        linuxproc::TcpDiagInfo b;
+        b.inode = 222;
+        b.hasInfo = true;
+        b.bytesReceived = 4096;
+        b.bytesSent = 0;
+
+        QHash<unsigned long long, ProcessNetPrior> prior;
+        QHash<unsigned long long, ProcessNetRate> rates =
+            processNetSocketRates({a, b}, 1000, prior);
+        check(rates.value(111).rxPerSec < 0.0
+                  && rates.value(222).txPerSec < 0.0,
+              "net: first tick per socket is warming (no rate)");
+
+        a.bytesReceived = 3000;
+        a.bytesSent = 1500;
+        b.bytesReceived = 4096;
+        rates = processNetSocketRates({a, b}, 1000, prior);
+        check(rates.value(111).rxPerSec == 2000.0
+                  && rates.value(111).txPerSec == 1000.0,
+              "net: byte delta over the interval yields bytes/s");
+        check(rates.value(222).rxPerSec == 0.0
+                  && rates.value(222).txPerSec == 0.0,
+              "net: idle socket reports an honest zero");
+
+        a.bytesReceived = 10;
+        a.bytesSent = 10;
+        rates = processNetSocketRates({a}, 1000, prior);
+        check(rates.value(111).rxPerSec == 0.0
+                  && rates.value(111).txPerSec == 0.0,
+              "net: recycled inode rebases to zero, never negative");
+
+        linuxproc::TcpDiagInfo noInfo;
+        noInfo.inode = 333;
+        noInfo.hasInfo = false;
+        rates = processNetSocketRates({noInfo}, 1000, prior);
+        check(rates.isEmpty(), "net: sockets without tcp_info are skipped");
+
+        QHash<unsigned long long, ProcessNetRate> socketRates;
+        ProcessNetRate known;
+        known.rxPerSec = 2048.0;
+        known.txPerSec = 1024.0;
+        socketRates.insert(111, known);
+        ProcessNetRate warm;
+        socketRates.insert(222, warm);
+        ProcessNetRate heavy;
+        heavy.rxPerSec = 8192.0;
+        heavy.txPerSec = 4096.0;
+        socketRates.insert(999, heavy);
+        QHash<unsigned long long, int> inodePid;
+        inodePid.insert(111, 500);
+        inodePid.insert(222, 500);
+        inodePid.insert(999, 501);
+        const QHash<int, ProcessNetPidRate> pidRates =
+            processNetPidRates(socketRates, inodePid);
+        check(pidRates.size() == 2 && pidRates.value(500).sockets == 2,
+              "net: pid aggregation counts sockets");
+        check(pidRates.value(500).rxPerSec == 2048.0
+                  && pidRates.value(500).txPerSec == 1024.0,
+              "net: pid rates sum warmed sockets only");
+        check(pidRates.value(501).rxPerSec == 8192.0
+                  && pidRates.value(501).rxPerSec >= 0.0,
+              "net: unattributed sockets are absent from the pid map");
+
+        const QList<ProcessNetTalker> talkers =
+            processNetTopTalkers(pidRates, 1);
+        check(talkers.size() == 1 && talkers.first().pid == 501,
+              "net: top talkers sorted by throughput and limited");
+
+        const QList<ProcessNetTalker> allTalkers =
+            processNetTopTalkers(pidRates, 8);
+        check(allTalkers.size() == 2, "net: zero-traffic pids filtered");
+
+        QHash<unsigned long long, ProcessNetRate> coldSockets;
+        coldSockets.insert(222, warm);
+        const QHash<int, ProcessNetPidRate> coldOnly =
+            processNetPidRates(coldSockets, inodePid);
+        check(coldOnly.value(500).rxPerSec < 0.0
+                  && coldOnly.value(500).sockets == 1
+                  && processNetTopTalkers(coldOnly, 8).isEmpty(),
+              "net: warming pids stay out of the talker list");
+
+        linuxproc::SocketInfo listen4;
+        listen4.proto = QStringLiteral("tcp4");
+        listen4.state = QStringLiteral("LISTEN");
+        listen4.localPort = 8080;
+        listen4.inode = 111;
+        linuxproc::SocketInfo listen6;
+        listen6.proto = QStringLiteral("tcp6");
+        listen6.state = QStringLiteral("LISTEN");
+        listen6.localPort = 443;
+        listen6.inode = 111;
+        linuxproc::SocketInfo established;
+        established.proto = QStringLiteral("tcp4");
+        established.state = QStringLiteral("ESTABLISHED");
+        established.localPort = 9000;
+        established.inode = 111;
+        linuxproc::SocketInfo otherPid;
+        otherPid.proto = QStringLiteral("tcp4");
+        otherPid.state = QStringLiteral("LISTEN");
+        otherPid.localPort = 5432;
+        otherPid.inode = 777;
+        const QList<quint16> ports = processNetListenPorts(
+            {listen4, listen6, established, otherPid}, {111});
+        check(ports == QList<quint16>({443, 8080}),
+              "net: listen ports filtered, deduped and sorted");
+
+        check(formatNetRate(-1.0) == QStringLiteral("--"),
+              "net: unknown rate renders as dashes");
+        check(formatNetRate(512.0) == QStringLiteral("512 B/s")
+                  && formatNetRate(2048.0) == QStringLiteral("2 KB/s")
+                  && formatNetRate(5.0 * 1024 * 1024)
+                         == QStringLiteral("5.0 MB/s"),
+              "net: rate formatting scales");
+        check(formatListenPorts({}) == QStringLiteral("--")
+                  && formatListenPorts({22, 80, 443, 8080})
+                         == QStringLiteral("22, 80, 443 +1")
+                  && formatListenPorts({5432}) == QStringLiteral("5432"),
+              "net: port formatting elides long lists");
+        check(processNetSummaryText(0, 0)
+                  == QStringLiteral("no tcp sockets")
+                  && processNetSummaryText(11, 35)
+                         == QStringLiteral("tcp sockets: 11 tracked, "
+                                           "35 other users"),
+              "net: summary states attribution honesty");
+    }
+
+    {
+        class FakeInodeBackend : public NullBackend {
+        public:
+            QList<unsigned long long> socketInodes(int pid) override {
+                if (pid == 700) {
+                    return {111, 0, 222};
+                }
+                if (pid == 701) {
+                    return {333};
+                }
+                return {};
+            }
+        };
+        FakeInodeBackend backend;
+        const QHash<unsigned long long, int> map =
+            processNetInodePid(backend, {700, 701, 702});
+        check(map.size() == 3 && map.value(111) == 700
+                  && map.value(222) == 700 && map.value(333) == 701,
+              "net: inode map skips zero inodes and unreadable pids");
     }
 
     std::printf("%d failure(s)\n", failures);

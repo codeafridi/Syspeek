@@ -81,6 +81,9 @@ DisplaySnapshot demoSnapshot(int tick) {
     proc.threads = 148;
     proc.fds = 1204;
     proc.cpuPercent = 12.4;
+    proc.netRxPerSec = 1'258'291.0;
+    proc.netTxPerSec = 196'608.0;
+    proc.listenPorts = {9222};
     proc.name = QStringLiteral("cursor");
     proc.memory = QStringLiteral("612.4 MB");
     s.processes = {proc};
@@ -99,6 +102,37 @@ DisplaySnapshot demoSnapshot(int tick) {
         row.memory = QString::fromUtf8(mem);
         s.processes.append(row);
     }
+    s.processes[1].netRxPerSec = 262'144.0;
+    s.processes[1].netTxPerSec = 65'536.0;
+    s.processes[1].listenPorts = {3000, 3001};
+    s.processes[4].netRxPerSec = 0.0;
+    s.processes[4].netTxPerSec = 0.0;
+    s.processNetAvailable = true;
+    s.processNetTracked = 14;
+    s.processNetUnattributed = 39;
+    s.focusNetRxPerSec = 1'258'291.0;
+    s.focusNetTxPerSec = 196'608.0;
+    ProcessNetTalker talkerA;
+    talkerA.pid = 2092707;
+    talkerA.sockets = 4;
+    talkerA.rxPerSec = 1'258'291.0;
+    talkerA.txPerSec = 196'608.0;
+    talkerA.name = QStringLiteral("cursor");
+    talkerA.listenPorts = {9222};
+    ProcessNetTalker talkerB;
+    talkerB.pid = 2092708;
+    talkerB.sockets = 2;
+    talkerB.rxPerSec = 262'144.0;
+    talkerB.txPerSec = 65'536.0;
+    talkerB.name = QStringLiteral("node");
+    talkerB.listenPorts = {3000, 3001};
+    ProcessNetTalker talkerC;
+    talkerC.pid = 8842;
+    talkerC.sockets = 1;
+    talkerC.rxPerSec = 12'288.0;
+    talkerC.txPerSec = 40'960.0;
+    talkerC.name = QStringLiteral("rsync");
+    s.processNetTalkers = {talkerA, talkerB, talkerC};
 
     ConnectionRow conn;
     conn.proto = QStringLiteral("tcp");

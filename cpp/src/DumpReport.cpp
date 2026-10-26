@@ -1,6 +1,7 @@
 #include "DumpReport.h"
 
 #include "DiskStatus.h"
+#include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "HostInfoStatus.h"
 #include "platform/PlatformFactory.h"
@@ -265,6 +266,53 @@ QString dumpReportJson(int maxProcs) {
         root.insert(QStringLiteral("tcpDiag"), tcpDiag);
     }
 #endif
+
+    {
+        QJsonObject processNet;
+        const bool supported = backend.capabilities().perProcessNet;
+        processNet.insert(QStringLiteral("available"), supported);
+        if (supported) {
+            const QHash<unsigned long long, int> inodePid =
+                processNetInodePid(backend, pids);
+            QHash<unsigned long long, ProcessNetPrior> prior;
+            const QList<linuxproc::TcpDiagInfo> baseline = backend.queryTcpDiag();
+            processNetSocketRates(baseline, 250, prior);
+            QThread::msleep(250);
+            const QList<linuxproc::TcpDiagInfo> current = backend.queryTcpDiag();
+            const QHash<unsigned long long, ProcessNetRate> socketRates =
+                processNetSocketRates(current, 250, prior);
+            int tracked = 0;
+            int unattributed = 0;
+            for (const linuxproc::TcpDiagInfo &info : current) {
+                if (info.inode == 0) {
+                    continue;
+                }
+                if (inodePid.contains(info.inode)) {
+                    ++tracked;
+                } else {
+                    ++unattributed;
+                }
+            }
+            processNet.insert(QStringLiteral("tracked"), tracked);
+            processNet.insert(QStringLiteral("unattributed"), unattributed);
+            processNet.insert(QStringLiteral("socketsWithRate"),
+                              socketRates.size());
+            QList<ProcessNetTalker> talkers = processNetTopTalkers(
+                processNetPidRates(socketRates, inodePid), 5);
+            QJsonArray rows;
+            for (ProcessNetTalker &talker : talkers) {
+                QJsonObject row;
+                row.insert(QStringLiteral("pid"), talker.pid);
+                row.insert(QStringLiteral("name"), backend.comm(talker.pid));
+                row.insert(QStringLiteral("sockets"), talker.sockets);
+                row.insert(QStringLiteral("rxBps"), talker.rxPerSec);
+                row.insert(QStringLiteral("txBps"), talker.txPerSec);
+                rows.append(row);
+            }
+            processNet.insert(QStringLiteral("talkers"), rows);
+        }
+        root.insert(QStringLiteral("processNet"), processNet);
+    }
 
     QJsonObject services;
     const QList<ServiceRecord> serviceRecords = backend.readServices();

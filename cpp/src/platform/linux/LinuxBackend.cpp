@@ -19,6 +19,7 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.tcpCounters = true;
     caps.psi = true;
     caps.namespaces = true;
+    caps.perProcessNet = true;
     return caps;
 }
 

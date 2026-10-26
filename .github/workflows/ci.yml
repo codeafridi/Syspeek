@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -102,6 +102,16 @@ jobs:
               assert td["count"] >= 0 and td["withInfo"] >= 0, td
               print("tcpdiag ok: %d sockets, %d with tcp_info"
                     % (td["count"], td["withInfo"]))
+              pn = d.get("processNet", {})
+              assert pn.get("available") is True, pn
+              assert pn["tracked"] >= 0 and pn["unattributed"] >= 0, pn
+              assert pn["socketsWithRate"] >= 0, pn
+              for t in pn.get("talkers", []):
+                  assert t["rxBps"] >= 0 and t["txBps"] >= 0, t
+              print("processNet ok: %d tracked, %d other-user sockets, "
+                    "%d talkers"
+                    % (pn["tracked"], pn["unattributed"],
+                       len(pn.get("talkers", []))))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):

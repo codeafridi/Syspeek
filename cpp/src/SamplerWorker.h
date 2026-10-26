@@ -12,6 +12,7 @@
 #include "LinuxProcess.h"
 #include "NetRateTracker.h"
 #include "ProcessIdentity.h"
+#include "ProcessNetStatus.h"
 #include "SbomSource.h"
 #include "TcpSampler.h"
 #include "platform/PlatformFactory.h"
@@ -45,6 +46,8 @@ private:
     DisplaySnapshot buildSnapshot(const FocusSample &focus);
     void fillHostTail(DisplaySnapshot &snapshot,
                       const QList<linuxproc::SocketInfo> &sockets);
+    void fillProcessNet(DisplaySnapshot &snapshot,
+                        const QList<linuxproc::SocketInfo> &sockets);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -70,6 +73,10 @@ private:
     };
     QHash<unsigned long long, DiagPrior> m_diagPrior;
 #endif
+    QHash<unsigned long long, ProcessNetPrior> m_netPrior;
+    QHash<unsigned long long, int> m_netInodePid;
+    qint64 m_netMapStampMs = 0;
+    qint64 m_netRateStampMs = 0;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;
