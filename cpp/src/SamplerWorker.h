@@ -50,6 +50,7 @@ private:
     void fillProcessNet(DisplaySnapshot &snapshot,
                         const QList<linuxproc::SocketInfo> &sockets);
     void fillProcessDisk(DisplaySnapshot &snapshot);
+    void fillGpu(DisplaySnapshot &snapshot);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -89,6 +90,17 @@ private:
     double m_scanDiskWritePerSec = -1.0;
     int m_scanDiskTracked = 0;
     int m_scanDiskUnreadable = 0;
+    // GPU: one backend probe per 2 s window plus an incremental fdinfo
+    // client scan (known clients + a rotating pid slice, ~80 pids/tick)
+    // so the per-tick cost stays bounded on big machines.
+    GpuReading m_gpuReading;
+    QHash<quint64, GpuEngineSample> m_gpuClients;
+    QHash<quint64, GpuClientPrior> m_gpuPrior;
+    QList<GpuProcess> m_gpuProcesses;
+    qint64 m_gpuStampMs = 0;
+    qint64 m_gpuWindowMs = 0;
+    int m_gpuRotate = 0;
+    bool m_gpuWarming = true;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

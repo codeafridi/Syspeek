@@ -41,6 +41,7 @@ public:
     int countFds(int pid) override;
     bool processDiskCounters(int pid, long long &readBytes,
                              long long &writeBytes) override;
+    GpuReading gpuInfo() override;
     QList<unsigned long long> socketInodes(int pid) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;
@@ -73,6 +74,14 @@ private:
     QList<void *> m_pdhDiskHandles;
     long long m_pdhTimeBase = 0;
     QMutex m_pdhDiskMutex;
+
+    // GPU Engine / GPU Process Memory / GPU Adapter Memory counters
+    // (Task Manager's GPU view is fed by the same PDH counter set).
+    bool ensurePdhGpuQuery();
+    void closePdhGpuQuery();
+    void *m_pdhGpuQuery = nullptr;
+    QList<void *> m_pdhGpuHandles;
+    QMutex m_pdhGpuMutex;
 
     // Per-process cumulative context switches (NtQuerySystemInformation
     // SystemProcessInformation walk; 1 s TTL cache).

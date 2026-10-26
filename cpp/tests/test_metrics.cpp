@@ -29,6 +29,7 @@
 #include "FimStatus.h"
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
+#include "GpuStatus.h"
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "platform/mac/MacFimStream.h"
@@ -2557,6 +2558,197 @@ int main(int argc, char *argv[]) {
         check(consumerText.contains(QStringLiteral("pid 302"))
                   && consumerText.contains(QStringLiteral("KB/s")),
               "disk: consumer text renders one row per pid");
+    }
+
+
+    {
+        GpuEngineSample sample;
+        const QByteArray i915 =
+            "pos:\t0\nflags:\t02100002\ndrm-driver:\ti915\n"
+            "drm-client-id:\t721\ndrm-pdev:\t0000:00:02.0\n"
+            "drm-total-system0:\t4096\ndrm-total-stolen-system0:\t0\n"
+            "drm-engine-render:\t1000 ns\ndrm-engine-copy:\t250 ns\n"
+            "drm-engine-capacity-video:\t2\ndrm-engine-video:\t0 ns\n";
+        check(parseDrmFdinfo(i915, sample) && sample.driver == "i915"
+                  && sample.clientId == 721
+                  && sample.pciId == QStringLiteral("0000:00:02.0")
+                  && sample.memSystem == 4096 && sample.hasEngines
+                  && sample.engineNanos.value(QStringLiteral("render")) == 1000
+                  && !sample.engineNanos.contains(QStringLiteral("capacity-video")),
+              "gpu: i915 fdinfo decode (engines in ns, capacity excluded)");
+
+        GpuEngineSample amd;
+        const QByteArray amdgpu =
+            "drm-driver:\tamdgpu\ndrm-client-id:\t9\n"
+            "drm-memory-vram:\t1048576 KiB\ndrm-total-local0:\t8192\n"
+            "drm-total-system0:\t2048\ndrm-engine-gfx:\t5000 ns\n";
+        check(parseDrmFdinfo(amdgpu, amd) && amd.driver == "amdgpu"
+                  && amd.memLocal == 8192 && amd.memSystem == 2048,
+              "gpu: amdgpu local/system memory split");
+
+        GpuEngineSample plain;
+        check(!parseDrmFdinfo("pos:\t0\nflags:\t02\n", plain),
+              "gpu: non-drm fdinfo is rejected");
+
+        QHash<quint64, GpuClientPrior> prior;
+        GpuEngineSample first;
+        first.pid = 42;
+        first.name = QStringLiteral("game");
+        first.clientId = 7;
+        first.engineNanos.insert(QStringLiteral("render"), 1000);
+        first.hasEngines = true;
+        const auto warming = gpuClientBusy({first}, 1000, prior);
+        check(warming.value(7).busyPercent < 0.0,
+              "gpu: first sighting of a client is warming, not zero");
+
+        GpuEngineSample second = first;
+        second.engineNanos.insert(QStringLiteral("render"), 1000 + 500 * 1000000LL);
+        const auto busy = gpuClientBusy({second}, 1000, prior);
+        check(qAbs(busy.value(7).busyPercent - 50.0) < 0.01,
+              "gpu: engine nanos over the window become 50 percent");
+        check(busy.value(7).engines.contains(QStringLiteral("render")),
+              "gpu: busy engines are named in the row");
+
+        GpuEngineSample reset = first;
+        reset.engineNanos.insert(QStringLiteral("render"), 10);
+        const auto afterReset = gpuClientBusy({reset}, 1000, prior);
+        check(afterReset.value(7).busyPercent == 0.0,
+              "gpu: a counter reset rebases to zero, never negative");
+
+        GpuEngineSample other;
+        other.pid = 77;
+        other.clientId = 8;
+        other.engineNanos.insert(QStringLiteral("render"), 1);
+        QHash<quint64, GpuClientPrior> prune;
+        gpuClientBusy({first}, 0, prune);
+        gpuClientBusy({other}, 0, prune);
+        check(prune.size() == 1 && prune.contains(8),
+              "gpu: prior map drops clients that disappeared");
+
+        GpuEngineSample a;
+        a.pid = 42;
+        a.name = QStringLiteral("game");
+        a.clientId = 1;
+        a.memLocal = 1024;
+        GpuEngineSample b;
+        b.pid = 42;
+        b.name = QStringLiteral("game");
+        b.clientId = 2;
+        b.memSystem = 512;
+        QHash<quint64, GpuClientBusy> rates;
+        GpuClientBusy r1;
+        r1.busyPercent = 20.0;
+        r1.memBytes = 1024;
+        r1.engines = QStringLiteral("render 20%");
+        GpuClientBusy r2;
+        r2.busyPercent = -1.0;
+        r2.memBytes = 512;
+        rates.insert(1, r1);
+        rates.insert(2, r2);
+        const QList<GpuProcess> merged = gpuMergeClients({a, b}, rates, 8);
+        check(merged.size() == 1 && merged.at(0).pid == 42
+                  && qAbs(merged.at(0).busyPercent - 20.0) < 0.01
+                  && merged.at(0).memBytes == 1536,
+              "gpu: clients fold per pid (busy keeps known values only)");
+        check(qAbs(gpuClientTotalBusy(merged) - 20.0) < 0.01
+                  && gpuClientTotalBusy({}) < 0.0,
+              "gpu: client total clamps and reports no-data honestly");
+
+        const QList<GpuDevice> nv = parseNvidiaSmiCsv(
+            "0, NVIDIA GeForce RTX 4090, 45, 2048, 24564, 61, 120.50, 2100\n"
+            "1, NVIDIA A100, [N/A], [N/A], 40960, 35, [N/A], 1410\n");
+        check(nv.size() == 2 && nv.at(0).vendor == "nvidia"
+                  && nv.at(0).utilPercent == 45.0
+                  && nv.at(0).memUsed == 2048ULL * 1024 * 1024
+                  && nv.at(0).tempC == 61.0
+                  && nv.at(0).powerW == 120.5 && nv.at(0).clockMhz == 2100
+                  && nv.at(1).utilPercent < 0.0,
+              "gpu: nvidia-smi csv decode keeps [N/A] honest");
+
+        const QList<GpuProcess> apps = parseNvidiaSmiAppsCsv(
+            "GPU-abc, 1234, python3, 512\nGPU-abc, 4321, blender, 2048\n");
+        check(apps.size() == 2 && apps.at(0).pid == 1234
+                  && apps.at(0).memBytes == 512ULL * 1024 * 1024,
+              "gpu: nvidia-smi compute apps decode");
+
+        GpuDevice ioreg;
+        const QByteArray ioregText =
+            "\"PerformanceStatistics\" = {\"Device Utilization %\"=37,"
+            "\"Renderer Utilization %\"=20,\"In use system memory\"=734003200,"
+            "\"Core Clock(MHz)\"=1200,\"model\"=\"Apple M3\"}\n";
+        check(parseIoregAccelerator(ioregText, ioreg)
+                  && ioreg.utilPercent == 37.0
+                  && ioreg.memUsed == 734003200ULL
+                  && ioreg.clockMhz == 1200
+                  && ioreg.name == QStringLiteral("Apple M3"),
+              "gpu: IOAccelerator PerformanceStatistics decode");
+
+        GpuDevice coreUtil;
+        check(parseIoregAccelerator(
+                  "\"GPU Core Utilization\"=0.42\n", coreUtil)
+                  && qAbs(coreUtil.utilPercent - 42.0) < 0.01,
+              "gpu: Apple Silicon fractional GPU Core Utilization");
+
+        check(gpuVendorFromPci("0x8086", {}) == "intel"
+                  && gpuVendorFromPci("1002", {}) == "amd"
+                  && gpuVendorFromPci("10de", {}) == "nvidia"
+                  && gpuVendorFromPci("8680", {}) == "intel"
+                  && gpuVendorFromPci("6b10", {}) == "apple"
+                  && gpuVendorFromPci("1234", {}) == "unknown",
+              "gpu: pci vendor ids map for sysfs and ioreg byte order");
+        check(gpuVendorLabel("nvidia") == QStringLiteral("NVIDIA")
+                  && gpuVendorLabel("intel") == QStringLiteral("Intel"),
+              "gpu: vendor labels");
+
+        check(gpuPidFromPdhInstance(
+                  QStringLiteral("pid_1234_luid_0x00000000_0x0000A7A1_phys_0_"
+                                 "eng_0_engtype_3D")) == 1234
+                  && gpuPidFromPdhInstance(QStringLiteral("luid_0x0_0x1")) == 0,
+              "gpu: pdh instance names carry the pid");
+
+        GpuReading reading;
+        reading.ok = true;
+        reading.vendor = QStringLiteral("intel");
+        GpuDevice dev;
+        dev.vendor = QStringLiteral("intel");
+        dev.name = QStringLiteral("Iris Xe");
+        dev.driver = QStringLiteral("i915");
+        dev.utilPercent = 12.5;
+        dev.memUsed = 512ULL * 1024 * 1024;
+        dev.memTotal = 8ULL * 1024 * 1024 * 1024;
+        dev.tempC = 55.0;
+        dev.powerW = 11.5;
+        dev.clockMhz = 900;
+        reading.devices.append(dev);
+        check(gpuDeviceText(reading).contains(QStringLiteral("12.5%"))
+                  && gpuDeviceText(reading).contains(QStringLiteral("900 MHz"))
+                  && !gpuDeviceText(reading).contains(QStringLiteral("%1")),
+              "gpu: device text renders every field and no raw placeholders");
+        check(gpuSummaryText(reading, false, true, 2)
+                  .contains(QStringLiteral("2 processes"))
+                  && gpuSummaryText(reading, true, true, 0)
+                         .contains(QStringLiteral("warming")),
+              "gpu: summary states process counts and warming");
+        GpuProcess gp;
+        gp.pid = 42;
+        gp.name = QStringLiteral("game");
+        gp.busyPercent = 55.5;
+        gp.memBytes = 256ULL * 1024 * 1024;
+        gp.engines = QStringLiteral("render 55%");
+        check(gpuProcessText({gp}).contains(QStringLiteral("55.5%"))
+                  && gpuProcessText({gp}).contains(QStringLiteral("render")),
+              "gpu: process text renders busy, memory and engines");
+
+        DisplaySnapshot gpuSnap;
+        gpuSnap.gpu = reading;
+        const QString prom = prometheusText(gpuSnap);
+        check(prom.contains(QStringLiteral("syspeek_gpu_utilization_percent"))
+                  && prom.contains(QStringLiteral("syspeek_gpu_memory_total_bytes"))
+                  && prom.contains(QStringLiteral("syspeek_gpu_temperature_celsius")),
+              "gpu: prometheus exposes device gauges when a gpu is present");
+        DisplaySnapshot emptyGpu;
+        check(!prometheusText(emptyGpu).contains(QStringLiteral("syspeek_gpu_")),
+              "gpu: prometheus omits gpu lines when no reading exists");
     }
 
     std::printf("%d failure(s)\n", failures);

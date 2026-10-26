@@ -164,6 +164,39 @@ DisplaySnapshot demoSnapshot(int tick) {
     diskC.writePerSec = 524'288.0;
     s.processDiskTop = {diskA, diskB, diskC};
 
+
+    s.gpu.ok = true;
+    s.gpu.vendor = QStringLiteral("intel");
+    s.gpuClientsAvailable = true;
+    {
+        GpuDevice dev;
+        dev.index = 0;
+        dev.vendor = QStringLiteral("intel");
+        dev.name = QStringLiteral("Iris Xe Graphics");
+        dev.driver = QStringLiteral("i915");
+        dev.pciId = QStringLiteral("8086:A7A1");
+        dev.utilPercent = 62.5;
+        dev.memUsed = 2ULL * 1024 * 1024 * 1024;
+        dev.memTotal = 8ULL * 1024 * 1024 * 1024;
+        dev.tempC = 64.0;
+        dev.powerW = 18.5;
+        dev.clockMhz = 1150;
+        s.gpu.devices = {dev};
+        GpuProcess game;
+        game.pid = 2092707;
+        game.name = QStringLiteral("cursor");
+        game.busyPercent = 62.5;
+        game.memBytes = 1ULL * 1024 * 1024 * 1024;
+        game.engines = QStringLiteral("render 62%");
+        GpuProcess shell;
+        shell.pid = 2048;
+        shell.name = QStringLiteral("gnome-shell");
+        shell.busyPercent = 11.0;
+        shell.memBytes = 512ULL * 1024 * 1024;
+        shell.engines = QStringLiteral("render 11%");
+        s.gpu.processes = {game, shell};
+    }
+
     ConnectionRow conn;
     conn.proto = QStringLiteral("tcp");
     conn.local = QStringLiteral("127.0.0.1:59640");

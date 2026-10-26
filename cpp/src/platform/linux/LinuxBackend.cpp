@@ -1,5 +1,7 @@
 #include "LinuxBackend.h"
 
+#include "LinuxGpu.h"
+
 #include <QFile>
 
 #include <unistd.h>
@@ -22,6 +24,8 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.perProcessNet = true;
     caps.perProcessDisk = true;
     caps.perProcessDiskScan = true;
+    caps.gpu = true;
+    caps.gpuClients = true;
     return caps;
 }
 
@@ -158,6 +162,15 @@ bool LinuxBackend::processOom(int pid, linuxproc::OomInfo &out) {
 bool LinuxBackend::processDiskCounters(int pid, long long &readBytes,
                                        long long &writeBytes) {
     return linuxproc::procDiskCounters(pid, readBytes, writeBytes);
+}
+
+GpuReading LinuxBackend::gpuInfo() {
+    return linuxgpu::collect();
+}
+
+bool LinuxBackend::gpuClients(const QList<int> &pids,
+                              QList<GpuEngineSample> &out) {
+    return linuxgpu::clients(pids, out);
 }
 
 bool LinuxBackend::sumRssKb(const QList<int> &pids, unsigned long long &out) {

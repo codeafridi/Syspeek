@@ -2,6 +2,7 @@
 
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
+#include "GpuStatus.h"
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
@@ -106,6 +107,9 @@ struct DisplaySnapshot {
     double processDiskReadPerSec = -1.0;
     double processDiskWritePerSec = -1.0;
     QList<ProcessDiskConsumer> processDiskTop;
+    GpuReading gpu;
+    bool gpuWarming = false;
+    bool gpuClientsAvailable = false;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;
     QList<EndpointRow> endpoints;

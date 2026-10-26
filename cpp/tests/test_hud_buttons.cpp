@@ -238,6 +238,28 @@ int main(int argc, char *argv[]) {
     diskConsumer.readPerSec = 0.0;
     diskConsumer.writePerSec = 2097152.0;
     withProcs.processDiskTop = {diskConsumer};
+
+    GpuDevice gpuDev;
+    gpuDev.index = 0;
+    gpuDev.vendor = QStringLiteral("intel");
+    gpuDev.name = QStringLiteral("Iris Xe");
+    gpuDev.driver = QStringLiteral("i915");
+    gpuDev.utilPercent = 42.0;
+    gpuDev.memUsed = 2ULL * 1024 * 1024 * 1024;
+    gpuDev.memTotal = 8ULL * 1024 * 1024 * 1024;
+    gpuDev.tempC = 61.0;
+    gpuDev.clockMhz = 1100;
+    GpuProcess gpuProc;
+    gpuProc.pid = 4242;
+    gpuProc.name = QStringLiteral("game");
+    gpuProc.busyPercent = 33.0;
+    gpuProc.memBytes = 512ULL * 1024 * 1024;
+    gpuProc.engines = QStringLiteral("render 33%");
+    withProcs.gpu.ok = true;
+    withProcs.gpu.vendor = QStringLiteral("intel");
+    withProcs.gpu.devices = {gpuDev};
+    withProcs.gpu.processes = {gpuProc};
+    withProcs.gpuClientsAvailable = true;
     hud.setSnapshot(withProcs);
 
     auto *dashApp = hud.findChild<QLabel *>(QStringLiteral("ddApp"));
@@ -315,6 +337,59 @@ int main(int argc, char *argv[]) {
                   && diskTop != nullptr
                   && diskTop->text() == QStringLiteral("--"),
               "panel gates the top disk card on this OS");
+    }
+
+
+    {
+        const bool gpuCapable = systemBackend().capabilities().gpu;
+        const bool gpuClients = systemBackend().capabilities().gpuClients;
+        auto *gpuUtil = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileUtil"));
+        auto *gpuMem = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileMem"));
+        auto *gpuProcs = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileProcs"));
+        auto *gpuSummary = hud.findChild<QLabel *>(QStringLiteral("ddGpuSummary"));
+        auto *gpuDevices = hud.findChild<QLabel *>(QStringLiteral("ddGpuDevices"));
+        auto *gpuNote =
+            hud.findChild<QLabel *>(QStringLiteral("ddGpuProcessNote"));
+        auto *gpuTable =
+            hud.findChild<QTreeWidget *>(QStringLiteral("ddGpuTable"));
+        check(gpuUtil != nullptr && gpuMem != nullptr && gpuProcs != nullptr
+                  && gpuTable != nullptr,
+              "panel builds the gpu tiles and process table");
+        if (gpuCapable) {
+            check(gpuUtil->text() == QStringLiteral("42.0%")
+                      && gpuMem->text()
+                             == QStringLiteral("2.0 GB / 8.0 GB")
+                      && gpuProcs->text() == QStringLiteral("1"),
+                  "panel gpu tiles show utilization, vram and process count");
+            check(gpuDevices != nullptr
+                      && gpuDevices->text().contains(QStringLiteral("Iris Xe"))
+                      && gpuDevices->text().contains(QStringLiteral("1100 MHz")),
+                  "panel gpu device card renders the device fields");
+            check(gpuTable != nullptr && gpuTable->columnCount() == 5
+                      && gpuTable->topLevelItemCount() == 1
+                      && gpuTable->topLevelItem(0)->text(0)
+                             == QStringLiteral("game")
+                      && gpuTable->topLevelItem(0)->text(2)
+                             == QStringLiteral("33.0"),
+                  "panel gpu table lists the using processes");
+            check(gpuSummary != nullptr
+                      && gpuSummary->text().contains(
+                             QStringLiteral("1 process using the gpu")),
+                  "panel gpu summary states the process count");
+            check(gpuNote != nullptr
+                      && (gpuClients
+                              ? gpuNote->text().contains(QStringLiteral("fdinfo"))
+                              : gpuNote->text().contains(
+                                    QStringLiteral("device usage only"))),
+                  "panel gpu note states the per-process surface honestly");
+        } else {
+            check(gpuUtil->text() == QStringLiteral("--")
+                      && gpuTable->topLevelItemCount() == 0
+                      && gpuSummary != nullptr
+                      && gpuSummary->text().contains(
+                             QStringLiteral("not supported on this OS")),
+                  "panel gates the gpu page on unsupported OSes");
+        }
     }
 
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));
@@ -590,7 +665,7 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 27;
+            constexpr int kRailCount = 28;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
             rail->setCurrentRow(settingsRow);

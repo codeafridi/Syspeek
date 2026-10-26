@@ -1,5 +1,7 @@
 #include "MacBackend.h"
 
+#include "MacGpu.h"
+
 #ifdef Q_OS_MACOS
 
 #include <mach/mach.h>
@@ -231,6 +233,7 @@ PlatformCapabilities MacBackend::capabilities() const {
         && (probe.tcps_rcvtotal != 0 || probe.tcps_sndtotal != 0
             || probe.tcps_connattempt != 0);
     caps.perProcessDisk = true;
+    caps.gpu = true;
     caps.perProcessDiskScan = true;
     return caps;
 }
@@ -851,6 +854,10 @@ bool MacBackend::processDiskCounters(int pid, long long &readBytes,
     readBytes = static_cast<long long>(ri.ri_diskio_bytesread);
     writeBytes = static_cast<long long>(ri.ri_diskio_byteswritten);
     return true;
+}
+
+GpuReading MacBackend::gpuInfo() {
+    return macgpu::collect();
 }
 
 int MacBackend::countFds(int pid) {

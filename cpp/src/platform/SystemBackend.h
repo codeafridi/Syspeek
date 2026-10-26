@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DiskStatus.h"
+#include "GpuStatus.h"
 #include "LinuxProcess.h"
 #include "ProcessIdentity.h"
 #include "ProfileStatus.h"
@@ -25,6 +26,8 @@ struct PlatformCapabilities {
     bool perProcessNet = false;
     bool perProcessDisk = false;
     bool perProcessDiskScan = false;
+    bool gpu = false;
+    bool gpuClients = false;
 };
 
 class SystemBackend {
@@ -149,6 +152,18 @@ public:
         Q_UNUSED(pid);
         Q_UNUSED(readBytes);
         Q_UNUSED(writeBytes);
+        return false;
+    }
+    // Device-level GPU state (utilization, memory, temperature, power,
+    // clock) plus whatever per-process usage the platform can attribute.
+    virtual GpuReading gpuInfo() { return GpuReading{}; }
+    // Per-DRM-client engine-time counters for the given pids (Linux fdinfo).
+    // Platforms without a readable per-client surface leave this empty and
+    // report gpuClients == false so the page stays honest.
+    virtual bool gpuClients(const QList<int> &pids,
+                            QList<GpuEngineSample> &out) {
+        Q_UNUSED(pids);
+        Q_UNUSED(out);
         return false;
     }
     virtual QList<QString> fdTargets(int pid) {

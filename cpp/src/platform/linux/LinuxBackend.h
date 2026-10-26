@@ -43,6 +43,9 @@ public:
     bool processOom(int pid, linuxproc::OomInfo &out) override;
     bool processDiskCounters(int pid, long long &readBytes,
                              long long &writeBytes) override;
+    GpuReading gpuInfo() override;
+    bool gpuClients(const QList<int> &pids,
+                    QList<GpuEngineSample> &out) override;
     bool sumRssKb(const QList<int> &pids, unsigned long long &out) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;

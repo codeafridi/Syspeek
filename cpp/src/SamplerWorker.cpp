@@ -475,6 +475,7 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
     snapshot.diskIntervalMs = disk.intervalMs;
 
     fillProcessDisk(snapshot);
+    fillGpu(snapshot);
 
     const TcpHealth tcp = m_tcpSampler.sample();
     snapshot.tcpHealth = tcp;
@@ -587,6 +588,99 @@ void SamplerWorker::fillProcessNet(
             processNetListenPorts(sockets, inodesOfPid.value(talker.pid));
     }
     snapshot.processNetTalkers = talkers;
+}
+
+void SamplerWorker::fillGpu(DisplaySnapshot &snapshot) {
+    if (!m_backend->capabilities().gpu) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence = qBound<qint64>(qint64(2000), m_intervalMs * 2,
+                                          qint64(5000));
+    if (m_gpuStampMs == 0 || now - m_gpuStampMs >= cadence) {
+        const qint64 windowMs = m_gpuStampMs > 0
+            ? qBound<qint64>(qint64(200), now - m_gpuStampMs, qint64(60000))
+            : 0;
+        GpuReading reading = m_backend->gpuInfo();
+        if (m_backend->capabilities().gpuClients && reading.ok) {
+            const QList<int> all = m_backend->allPids();
+            QList<int> scan;
+            QSet<int> queued;
+            for (auto it = m_gpuClients.constBegin();
+                 it != m_gpuClients.constEnd(); ++it) {
+                if (!queued.contains(it->pid)) {
+                    queued.insert(it->pid);
+                    scan.append(it->pid);
+                }
+            }
+            // The focused app must show up on the first scan, so its pids
+            // are always in the window; the rotating slice discovers the
+            // machine-wide clients without paying a full fdinfo sweep.
+            for (const ProcessRow &row : snapshot.processes) {
+                if (!queued.contains(row.pid)) {
+                    queued.insert(row.pid);
+                    scan.append(row.pid);
+                }
+            }
+            constexpr int kRotate = 120;
+            if (!all.isEmpty()) {
+                const int count = qMin<int>(kRotate, all.size());
+                for (int i = 0; i < count; ++i) {
+                    const int pid = all.at((m_gpuRotate + i) % all.size());
+                    if (!queued.contains(pid)) {
+                        queued.insert(pid);
+                        scan.append(pid);
+                    }
+                }
+                m_gpuRotate = (m_gpuRotate + count) % all.size();
+            }
+            QList<GpuEngineSample> found;
+            m_backend->gpuClients(scan, found);
+            for (auto it = m_gpuClients.begin(); it != m_gpuClients.end();) {
+                if (!m_backend->exists(it->pid)) {
+                    it = m_gpuClients.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (const GpuEngineSample &client : found) {
+                m_gpuClients.insert(client.clientId, client);
+            }
+            if (m_gpuClients.size() > 512) {
+                m_gpuClients.clear();
+            }
+            const QList<GpuEngineSample> live = m_gpuClients.values();
+            const QHash<quint64, GpuClientBusy> busy =
+                gpuClientBusy(live, windowMs, m_gpuPrior);
+            m_gpuProcesses = gpuMergeClients(live, busy, 8);
+            const double clientTotal = gpuClientTotalBusy(m_gpuProcesses);
+            quint64 clientMem = 0;
+            for (const GpuEngineSample &client : live) {
+                clientMem += client.memLocal > 0 ? client.memLocal
+                                                 : client.memSystem;
+            }
+            for (GpuDevice &device : reading.devices) {
+                if (device.utilFromClients) {
+                    device.utilPercent = clientTotal > 0.0 ? clientTotal
+                        : (windowMs == 0 ? -1.0 : 0.0);
+                }
+                if (device.memUsed == 0 && clientMem > 0) {
+                    device.memUsed = clientMem;
+                }
+            }
+            if (reading.processes.isEmpty()) {
+                reading.processes = m_gpuProcesses;
+            }
+        }
+        m_gpuWarming =
+            m_backend->capabilities().gpuClients && windowMs == 0;
+        m_gpuStampMs = now;
+        m_gpuWindowMs = windowMs;
+        m_gpuReading = reading;
+    }
+    snapshot.gpu = m_gpuReading;
+    snapshot.gpuWarming = m_gpuWarming;
+    snapshot.gpuClientsAvailable = m_backend->capabilities().gpuClients;
 }
 
 void SamplerWorker::fillProcessDisk(DisplaySnapshot &snapshot) {

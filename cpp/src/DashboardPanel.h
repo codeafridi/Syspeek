@@ -112,6 +112,7 @@ private:
     QWidget *buildDatabasesView();
     QWidget *buildCostView();
     QWidget *buildDisksView();
+    QWidget *buildGpuView();
     QWidget *buildHostView();
     QWidget *buildSecurityView();
     QWidget *buildTracesView();
@@ -135,6 +136,8 @@ private:
     bool m_osProcessNet = true;
     bool m_osProcessDisk = true;
     bool m_osProcessDiskScan = true;
+    bool m_osGpu = true;
+    bool m_osGpuClients = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
@@ -362,6 +365,17 @@ private:
     QLabel *m_diskTilePsi = nullptr;
     TimeseriesChart *m_chartIoRw = nullptr;
     TimeseriesChart *m_chartIoUtil = nullptr;
+
+    // GPU page (M73): device utilization/memory/sensors + gpu processes.
+    QLabel *m_gpuTileUtil = nullptr;
+    QLabel *m_gpuTileMem = nullptr;
+    QLabel *m_gpuTileTemp = nullptr;
+    QLabel *m_gpuTileProcs = nullptr;
+    QLabel *m_gpuSummary = nullptr;
+    QLabel *m_gpuDevices = nullptr;
+    QLabel *m_gpuProcessNote = nullptr;
+    QTreeWidget *m_gpuTable = nullptr;
+    TimeseriesChart *m_chartGpu = nullptr;
 
     // Datadog-style Host page (M61k): live-vitals tiles + inventory cards.
     QLabel *m_hostTileCpu = nullptr;

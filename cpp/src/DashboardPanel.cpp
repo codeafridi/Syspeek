@@ -232,6 +232,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osProcessNet = osCaps.perProcessNet;
     m_osProcessDisk = osCaps.perProcessDisk;
     m_osProcessDiskScan = osCaps.perProcessDiskScan;
+    m_osGpu = osCaps.gpu;
+    m_osGpuClients = osCaps.gpuClients;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -316,6 +318,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Alerts"), QStringLiteral("Incidents"), QStringLiteral("SLO"),
                       QStringLiteral("Processes"), QStringLiteral("Memory"),
                       QStringLiteral("Disks"),
+                      QStringLiteral("GPU"),
                       QStringLiteral("Host"),
                       QStringLiteral("Network"),
                       QStringLiteral("Network Path"),
@@ -341,6 +344,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildProcessesView());
     m_views->addWidget(buildMemoryView());
     m_views->addWidget(buildDisksView());
+    m_views->addWidget(buildGpuView());
     m_views->addWidget(buildHostView());
     m_views->addWidget(buildNetworkView());
     m_views->addWidget(buildNetworkPathView());
@@ -429,7 +433,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
-        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop { color: %MUTED%; }"
+        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
@@ -464,7 +468,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
-        "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
+        "#ddGpuTileUtil, #ddGpuTileMem, #ddGpuTileTemp, #ddGpuTileProcs,"
+        " #ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
         " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
         " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx,"
         " #ddPathTileTargets, #ddPathTileHops, #ddPathTileLoss,"
@@ -3098,6 +3103,110 @@ QWidget *DashboardPanel::buildDisksView() {
     return view;
 }
 
+QWidget *DashboardPanel::buildGpuView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_gpuTileUtil = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileUtil->setObjectName(QStringLiteral("ddGpuTileUtil"));
+    m_gpuTileMem = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileMem->setObjectName(QStringLiteral("ddGpuTileMem"));
+    m_gpuTileTemp = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileTemp->setObjectName(QStringLiteral("ddGpuTileTemp"));
+    m_gpuTileProcs = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileProcs->setObjectName(QStringLiteral("ddGpuTileProcs"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("GPU UTIL"), m_gpuTileUtil,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("VRAM USED"), m_gpuTileMem,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("TEMP"), m_gpuTileTemp,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PROCESSES"), m_gpuTileProcs,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_gpuSummary = new QLabel(QStringLiteral("--"), view);
+    m_gpuSummary->setObjectName(QStringLiteral("ddGpuSummary"));
+    m_gpuSummary->setFont(monoFont(12, true));
+    layout->addWidget(makeBanner(QStringLiteral("GPU"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("GPU"), m_gpuSummary, view));
+
+    m_chartGpu = new TimeseriesChart(view);
+    m_chartGpu->setUnit(QStringLiteral("Percent"));
+    m_chartGpu->setSeriesName(QStringLiteral("syspeek.gpu.util"));
+    layout->addWidget(makeBanner(QStringLiteral("UTILIZATION OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("busiest gpu"), m_chartGpu,
+                                    view));
+
+    m_gpuDevices = new QLabel(QStringLiteral("--"), view);
+    m_gpuDevices->setObjectName(QStringLiteral("ddGpuDevices"));
+    m_gpuDevices->setFont(monoFont(10));
+    m_gpuDevices->setMinimumWidth(1);
+    layout->addWidget(makeBanner(QStringLiteral("DEVICES"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("DEVICES"), m_gpuDevices, view), 1);
+
+    m_gpuProcessNote = new QLabel(QStringLiteral("--"), view);
+    m_gpuProcessNote->setObjectName(QStringLiteral("ddGpuProcessNote"));
+    m_gpuProcessNote->setFont(monoFont(10));
+    m_gpuProcessNote->setMinimumWidth(1);
+
+    m_gpuTable = new QTreeWidget(view);
+    m_gpuTable->setObjectName(QStringLiteral("ddGpuTable"));
+    m_gpuTable->setColumnCount(5);
+    m_gpuTable->setHeaderLabels({QStringLiteral("Process"),
+                                 QStringLiteral("PID"),
+                                 QStringLiteral("GPU %"),
+                                 QStringLiteral("MEM"),
+                                 QStringLiteral("ENGINES")});
+    m_gpuTable->setRootIsDecorated(false);
+    m_gpuTable->setSelectionMode(QAbstractItemView::NoSelection);
+    m_gpuTable->setFocusPolicy(Qt::NoFocus);
+    m_gpuTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int i = 1; i < 5; ++i) {
+        m_gpuTable->header()->setSectionResizeMode(i,
+                                                   QHeaderView::ResizeToContents);
+    }
+
+    auto *procBox = new QWidget(view);
+    auto *procLayout = new QVBoxLayout(procBox);
+    procLayout->setContentsMargins(0, 0, 0, 0);
+    procLayout->setSpacing(4);
+    procLayout->addWidget(m_gpuProcessNote);
+    procLayout->addWidget(m_gpuTable);
+
+    layout->addWidget(makeBanner(QStringLiteral("PROCESSES"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
 QWidget *DashboardPanel::buildHostView() {
     auto *view = new QWidget(this);
     auto *content = new QWidget(view);
@@ -3543,6 +3652,101 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 snapshot.processDiskTracked, snapshot.processDiskUnreadable,
                 snapshot.processDiskReadPerSec, snapshot.processDiskWritePerSec));
             m_diskTop->setText(processDiskConsumerText(snapshot.processDiskTop));
+        }
+    }
+
+    if (m_gpuSummary != nullptr) {
+        const GpuReading &gpu = snapshot.gpu;
+        m_gpuTable->clear();
+        if (!m_osGpu) {
+            m_gpuSummary->setText(
+                QStringLiteral("gpu: %1").arg(unsupportedOsText()));
+            m_gpuTileUtil->setText(QStringLiteral("--"));
+            m_gpuTileMem->setText(QStringLiteral("--"));
+            m_gpuTileTemp->setText(QStringLiteral("--"));
+            m_gpuTileProcs->setText(QStringLiteral("--"));
+            m_gpuDevices->setText(QStringLiteral("--"));
+            m_gpuProcessNote->setText(
+                QStringLiteral("per-process gpu: %1").arg(unsupportedOsText()));
+        } else if (!gpu.ok) {
+            m_gpuSummary->setText(
+                gpuSummaryText(gpu, false, false, 0));
+            m_gpuTileUtil->setText(QStringLiteral("--"));
+            m_gpuTileMem->setText(QStringLiteral("--"));
+            m_gpuTileTemp->setText(QStringLiteral("--"));
+            m_gpuTileProcs->setText(QStringLiteral("--"));
+            m_gpuDevices->setText(QStringLiteral("--"));
+            m_gpuProcessNote->setText(QStringLiteral("--"));
+        } else {
+            double bestUtil = -1.0;
+            quint64 memUsed = 0;
+            quint64 memTotal = 0;
+            double bestTemp = -1.0;
+            for (const GpuDevice &device : gpu.devices) {
+                bestUtil = qMax(bestUtil, device.utilPercent);
+                bestTemp = qMax(bestTemp, device.tempC);
+                if (device.memUsed > memUsed || memUsed == 0) {
+                    memUsed = device.memUsed;
+                }
+                if (device.memTotal > memTotal) {
+                    memTotal = device.memTotal;
+                }
+            }
+            m_gpuSummary->setText(
+                gpuSummaryText(gpu, snapshot.gpuWarming,
+                               snapshot.gpuClientsAvailable,
+                               gpu.processes.size()));
+            m_gpuTileUtil->setText(
+                bestUtil < 0.0
+                    ? QStringLiteral("--")
+                    : QStringLiteral("%1%").arg(bestUtil, 0, 'f', 1));
+            m_gpuTileMem->setText(
+                memTotal > 0
+                    ? QStringLiteral("%1 / %2")
+                          .arg(formatGpuBytes(memUsed),
+                               formatGpuBytes(memTotal))
+                    : formatGpuBytes(memUsed));
+            m_gpuTileTemp->setText(
+                bestTemp < 0.0
+                    ? QStringLiteral("--")
+                    : QStringLiteral("%1 C").arg(bestTemp, 0, 'f', 0));
+            m_gpuTileProcs->setText(
+                QString::number(gpu.processes.size()));
+            m_gpuDevices->setText(gpuDeviceText(gpu));
+            if (!snapshot.gpuClientsAvailable) {
+                m_gpuProcessNote->setText(
+                    QStringLiteral("per-process gpu: %1 reports device "
+                                   "usage only").arg(m_osName));
+            } else if (snapshot.gpuWarming) {
+                m_gpuProcessNote->setText(
+                    QStringLiteral("gpu clients: warming up (engine deltas)"));
+            } else {
+                m_gpuProcessNote->setText(
+                    QStringLiteral("gpu clients: per-process engine time "
+                                   "from /proc/<pid>/fdinfo"));
+            }
+            for (const GpuProcess &process : gpu.processes) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, process.name);
+                item->setText(1, QString::number(process.pid));
+                item->setText(2, process.busyPercent < 0.0
+                                      ? QStringLiteral("warming")
+                                      : QStringLiteral("%1")
+                                            .arg(process.busyPercent, 0, 'f', 1));
+                item->setText(3, formatGpuBytes(process.memBytes));
+                item->setText(4, process.engines);
+                item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+                if (process.busyPercent >= 80.0) {
+                    item->setForeground(0, QColor(QStringLiteral("#d1685f")));
+                } else if (process.busyPercent >= 40.0) {
+                    item->setForeground(0, QColor(QStringLiteral("#d8b25f")));
+                }
+                m_gpuTable->addTopLevelItem(item);
+            }
+            if (m_chartGpu != nullptr && bestUtil >= 0.0) {
+                m_chartGpu->push(bestUtil);
+            }
         }
     }
 

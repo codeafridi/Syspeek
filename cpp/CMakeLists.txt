@@ -183,6 +183,8 @@ add_library(syspeek_core STATIC
     src/ExportRun.h
     src/ProcessDiskStatus.cpp
     src/ProcessDiskStatus.h
+    src/GpuStatus.cpp
+    src/GpuStatus.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
     src/KubeStatus.cpp
@@ -203,7 +205,9 @@ add_library(syspeek_core STATIC
 if(UNIX AND NOT APPLE)
     target_sources(syspeek_core PRIVATE
         src/platform/linux/LinuxBackend.cpp
-        src/platform/linux/LinuxBackend.h)
+        src/platform/linux/LinuxBackend.h
+        src/platform/linux/LinuxGpu.cpp
+        src/platform/linux/LinuxGpu.h)
 elseif(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
@@ -211,6 +215,8 @@ elseif(APPLE)
     target_sources(syspeek_core PRIVATE
         src/platform/mac/MacBackend.cpp
         src/platform/mac/MacBackend.h
+        src/platform/mac/MacGpu.cpp
+        src/platform/mac/MacGpu.h
         src/platform/mac/MacFocusProvider.mm
         src/platform/mac/MacFocusProvider.h
         src/platform/mac/MacNotifier.mm

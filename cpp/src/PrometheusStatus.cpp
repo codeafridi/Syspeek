@@ -202,6 +202,79 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    if (s.gpu.ok) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_gpu_utilization_percent GPU utilization."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_gpu_utilization_percent gauge"));
+        for (const GpuDevice &device : s.gpu.devices) {
+            const QString labels =
+                QStringLiteral("device=\"%1\",vendor=\"%2\",name=\"%3\"")
+                    .arg(device.index)
+                    .arg(escapeLabel(device.vendor))
+                    .arg(escapeLabel(device.name));
+            if (device.utilPercent >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_utilization_percent{%1} %2")
+                        .arg(labels, num(device.utilPercent)));
+            }
+            if (device.memUsed > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_memory_used_bytes{%1} %2")
+                        .arg(labels)
+                        .arg(device.memUsed));
+            }
+            if (device.memTotal > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_memory_total_bytes{%1} %2")
+                        .arg(labels)
+                        .arg(device.memTotal));
+            }
+            if (device.tempC >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_temperature_celsius{%1} %2")
+                        .arg(labels, num(device.tempC)));
+            }
+            if (device.powerW >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_power_watts{%1} %2")
+                        .arg(labels, num(device.powerW)));
+            }
+            if (device.clockMhz > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_clock_mhz{%1} %2")
+                        .arg(labels)
+                        .arg(device.clockMhz));
+            }
+        }
+        if (!s.gpu.processes.isEmpty()) {
+            lines.append(QStringLiteral(
+                "# HELP syspeek_gpu_process_busy_percent Per-process gpu "
+                "engine utilization."));
+            lines.append(QStringLiteral(
+                "# TYPE syspeek_gpu_process_busy_percent gauge"));
+            for (const GpuProcess &process : s.gpu.processes) {
+                const QString labels =
+                    QStringLiteral("process=\"%1\",pid=\"%2\"")
+                        .arg(escapeLabel(process.name))
+                        .arg(process.pid);
+                if (process.busyPercent >= 0.0) {
+                    lines.append(
+                        QStringLiteral(
+                            "syspeek_gpu_process_busy_percent{%1} %2")
+                            .arg(labels, num(process.busyPercent)));
+                }
+                if (process.memBytes > 0) {
+                    lines.append(
+                        QStringLiteral(
+                            "syspeek_gpu_process_memory_bytes{%1} %2")
+                            .arg(labels)
+                            .arg(process.memBytes));
+                }
+            }
+        }
+    }
+
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
             "# HELP syspeek_net_rx_bytes_total Network receive bytes."));

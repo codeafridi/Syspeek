@@ -122,6 +122,22 @@ jobs:
               print("processDisk ok: %d read/%d pids, %d top, r %d B/s"
                     % (pd["readable"], pd["pids"], len(pd.get("top", [])),
                        int(pd["readBps"])))
+              gpu = d.get("gpu", {})
+              if gpu.get("capable"):
+                  assert gpu.get("ok") in (True, False), gpu
+                  if gpu.get("ok"):
+                      assert gpu["devices"], gpu
+                      for dev in gpu["devices"]:
+                          assert dev["memUsed"] >= 0 and dev["memTotal"] >= 0, dev
+                          u = dev.get("utilPercent")
+                          assert u is None or 0 <= u <= 100, dev
+                      print("gpu ok: %d device(s), %s, %d client(s), %d proc(s)"
+                            % (len(gpu["devices"]),
+                               gpu["devices"][0]["vendor"],
+                               gpu.get("clientsFound", 0),
+                               len(gpu.get("processes", []))))
+                  else:
+                      print("gpu not detectable here:", gpu.get("note"))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
@@ -271,6 +287,15 @@ jobs:
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
                 "installed programs")
+          gpu = d.get("gpu", {})
+          if gpu.get("capable") and gpu.get("ok"):
+              assert gpu["devices"], gpu
+              for dev in gpu["devices"]:
+                  assert dev["memUsed"] >= 0 and dev["memTotal"] >= 0, dev
+              print("gpu ok: %d adapter(s), %d proc(s)"
+                    % (len(gpu["devices"]), len(gpu.get("processes", []))))
+          else:
+              print("gpu not exposed here:", gpu.get("note"))
           depth = d.get("selfDepth", {})
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth
@@ -403,14 +428,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 26); do
+          for i in $(seq 0 27); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 27, files
+          assert len(files) == 28, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",

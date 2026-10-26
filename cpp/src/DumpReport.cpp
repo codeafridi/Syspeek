@@ -376,6 +376,88 @@ QString dumpReportJson(int maxProcs) {
         root.insert(QStringLiteral("processDisk"), processDisk);
     }
 
+    {
+        QJsonObject gpu;
+        const PlatformCapabilities caps = backend.capabilities();
+        gpu.insert(QStringLiteral("capable"), caps.gpu);
+        gpu.insert(QStringLiteral("clients"), caps.gpuClients);
+        const GpuReading reading = backend.gpuInfo();
+        gpu.insert(QStringLiteral("ok"), reading.ok);
+        if (!reading.note.isEmpty()) {
+            gpu.insert(QStringLiteral("note"), reading.note);
+        }
+        QJsonArray devices;
+        for (const GpuDevice &device : reading.devices) {
+            QJsonObject row;
+            row.insert(QStringLiteral("index"), device.index);
+            row.insert(QStringLiteral("vendor"), device.vendor);
+            row.insert(QStringLiteral("name"), device.name);
+            row.insert(QStringLiteral("driver"), device.driver);
+            row.insert(QStringLiteral("pciId"), device.pciId);
+            if (device.utilPercent >= 0.0) {
+                row.insert(QStringLiteral("utilPercent"), device.utilPercent);
+            }
+            row.insert(QStringLiteral("utilFromClients"),
+                       device.utilFromClients);
+            row.insert(QStringLiteral("memUsed"), double(device.memUsed));
+            row.insert(QStringLiteral("memTotal"), double(device.memTotal));
+            if (device.tempC >= 0.0) {
+                row.insert(QStringLiteral("tempC"), device.tempC);
+            }
+            if (device.powerW >= 0.0) {
+                row.insert(QStringLiteral("powerW"), device.powerW);
+            }
+            if (device.clockMhz > 0) {
+                row.insert(QStringLiteral("clockMhz"), device.clockMhz);
+            }
+            devices.append(row);
+        }
+        gpu.insert(QStringLiteral("devices"), devices);
+
+        QJsonArray processes;
+        for (const GpuProcess &process : reading.processes) {
+            QJsonObject row;
+            row.insert(QStringLiteral("pid"), process.pid);
+            row.insert(QStringLiteral("name"), process.name);
+            if (process.busyPercent >= 0.0) {
+                row.insert(QStringLiteral("busyPercent"), process.busyPercent);
+            }
+            row.insert(QStringLiteral("memBytes"), double(process.memBytes));
+            if (!process.engines.isEmpty()) {
+                row.insert(QStringLiteral("engines"), process.engines);
+            }
+            processes.append(row);
+        }
+        if (caps.gpuClients) {
+            const QList<int> pids = backend.allPids();
+            QList<GpuEngineSample> clients;
+            backend.gpuClients(pids, clients);
+            gpu.insert(QStringLiteral("clientsFound"), clients.size());
+            QThread::msleep(250);
+            QList<GpuEngineSample> second;
+            backend.gpuClients(pids, second);
+            QHash<quint64, GpuClientPrior> prior;
+            gpuClientBusy(clients, 250, prior);
+            const QHash<quint64, GpuClientBusy> busy =
+                gpuClientBusy(second, 250, prior);
+            const QList<GpuProcess> merged = gpuMergeClients(second, busy, 5);
+            for (const GpuProcess &process : merged) {
+                QJsonObject row;
+                row.insert(QStringLiteral("pid"), process.pid);
+                row.insert(QStringLiteral("name"), process.name);
+                if (process.busyPercent >= 0.0) {
+                    row.insert(QStringLiteral("busyPercent"),
+                               process.busyPercent);
+                }
+                row.insert(QStringLiteral("memBytes"),
+                           double(process.memBytes));
+                processes.append(row);
+            }
+        }
+        gpu.insert(QStringLiteral("processes"), processes);
+        root.insert(QStringLiteral("gpu"), gpu);
+    }
+
     QJsonObject services;
     const QList<ServiceRecord> serviceRecords = backend.readServices();
     QList<UnitRow> serviceRows;
