@@ -39,6 +39,8 @@ public:
     bool procSample(int pid, linuxproc::MemInfo &mem,
                     linuxproc::ProcDetail &detail) override;
     int countFds(int pid) override;
+    bool processDiskCounters(int pid, long long &readBytes,
+                             long long &writeBytes) override;
     QList<unsigned long long> socketInodes(int pid) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;
