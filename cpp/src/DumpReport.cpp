@@ -272,6 +272,7 @@ QString dumpReportJson(int maxProcs) {
         const bool supported = backend.capabilities().perProcessNet;
         processNet.insert(QStringLiteral("available"), supported);
         if (supported) {
+#if defined(Q_OS_LINUX)
             const QHash<unsigned long long, int> inodePid =
                 processNetInodePid(backend, pids);
             QHash<unsigned long long, ProcessNetPrior> prior;
@@ -310,6 +311,7 @@ QString dumpReportJson(int maxProcs) {
                 rows.append(row);
             }
             processNet.insert(QStringLiteral("talkers"), rows);
+#endif
         }
         root.insert(QStringLiteral("processNet"), processNet);
     }

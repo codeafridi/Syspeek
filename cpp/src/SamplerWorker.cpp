@@ -499,7 +499,10 @@ void SamplerWorker::fillProcessNet(
         inodesOfPid[it.value()].append(it.key());
     }
 
-    const QList<linuxproc::TcpDiagInfo> diag = m_backend->queryTcpDiag();
+    QList<linuxproc::TcpDiagInfo> diag;
+#if defined(Q_OS_LINUX)
+    diag = m_backend->queryTcpDiag();
+#endif
     const QHash<unsigned long long, ProcessNetRate> socketRates =
         processNetSocketRates(diag, windowMs, m_netPrior);
     const QHash<int, ProcessNetPidRate> pidRates =

@@ -370,9 +370,26 @@ jobs:
         run: |
           cmake --build cpp/build --target syspeek_screenshot -j 3
           mkdir -p "${RUNNER_TEMP}/screens"
-          for i in $(seq 0 26); do
+
+          render() {
+            local index="$1"
+            local out="${RUNNER_TEMP}/screens/panel-$(printf '%02d' "$index").png"
+            echo "render page ${index}"
             QT_QPA_PLATFORM=offscreen ./cpp/build/syspeek_screenshot \
-              "${RUNNER_TEMP}/screens/panel-$(printf '%02d' "$i").png" panel "$i"
+              "$out" panel "$index" || {
+              local rc=$?
+              echo "::error::screenshot render failed: page ${index} rc=${rc}"
+              if command -v gdb >/dev/null 2>&1; then
+                gdb -batch -ex run -ex bt --args \
+                  ./cpp/build/syspeek_screenshot "$out" panel "$index" \
+                  2>&1 | tail -40 || true
+              fi
+              exit 2
+            }
+          }
+
+          for i in $(seq 0 26); do
+            render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
