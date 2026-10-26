@@ -9,6 +9,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStackedWidget>
+#include <QStringList>
 
 #include <cmath>
 #include <cstdio>
@@ -105,8 +106,8 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.processes[1].netRxPerSec = 262'144.0;
     s.processes[1].netTxPerSec = 65'536.0;
     s.processes[1].listenPorts = {3000, 3001};
-    s.processes[4].netRxPerSec = 0.0;
-    s.processes[4].netTxPerSec = 0.0;
+    s.processes.last().netRxPerSec = 0.0;
+    s.processes.last().netTxPerSec = 0.0;
     s.processNetAvailable = true;
     s.processNetTracked = 14;
     s.processNetUnattributed = 39;
@@ -348,10 +349,6 @@ int main(int argc, char *argv[]) {
         // 240 synthetic ticks: fills the chart rings so the panels show
         // plausible series instead of two-point stubs.
         for (int i = 0; i < 240; ++i) {
-            if (i % 20 == 0) {
-                std::fprintf(stderr, "[shot] history tick %d\n", i);
-                std::fflush(stderr);
-            }
             panel.setSnapshot(demoSnapshot(i));
             panel.setAlerts(alertsFor(i));
             app.processEvents();
@@ -518,16 +515,14 @@ int main(int argc, char *argv[]) {
             report.src = QStringLiteral("wlp0s20f3");
             report.tests = 10;
             report.ok = true;
-            const QList<const char *> hosts = {
-                QStringLiteral("gateway.local").toUtf8().constData(),
-                QStringLiteral("core1-rtr.isp").toUtf8().constData(),
-                QStringLiteral("edge1.isp").toUtf8().constData(),
-                QStringLiteral("peer TransitNet").toUtf8().constData(),
-                dst.toUtf8().constData()};
+            const QStringList hosts = {QStringLiteral("gateway.local"),
+                                       QStringLiteral("core1-rtr.isp"),
+                                       QStringLiteral("edge1.isp"),
+                                       QStringLiteral("peer TransitNet"), dst};
             for (int h = 0; h < hops; ++h) {
                 PathHop hop;
                 hop.index = h + 1;
-                hop.host = QString::fromUtf8(hosts.at(h));
+                hop.host = hosts.at(h);
                 hop.sent = 10;
                 hop.bestMs = 2.0 + h * 1.5;
                 hop.worstMs = 8.0 + h * 2.0;
