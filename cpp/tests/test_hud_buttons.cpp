@@ -2,6 +2,10 @@
 #include "DashboardPanel.h"
 
 #include <QApplication>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
@@ -512,6 +516,79 @@ int main(int argc, char *argv[]) {
                   && alertsText->text().contains(QStringLiteral("#d1685f")),
               "alert severity marker colorized");
 
+
+        QString generalText;
+        QList<QPushButton *> exportButtons;
+        for (QLabel *label :
+             hud.findChildren<QLabel *>(QStringLiteral("ddSettingsInfo"))) {
+            if (label->text().contains(QStringLiteral("export&nbsp;"))) {
+                generalText = label->text();
+            }
+        }
+        for (QPushButton *button : hud.findChildren<QPushButton *>()) {
+            if (button->text().startsWith(QStringLiteral("EXPORT"))) {
+                exportButtons.append(button);
+            }
+        }
+        check(generalText.contains(QStringLiteral("export&nbsp;")),
+              "settings GENERAL card carries the export row");
+        check(exportButtons.size() == 2,
+              "settings DIAGNOSTICS card carries both export buttons");
+
+        auto exportPathFrom = [](const QString &text) {
+            const int arrow = text.lastIndexOf(QStringLiteral("-> "));
+            if (arrow < 0) {
+                return QString();
+            }
+            const int stop = text.indexOf(QLatin1Char('<'), arrow);
+            return text.mid(arrow + 3,
+                            stop < 0 ? -1 : stop - arrow - 3).trimmed();
+        };
+
+        for (QPushButton *button : exportButtons) {
+            const QString format =
+                button->text().endsWith(QStringLiteral("JSON"))
+                    ? QStringLiteral("json")
+                    : QStringLiteral("csv");
+            button->click();
+            QString updated;
+            for (QLabel *label : hud.findChildren<QLabel *>(
+                     QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("export&nbsp;"))) {
+                    updated = label->text();
+                }
+            }
+            const QString path = exportPathFrom(updated);
+            QFile history(path);
+            const bool opened =
+                !path.isEmpty() && path.endsWith(QLatin1Char('.') + format)
+                && history.open(QIODevice::ReadOnly);
+            const QByteArray body = opened ? history.readAll() : QByteArray();
+            if (opened) {
+                history.close();
+            }
+            if (format == QStringLiteral("csv")) {
+                const QString text = QString::fromUtf8(body);
+                check(opened && text.startsWith(
+                                    QStringLiteral("# hostname;interval;"
+                                                   "timestamp;APP;app_pid;")),
+                      "HUD export writes the CSV header");
+                check(text.count(QLatin1Char('\n')) >= 2,
+                      "HUD export writes one row per sampled tick");
+            } else {
+                const QJsonObject root =
+                    QJsonDocument::fromJson(body).object();
+                const QJsonObject envelope =
+                    root.value(QStringLiteral("syspeek")).toObject();
+                check(opened
+                          && envelope.value(QStringLiteral("samples"))
+                                 .toArray()
+                                 .size()
+                          >= 1,
+                      "HUD export writes the JSON envelope");
+            }
+            check(QFile::remove(path), "HUD export leaves a real file behind");
+        }
         moreButton2->click();
         check(!hud.isExpanded() && panel->isHidden(),
               "LESS collapses the overlay in place");

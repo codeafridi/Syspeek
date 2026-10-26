@@ -3,6 +3,7 @@
 #include "DashboardPanel.h"
 #include "Theme.h"
 #include "platform/NotifierFactory.h"
+#include "platform/PlatformFactory.h"
 
 #ifdef Q_OS_MACOS
 #include "platform/mac/MacOverlay.h"
@@ -10,6 +11,8 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFont>
 #include <QFrame>
 #include <QGuiApplication>
@@ -19,6 +22,7 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QScreen>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -243,6 +247,8 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::applyMonitorChange);
     connect(m_panel, &DashboardPanel::monitorsResetRequested, this,
             &HudWindow::resetMonitors);
+    connect(m_panel, &DashboardPanel::historyExportRequested, this,
+            &HudWindow::exportHistory);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -281,6 +287,11 @@ QLayout *HudWindow::makeMetricBlock(const QString &caption, QLabel *value) {
 
 void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     m_lastSnapshot = snapshot;
+    m_exportRows.append(
+        exportRowFrom(snapshot, QDateTime::currentMSecsSinceEpoch()));
+    while (m_exportRows.size() > 1800) {
+        m_exportRows.removeFirst();
+    }
 
     if (m_appValue->text() != snapshot.appName) {
         m_appValue->setText(snapshot.appName);
@@ -495,6 +506,53 @@ void HudWindow::setWebhookConfig(const WebhookConfig &config) {
     }
 }
 
+void HudWindow::setExportIntervalMs(int intervalMs) {
+    if (intervalMs > 0) {
+        m_exportIntervalMs = intervalMs;
+    }
+}
+
+void HudWindow::exportHistory(const QString &format) {
+    const QString fmt = normalizedExportFormat(format);
+
+    ExportMeta meta;
+    meta.hostname = QSysInfo::machineHostName();
+    meta.platform = platformName();
+    meta.version = QString::fromLatin1(SYSPEEK_APP_VERSION);
+    meta.intervalMs = m_exportIntervalMs;
+
+    const QString body = exportRows(m_exportRows, meta, fmt);
+
+    QString dir =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (dir.isEmpty()) {
+        dir = QDir::homePath();
+    }
+    QDir().mkpath(dir);
+    const QString path =
+        dir + QStringLiteral("/syspeek-history-%1.%2")
+                  .arg(QDateTime::currentDateTimeUtc().toString(
+                           QStringLiteral("yyyyMMdd-HHmmss")),
+                       fmt);
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (m_panel != nullptr) {
+            m_panel->setExportLine(
+                QStringLiteral("failed - could not write %1").arg(path));
+        }
+        return;
+    }
+    file.write(body.toUtf8());
+    file.close();
+
+    if (m_panel != nullptr) {
+        m_panel->setExportLine(QStringLiteral("%1 - %2 samples -> %3")
+                                   .arg(fmt)
+                                   .arg(m_exportRows.size())
+                                   .arg(path));
+    }
+}
 
 void HudWindow::setSyntheticSnapshot(const SyntheticSnapshot &snapshot) {
     if (m_panel != nullptr) {

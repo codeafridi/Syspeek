@@ -823,6 +823,9 @@ int main(int argc, char *argv[]) {
     settingsInfo.webhookLine =
         QStringLiteral("generic -> https://alerts.example.test/syspeek"
                        " - 4 sent, 0 failed; last ok 17:42 (1 firing)");
+    settingsInfo.exportLine =
+        QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
+                       "syspeek-history-20261026-174210.csv");
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;
@@ -830,6 +833,7 @@ int main(int argc, char *argv[]) {
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
 
+    panel.resize(1020, 1040);
     panel.show();
     app.processEvents();
 

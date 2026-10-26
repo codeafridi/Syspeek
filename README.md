@@ -312,6 +312,38 @@ incoming-webhook message (`text` + `attachments[]` with `color`, `title`,
 batch); alerts that clear between ticks produce a `resolved` event. The Settings
 view shows the configured target and the last delivery result.
 
+**Metric history export** — the HUD keeps the last 1800 samples
+(~30 min at the default 1 s cadence) in memory and can write them out:
+Settings → DIAGNOSTICS → **EXPORT CSV** / **EXPORT JSON** (files land in
+`~/.cache/dev.syspeek/syspeek/syspeek-history-<time>.<ext>`, the path is shown
+in the GENERAL card). For headless capture use the recorder:
+
+```sh
+syspeek --record=60                 # 60 samples (1 s cadence) to stdout, CSV
+syspeek --record=5m --format=csv --out=history.csv
+syspeek --record=120 --format=json --out=history.json
+```
+
+`--record=<n>` counts samples, `--record=<n>s|m|h` counts wall time.
+`--format=csv|json` (default `csv`), `--out=<path|->` (default stdout).
+Only the local machine is read; nothing is uploaded.
+
+The CSV dialect is the shipped sysstat `sadf -d` format — a single
+`# hostname;interval;timestamp;...` header line, `;` separated fields, one row
+per sample, `YYYY-MM-DD HH:MM:SS UTC` timestamps and `-1` for values that do
+not apply (warming ticks, gated collectors) — so it loads straight into the
+same spreadsheet/analysis tooling you already point at `sar` output:
+
+```
+# hostname;interval;timestamp;APP;app_pid;app_cpu_percent;app_rss_kb;host_cpu_percent;...
+box;1;2026-10-26 12:59:07 UTC;cursor;36904;179.52;3391572;16.95;0.00;6014808;...
+```
+
+The JSON export nests the same way `sadf -j` does (`samples[].timestamp.date/
+time/tz`, then `app`, `host`, `disk`, `network`, `tcp` objects) but stays inside
+a `{"syspeek": {...}}` envelope with `version`, `platform`, `hostname`,
+`intervalMs`; values a collector could not produce are `null`.
+
 Handy environment variables:
 
 - `SYSPEEK_PROBE=1 ./syspeek` — print the detected focus provider and

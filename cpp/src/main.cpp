@@ -18,6 +18,7 @@
 #include "DumpReport.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
+#include "ExportRun.h"
 #include "DashboardPanel.h"
 #include "TlsSource.h"
 #include "FimSource.h"
@@ -160,7 +161,7 @@ QString settingsAutostartLine() {
 QString settingsVerbsLine() {
 #if defined(Q_OS_WIN)
     return QStringLiteral("syspeek start|stop|restart|status|disable"
-                          "|uninstall|logs|--dump|--probe");
+                          "|uninstall|logs|--dump|--probe|--record");
 #elif defined(Q_OS_MACOS)
     return QStringLiteral("install_macos.sh run|start|stop|restart|status"
                           "|enable|disable|update|uninstall|logs");
@@ -366,6 +367,10 @@ int main(int argc, char *argv[]) {
         if (arg.startsWith(QByteArrayLiteral("--probe"))) {
             return probeRun(argc, argv);
         }
+        if (arg == QByteArrayLiteral("--record")
+            || arg.startsWith(QByteArrayLiteral("--record="))) {
+            return exportRun(argc, argv);
+        }
         if (arg == QByteArrayLiteral("logs")) {
             const int status = printAppLogTail(40) ? 0 : 2;
             if (status != 0) {
@@ -521,6 +526,7 @@ int main(int argc, char *argv[]) {
                             ? defaultAlertRules()
                             : config.alertRules);
         hud.setWebhookConfig(config.webhook);
+        hud.setExportIntervalMs(config.sampleIntervalMs);
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);

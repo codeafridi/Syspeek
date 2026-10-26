@@ -44,6 +44,7 @@ struct SettingsInfo {
     QString verbsLine;
     QString metricsLine;
     QString webhookLine;
+    QString exportLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -77,6 +78,8 @@ public:
 
     void setWebhookLine(const QString &line);
 
+    void setExportLine(const QString &line);
+
     // M66: editable monitors — populates the threshold/cycles editors and
     // refreshes them without re-emitting editor signals (block during fill).
     void setMonitors(const QList<AlertRule> &rules);
@@ -85,6 +88,7 @@ signals:
     void collapseRequested();
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
+    void historyExportRequested(const QString &format);
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);

@@ -2524,7 +2524,9 @@ QWidget *DashboardPanel::buildErrorsView() {
 
 QWidget *DashboardPanel::buildSettingsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(12);
 
@@ -2678,6 +2680,10 @@ QWidget *DashboardPanel::buildSettingsView() {
          QStringLiteral("syspeek --dump")},
         {QStringLiteral("pipeline probe (headless tick log)"),
          QStringLiteral("syspeek --probe")},
+        {QStringLiteral("record history (CSV, sadf dialect)"),
+         QStringLiteral("syspeek --record=60s --format=csv --out=syspeek.csv")},
+        {QStringLiteral("record history (JSON)"),
+         QStringLiteral("syspeek --record=60s --format=json --out=syspeek.json")},
         {QStringLiteral("tail the HUD log"),
          QStringLiteral("syspeek logs")},
         {QStringLiteral("instance + autostart state"),
@@ -2709,8 +2715,52 @@ QWidget *DashboardPanel::buildSettingsView() {
         row->addWidget(copy);
         diagLayout->addLayout(row);
     }
+    auto *exportRow = new QHBoxLayout();
+    exportRow->setSpacing(8);
+    auto *exportWhat = new QLabel(
+        QStringLiteral("export this session's history"), diagCard);
+    exportWhat->setObjectName(QStringLiteral("ddSettingsInfo"));
+    exportWhat->setFont(monoFont(10));
+    auto *exportCsv = new QPushButton(QStringLiteral("EXPORT CSV"), diagCard);
+    exportCsv->setObjectName(QStringLiteral("ddCopy"));
+    exportCsv->setCursor(Qt::PointingHandCursor);
+    exportCsv->setFocusPolicy(Qt::NoFocus);
+    exportCsv->setToolTip(
+        QStringLiteral("write the sampled history to a CSV file"));
+    connect(exportCsv, &QPushButton::clicked, this, [this]() {
+        emit historyExportRequested(QStringLiteral("csv"));
+    });
+    auto *exportJson = new QPushButton(QStringLiteral("EXPORT JSON"), diagCard);
+    exportJson->setObjectName(QStringLiteral("ddCopy"));
+    exportJson->setCursor(Qt::PointingHandCursor);
+    exportJson->setFocusPolicy(Qt::NoFocus);
+    exportJson->setToolTip(
+        QStringLiteral("write the sampled history to a JSON file"));
+    connect(exportJson, &QPushButton::clicked, this, [this]() {
+        emit historyExportRequested(QStringLiteral("json"));
+    });
+    exportRow->addWidget(exportWhat, 1);
+    exportRow->addWidget(exportCsv);
+    exportRow->addWidget(exportJson);
+    diagLayout->addLayout(exportRow);
+
     layout->addWidget(diagCard);
     layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
 
     applySettingsInfo();
     return view;
@@ -2765,6 +2815,10 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.webhookLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.webhookLine);
+    general += QStringLiteral("export&nbsp;&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.exportLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.exportLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);
@@ -2789,6 +2843,11 @@ void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
 
 void DashboardPanel::setWebhookLine(const QString &line) {
     m_settings.webhookLine = line;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setExportLine(const QString &line) {
+    m_settings.exportLine = line;
     applySettingsInfo();
 }
 
