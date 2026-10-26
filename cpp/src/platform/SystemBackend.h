@@ -22,6 +22,7 @@ struct PlatformCapabilities {
     bool tcpCounters = false;
     bool psi = false;
     bool namespaces = false;
+    bool perProcessNet = false;
 };
 
 class SystemBackend {

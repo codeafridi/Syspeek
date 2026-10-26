@@ -5,6 +5,7 @@
 
 #include "LogParser.h"
 #include "MemoryFormat.h"
+#include "ProcessNetStatus.h"
 #include "SensitiveStatus.h"
 #include "Sparkline.h"
 #include "TimeseriesChart.h"
@@ -228,6 +229,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osDpkgSbom = osCaps.sbom;
     m_osFim = osCaps.fim;
     m_osSecurity = osCaps.namespaces;
+    m_osProcessNet = osCaps.perProcessNet;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -425,6 +427,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
+        "#ddProcNetNote, #ddTalkers { color: %MUTED%; }"
+        "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
         "#ddSecuritySummary { color: %DIM%; }"
@@ -1306,15 +1310,17 @@ QWidget *DashboardPanel::buildProcessesView() {
 
     m_procs = new QTreeWidget(view);
     m_procs->setObjectName(QStringLiteral("ddProcs"));
-    m_procs->setColumnCount(6);
+    m_procs->setColumnCount(9);
     m_procs->setHeaderLabels({QStringLiteral("Process"), QStringLiteral("PID"),
-                              QStringLiteral("CPU%"), QStringLiteral("Threads"),
-                              QStringLiteral("FDs"), QStringLiteral("RSS")});
+                              QStringLiteral("CPU%"), QStringLiteral("NET ↓"),
+                              QStringLiteral("NET ↑"), QStringLiteral("Threads"),
+                              QStringLiteral("FDs"), QStringLiteral("RSS"),
+                              QStringLiteral("PORTS")});
     m_procs->setRootIsDecorated(true);
     m_procs->setSelectionMode(QAbstractItemView::NoSelection);
     m_procs->setFocusPolicy(Qt::NoFocus);
     m_procs->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 6; ++i) {
+    for (int i = 1; i < 9; ++i) {
         m_procs->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
     connect(m_procs, &QTreeWidget::itemExpanded, this,
@@ -1332,7 +1338,17 @@ QWidget *DashboardPanel::buildProcessesView() {
 
     layout->addWidget(makeBanner(QStringLiteral("PROCESS TREE"),
         ui_theme::accent(), view));
-    layout->addWidget(makeCard(QStringLiteral("PROCESSES"), m_procs, view), 2);
+    auto *procBox = new QWidget(view);
+    auto *procBoxLayout = new QVBoxLayout(procBox);
+    procBoxLayout->setContentsMargins(0, 0, 0, 0);
+    procBoxLayout->setSpacing(4);
+    m_procNetNote = new QLabel(QStringLiteral("--"), procBox);
+    m_procNetNote->setObjectName(QStringLiteral("ddProcNetNote"));
+    m_procNetNote->setFont(monoFont(10));
+    m_procNetNote->setMinimumWidth(1);
+    procBoxLayout->addWidget(m_procs, 1);
+    procBoxLayout->addWidget(m_procNetNote);
+    layout->addWidget(makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
 
     // --- CPU / load history (Syspeek-own fleet counters).
     m_chartProcTotals = new TimeseriesChart(view);
@@ -1506,6 +1522,28 @@ QWidget *DashboardPanel::buildNetworkView() {
         ui_theme::banner(), view));
     layout->addWidget(makeChartCard(QStringLiteral("host rx + tx"),
                                     m_chartNetPage, view));
+
+    // --- Machine-wide talkers: per-socket tcp_info byte deltas.
+    m_talkerSummary = new QLabel(QStringLiteral("--"), view);
+    m_talkerSummary->setObjectName(QStringLiteral("ddTalkerSummary"));
+    m_talkerSummary->setFont(monoFont(11, true));
+    m_talkerSummary->setMinimumWidth(1);
+    m_talkers = new QLabel(QStringLiteral("--"), view);
+    m_talkers->setObjectName(QStringLiteral("ddTalkers"));
+    m_talkers->setFont(monoFont(10));
+    m_talkers->setMinimumWidth(1);
+
+    auto *talkerBox = new QWidget(view);
+    auto *talkerLayout = new QVBoxLayout(talkerBox);
+    talkerLayout->setContentsMargins(0, 0, 0, 0);
+    talkerLayout->setSpacing(4);
+    talkerLayout->addWidget(m_talkerSummary);
+    talkerLayout->addWidget(m_talkers);
+
+    layout->addWidget(makeBanner(QStringLiteral("TOP TALKERS"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("processes by tcp throughput"),
+                               talkerBox, view), 1);
 
     // --- Focused-app connection latency trend (netlink tcp_info per tick).
     m_chartConnRtt = new TimeseriesChart(view);
@@ -2524,7 +2562,9 @@ QWidget *DashboardPanel::buildErrorsView() {
 
 QWidget *DashboardPanel::buildSettingsView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(12);
 
@@ -2678,6 +2718,10 @@ QWidget *DashboardPanel::buildSettingsView() {
          QStringLiteral("syspeek --dump")},
         {QStringLiteral("pipeline probe (headless tick log)"),
          QStringLiteral("syspeek --probe")},
+        {QStringLiteral("record history (CSV, sadf dialect)"),
+         QStringLiteral("syspeek --record=60s --format=csv --out=syspeek.csv")},
+        {QStringLiteral("record history (JSON)"),
+         QStringLiteral("syspeek --record=60s --format=json --out=syspeek.json")},
         {QStringLiteral("tail the HUD log"),
          QStringLiteral("syspeek logs")},
         {QStringLiteral("instance + autostart state"),
@@ -2709,8 +2753,52 @@ QWidget *DashboardPanel::buildSettingsView() {
         row->addWidget(copy);
         diagLayout->addLayout(row);
     }
+    auto *exportRow = new QHBoxLayout();
+    exportRow->setSpacing(8);
+    auto *exportWhat = new QLabel(
+        QStringLiteral("export this session's history"), diagCard);
+    exportWhat->setObjectName(QStringLiteral("ddSettingsInfo"));
+    exportWhat->setFont(monoFont(10));
+    auto *exportCsv = new QPushButton(QStringLiteral("EXPORT CSV"), diagCard);
+    exportCsv->setObjectName(QStringLiteral("ddCopy"));
+    exportCsv->setCursor(Qt::PointingHandCursor);
+    exportCsv->setFocusPolicy(Qt::NoFocus);
+    exportCsv->setToolTip(
+        QStringLiteral("write the sampled history to a CSV file"));
+    connect(exportCsv, &QPushButton::clicked, this, [this]() {
+        emit historyExportRequested(QStringLiteral("csv"));
+    });
+    auto *exportJson = new QPushButton(QStringLiteral("EXPORT JSON"), diagCard);
+    exportJson->setObjectName(QStringLiteral("ddCopy"));
+    exportJson->setCursor(Qt::PointingHandCursor);
+    exportJson->setFocusPolicy(Qt::NoFocus);
+    exportJson->setToolTip(
+        QStringLiteral("write the sampled history to a JSON file"));
+    connect(exportJson, &QPushButton::clicked, this, [this]() {
+        emit historyExportRequested(QStringLiteral("json"));
+    });
+    exportRow->addWidget(exportWhat, 1);
+    exportRow->addWidget(exportCsv);
+    exportRow->addWidget(exportJson);
+    diagLayout->addLayout(exportRow);
+
     layout->addWidget(diagCard);
     layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
 
     applySettingsInfo();
     return view;
@@ -2761,6 +2849,14 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.metricsLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.metricsLine);
+    general += QStringLiteral("webhook&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.webhookLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.webhookLine);
+    general += QStringLiteral("export&nbsp;&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.exportLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.exportLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);
@@ -2780,6 +2876,16 @@ void DashboardPanel::applySettingsInfo() {
 
 void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
     m_settings = info;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setWebhookLine(const QString &line) {
+    m_settings.webhookLine = line;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setExportLine(const QString &line) {
+    m_settings.exportLine = line;
     applySettingsInfo();
 }
 
@@ -3359,6 +3465,21 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_chartProcTotals->pushB(qMax(0.0, snapshot.hostLoad1));
     }
 
+    if (m_procNetNote != nullptr) {
+        if (!m_osProcessNet) {
+            m_procNetNote->setText(
+                QStringLiteral("net / ports: %1").arg(unsupportedOsText()));
+        } else if (snapshot.processNetWarming) {
+            m_procNetNote->setText(
+                QStringLiteral("net / ports: warming up (tcp only)"));
+        } else {
+            m_procNetNote->setText(
+                QStringLiteral("%1 (tcp only)")
+                    .arg(processNetSummaryText(snapshot.processNetTracked,
+                                               snapshot.processNetUnattributed)));
+        }
+    }
+
     m_statusValue->setText(snapshot.status);
     if (m_statusBig != nullptr) {
         m_statusBig->setText(snapshot.status);
@@ -3738,6 +3859,38 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     }
     m_ifaces->setText(ifaces.isEmpty() ? QStringLiteral("--") : ifaces);
 
+    if (m_talkers != nullptr) {
+        if (!m_osProcessNet) {
+            m_talkerSummary->setText(unsupportedOsText());
+            m_talkers->setText(unsupportedOsText());
+        } else {
+            m_talkerSummary->setText(processNetSummaryText(
+                snapshot.processNetTracked,
+                snapshot.processNetUnattributed));
+            if (snapshot.processNetWarming) {
+                m_talkers->setText(QStringLiteral("warming up"));
+            } else if (snapshot.processNetTalkers.isEmpty()) {
+                m_talkers->setText(QStringLiteral("no tcp traffic"));
+            } else {
+                QString text;
+                for (const ProcessNetTalker &talker
+                     : snapshot.processNetTalkers) {
+                    text += QStringLiteral("%1 %2  rx %3  tx %4%5\n")
+                                .arg(talker.name, -18)
+                                .arg(QStringLiteral("(%1)").arg(talker.pid))
+                                .arg(formatNetRate(talker.rxPerSec))
+                                .arg(formatNetRate(talker.txPerSec))
+                                .arg(talker.listenPorts.isEmpty()
+                                         ? QString()
+                                         : QStringLiteral("  :%1").arg(
+                                               formatListenPorts(
+                                                   talker.listenPorts)));
+                }
+                m_talkers->setText(text);
+            }
+        }
+    }
+
     if (snapshot.tcpHealthAvailable) {
         m_tcpSummary->setText(tcpHealthSummaryText(snapshot.tcpHealth));
         m_tcp->setText(tcpHealthDetailText(snapshot.tcpHealth));
@@ -4034,14 +4187,23 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 
     m_focusDetail->setText(
         QStringLiteral("threads  %1\nfds      %2\nctx sw   %3 vol / %4 invol\n"
-                       "io read  %5\nio write %6")
+                       "io read  %5\nio write %6\nnet tcp  %7")
             .arg(snapshot.focusThreads)
             .arg(snapshot.focusFds < 0 ? QStringLiteral("--")
                                        : QString::number(snapshot.focusFds))
             .arg(snapshot.focusVolCtx)
             .arg(snapshot.focusInvolCtx)
             .arg(formatRate(snapshot.focusIoReadPerSec))
-            .arg(formatRate(snapshot.focusIoWritePerSec)));
+            .arg(formatRate(snapshot.focusIoWritePerSec))
+            .arg(!m_osProcessNet
+                     ? unsupportedOsText()
+                     : (snapshot.focusNetRxPerSec < 0.0
+                            ? QStringLiteral("--")
+                            : QStringLiteral("%1 down / %2 up")
+                                  .arg(formatNetRate(
+                                           snapshot.focusNetRxPerSec),
+                                       formatNetRate(
+                                           snapshot.focusNetTxPerSec)))));
 
     QString files;
     int fileCount = 0;
@@ -4101,12 +4263,15 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         item->setText(2, row.cpuPercent > 0.0
                              ? QStringLiteral("%1%").arg(row.cpuPercent, 0, 'f', 1)
                              : QStringLiteral("--"));
-        item->setText(3, row.threads > 0 ? QString::number(row.threads)
+        item->setText(3, formatNetRate(row.netRxPerSec));
+        item->setText(4, formatNetRate(row.netTxPerSec));
+        item->setText(5, row.threads > 0 ? QString::number(row.threads)
                                          : QStringLiteral("--"));
-        item->setText(4, row.fds < 0 ? QStringLiteral("--")
+        item->setText(6, row.fds < 0 ? QStringLiteral("--")
                                      : QString::number(row.fds));
-        item->setText(5, row.memory);
-        for (int c = 1; c < 6; ++c) {
+        item->setText(7, row.memory);
+        item->setText(8, formatListenPorts(row.listenPorts));
+        for (int c = 1; c < 9; ++c) {
             item->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
         }
 

@@ -12,6 +12,8 @@
 #include "IncidentStatus.h"
 #include "WatchdogStatus.h"
 #include "Notifier.h"
+#include "AlertWebhook.h"
+#include "MetricsExport.h"
 #include "SyntheticStatus.h"
 #include "TraceStatus.h"
 #include "PathStatus.h"
@@ -58,6 +60,10 @@ public:
 public:
 
     void setNotifier(std::unique_ptr<Notifier> notifier);
+
+    void setWebhookConfig(const WebhookConfig &config);
+
+    void setExportIntervalMs(int intervalMs);
 
     void setSyntheticSnapshot(const SyntheticSnapshot &snapshot);
 
@@ -124,6 +130,10 @@ private:
     QList<double> m_stealHistory;
     AlertInput m_alertInput;
     std::unique_ptr<Notifier> m_notifier;
+    AlertWebhook *m_webhook = nullptr;
+    QList<ExportRow> m_exportRows;
+    int m_exportIntervalMs = 1000;
+    void exportHistory(const QString &format);
     void evaluateAlerts();
     QPushButton *m_moreButton = nullptr;
     QPushButton *m_showHideButton = nullptr;

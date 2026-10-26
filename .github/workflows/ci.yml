@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -102,6 +102,16 @@ jobs:
               assert td["count"] >= 0 and td["withInfo"] >= 0, td
               print("tcpdiag ok: %d sockets, %d with tcp_info"
                     % (td["count"], td["withInfo"]))
+              pn = d.get("processNet", {})
+              assert pn.get("available") is True, pn
+              assert pn["tracked"] >= 0 and pn["unattributed"] >= 0, pn
+              assert pn["socketsWithRate"] >= 0, pn
+              for t in pn.get("talkers", []):
+                  assert t["rxBps"] >= 0 and t["txBps"] >= 0, t
+              print("processNet ok: %d tracked, %d other-user sockets, "
+                    "%d talkers"
+                    % (pn["tracked"], pn["unattributed"],
+                       len(pn.get("talkers", []))))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
@@ -153,6 +163,57 @@ jobs:
             "${RUNNER_TEMP}/syspeek-probe.txt"
           grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
           ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+
+      - name: Record smoke
+        if: runner.os != 'Windows'
+        run: |
+          SYSPEEK_BIN=./cpp/build/syspeek
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
+            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          fi
+          "$SYSPEEK_BIN" --record=3 --format=csv --out="${RUNNER_TEMP}/syspeek-history.csv"
+          head -3 "${RUNNER_TEMP}/syspeek-history.csv"
+          grep -q "^# hostname;interval;timestamp;APP;app_pid;" \
+            "${RUNNER_TEMP}/syspeek-history.csv"
+          [ "$(wc -l < "${RUNNER_TEMP}/syspeek-history.csv")" -eq 4 ]
+          "$SYSPEEK_BIN" --record=2 --format=json --out="${RUNNER_TEMP}/syspeek-history.json"
+          python3 - "${RUNNER_TEMP}/syspeek-history.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))["syspeek"]
+          for key in ("version", "platform", "hostname", "intervalMs", "samples"):
+              assert key in d, key
+          assert len(d["samples"]) == 2, d["samples"]
+          first = d["samples"][0]
+          for key in ("timestamp", "app", "host", "disk", "network", "tcp"):
+              assert key in first, key
+          assert first["timestamp"]["tz"] == "UTC", first["timestamp"]
+          host = d["samples"][-1]["host"]
+          assert host["cpuPercent"] is None or host["cpuPercent"] >= 0, host
+          print("export json ok: %d samples, cpu %s"
+                % (len(d["samples"]), host["cpuPercent"]))
+          PY
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Record smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ./cpp/build/Release/syspeek.exe --record=3 --format=csv \
+            --out="${RUNNER_TEMP}/syspeek-history.csv"
+          head -3 "${RUNNER_TEMP}/syspeek-history.csv"
+          grep -q "^# hostname;interval;timestamp;APP;app_pid;" \
+            "${RUNNER_TEMP}/syspeek-history.csv"
+          [ "$(wc -l < "${RUNNER_TEMP}/syspeek-history.csv")" -eq 4 ]
+          ./cpp/build/Release/syspeek.exe --record=2 --format=json \
+            --out="${RUNNER_TEMP}/syspeek-history.json"
+          python - "${RUNNER_TEMP}/syspeek-history.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))["syspeek"]
+          assert d["platform"] == "windows", d["platform"]
+          assert len(d["samples"]) == 2, d["samples"]
+          print("export json ok: %d samples" % len(d["samples"]))
+          PY
 
       - name: Dump smoke (Windows)
         if: runner.os == 'Windows'
@@ -309,9 +370,31 @@ jobs:
         run: |
           cmake --build cpp/build --target syspeek_screenshot -j 3
           mkdir -p "${RUNNER_TEMP}/screens"
-          for i in $(seq 0 26); do
+
+          render() {
+            local index="$1"
+            local out="${RUNNER_TEMP}/screens/panel-$(printf '%02d' "$index").png"
+            echo "render page ${index}"
             QT_QPA_PLATFORM=offscreen ./cpp/build/syspeek_screenshot \
-              "${RUNNER_TEMP}/screens/panel-$(printf '%02d' "$i").png" panel "$i"
+              "$out" panel "$index" || {
+              local rc=$?
+              echo "::error::screenshot render failed: page ${index} rc=${rc}"
+              if ! command -v gdb >/dev/null 2>&1; then
+                sudo apt-get update -qq >/dev/null 2>&1 || true
+                sudo apt-get install -y -qq gdb >/dev/null 2>&1 || true
+              fi
+              if command -v gdb >/dev/null 2>&1; then
+                gdb -batch -ex "set confirm off" -ex run \
+                  -ex "thread apply all bt 20" --args \
+                  ./cpp/build/syspeek_screenshot "$out" panel "$index" \
+                  2>&1 | tail -80 || true
+              fi
+              exit 2
+            }
+          }
+
+          for i in $(seq 0 26); do
+            render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'

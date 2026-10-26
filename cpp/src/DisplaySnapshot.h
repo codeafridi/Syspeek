@@ -2,6 +2,7 @@
 
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
+#include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "SecurityStatus.h"
 #include "SloStatus.h"
@@ -22,6 +23,9 @@ struct ProcessRow {
     int threads = 0;
     int fds = -1;
     double cpuPercent = 0.0;
+    double netRxPerSec = -1.0;
+    double netTxPerSec = -1.0;
+    QList<quint16> listenPorts;
     QString name;
     QString memory;
 };
@@ -84,6 +88,13 @@ struct DisplaySnapshot {
     unsigned long long swapKb = 0;
     unsigned long long sharedKb = 0;
     QList<ProcessRow> processes;
+    bool processNetAvailable = false;
+    bool processNetWarming = false;
+    int processNetTracked = 0;
+    int processNetUnattributed = 0;
+    double focusNetRxPerSec = -1.0;
+    double focusNetTxPerSec = -1.0;
+    QList<ProcessNetTalker> processNetTalkers;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;
     QList<EndpointRow> endpoints;

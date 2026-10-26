@@ -27,8 +27,17 @@
 #include "platform/null/NullBackend.h"
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
+#include "AlertWebhook.h"
+#include "MetricsExport.h"
+#include "ProcessNetStatus.h"
 #include "platform/mac/MacFimStream.h"
 #include <QFile>
+#include <QEventLoop>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -538,6 +547,28 @@ int main(int argc, char *argv[]) {
               "prometheus: oom kill counter");
         check(text.contains(QStringLiteral("syspeek_cgroup_pids 148")),
               "prometheus: cgroup pids gauge");
+
+        ProcessNetTalker talker;
+        talker.pid = 508637;
+        talker.name = QStringLiteral("cursor");
+        talker.sockets = 7;
+        talker.rxPerSec = 2048.0;
+        talker.txPerSec = 512.0;
+        s.processNetTalkers.append(talker);
+        text = prometheusText(s);
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "pid=\"508637\",direction=\"rx\"} 2048.000")),
+              "prometheus: per-process rx gauge");
+        check(text.contains(QStringLiteral(
+                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "pid=\"508637\",direction=\"tx\"} 512.000")),
+              "prometheus: per-process tx gauge");
+        s.processNetTalkers.clear();
+        text = prometheusText(s);
+        check(!text.contains(
+                  QStringLiteral("syspeek_process_net_bytes_per_second")),
+              "prometheus: talker block omitted when no traffic");
     }
 
     int status = 0;
@@ -1807,6 +1838,623 @@ int main(int argc, char *argv[]) {
             check(!stream.running(), "fim: non-mac stream stub inert");
         }
 #endif
+    }
+
+    // --- alert webhooks (M69): payload schema grounded on Alertmanager 0.34.1
+    {
+        WebhookEvent firing;
+        firing.id = QStringLiteral("app_cpu");
+        firing.title = QStringLiteral("Focused app CPU 96% (high)");
+        firing.detail = QStringLiteral("cursor cpu 96.0% >= 90%");
+        firing.severity = QStringLiteral("critical");
+        firing.status = QStringLiteral("firing");
+        firing.startsAtMs = 1700000000000LL;
+
+        const QJsonObject generic =
+            QJsonDocument::fromJson(alertmanagerWebhookPayload({firing}))
+                .object();
+        check(generic.value(QStringLiteral("version")).toString()
+                  == QStringLiteral("4"),
+              "webhook: generic payload version 4");
+        check(!generic.value(QStringLiteral("groupKey")).toString().isEmpty(),
+              "webhook: generic groupKey present");
+        check(generic.value(QStringLiteral("truncatedAlerts")).toInt() == 0,
+              "webhook: generic truncatedAlerts 0");
+        check(generic.value(QStringLiteral("receiver")).toString()
+                  == QStringLiteral("syspeek"),
+              "webhook: generic receiver");
+        check(generic.value(QStringLiteral("status")).toString()
+                  == QStringLiteral("firing"),
+              "webhook: generic status");
+        check(generic.contains(QStringLiteral("commonLabels"))
+                  && generic.contains(QStringLiteral("commonAnnotations"))
+                  && generic.contains(QStringLiteral("externalURL")),
+              "webhook: generic template fields present");
+        const QJsonArray alerts =
+            generic.value(QStringLiteral("alerts")).toArray();
+        check(alerts.size() == 1, "webhook: generic one alert");
+        const QJsonObject alert = alerts.first().toObject();
+        const QJsonObject labels =
+            alert.value(QStringLiteral("labels")).toObject();
+        const QJsonObject annotations =
+            alert.value(QStringLiteral("annotations")).toObject();
+        check(labels.value(QStringLiteral("alertname")).toString()
+                  == QStringLiteral("app_cpu"),
+              "webhook: label alertname = rule id");
+        check(labels.value(QStringLiteral("severity")).toString()
+                  == QStringLiteral("critical"),
+              "webhook: label severity");
+        check(annotations.value(QStringLiteral("summary")).toString()
+                  == firing.title
+                  && annotations.value(QStringLiteral("description")).toString()
+                         == firing.detail,
+              "webhook: annotations summary/description");
+        check(alert.value(QStringLiteral("startsAt")).toString()
+                  == QStringLiteral("2023-11-14T22:13:20Z"),
+              "webhook: startsAt ISO");
+        check(alert.value(QStringLiteral("endsAt")).toString()
+                  == QStringLiteral("0001-01-01T00:00:00Z"),
+              "webhook: firing endsAt epoch");
+        check(alert.value(QStringLiteral("fingerprint")).toString()
+                  == QStringLiteral("app_cpu"),
+              "webhook: fingerprint");
+
+        WebhookEvent resolved = firing;
+        resolved.status = QStringLiteral("resolved");
+        resolved.endsAtMs = 1700000060000LL;
+        const QJsonObject genericResolved =
+            QJsonDocument::fromJson(alertmanagerWebhookPayload({resolved}))
+                .object();
+        check(genericResolved.value(QStringLiteral("status")).toString()
+                  == QStringLiteral("resolved"),
+              "webhook: generic resolved status");
+        check(genericResolved.value(QStringLiteral("alerts"))
+                      .toArray()
+                      .first()
+                      .toObject()
+                      .value(QStringLiteral("endsAt"))
+                      .toString()
+                  == QStringLiteral("2023-11-14T22:14:20Z"),
+              "webhook: resolved endsAt ISO");
+
+        const QJsonObject slack =
+            QJsonDocument::fromJson(slackWebhookPayload({firing})).object();
+        check(slack.value(QStringLiteral("text")).toString().contains(
+                  QStringLiteral("firing")),
+              "webhook: slack text mentions firing");
+        const QJsonArray attachments =
+            slack.value(QStringLiteral("attachments")).toArray();
+        check(attachments.size() == 1, "webhook: slack one attachment");
+        const QJsonObject attachment = attachments.first().toObject();
+        check(attachment.value(QStringLiteral("color")).toString()
+                  == QStringLiteral("d1685f"),
+              "webhook: slack critical color");
+        check(attachment.value(QStringLiteral("title")).toString()
+                  == firing.title,
+              "webhook: slack attachment title");
+        check(attachment.value(QStringLiteral("fallback")).toString().contains(
+                  QStringLiteral("firing")),
+              "webhook: slack fallback");
+        const QJsonArray fields =
+            attachment.value(QStringLiteral("fields")).toArray();
+        check(fields.size() == 2
+                  && fields.first().toObject().value(QStringLiteral("short"))
+                         .toBool(),
+              "webhook: slack fields short");
+        check(attachment.value(QStringLiteral("mrkdwn_in"))
+                      .toArray()
+                      .contains(QJsonValue(QStringLiteral("text"))),
+              "webhook: slack mrkdwn_in text");
+
+        const QJsonObject slackResolved =
+            QJsonDocument::fromJson(slackWebhookPayload({resolved})).object();
+        check(slackResolved.value(QStringLiteral("attachments"))
+                      .toArray()
+                      .first()
+                      .toObject()
+                      .value(QStringLiteral("color"))
+                      .toString()
+                  == QStringLiteral("36a64f"),
+              "webhook: slack resolved color");
+
+        WebhookConfig off;
+        check(webhookConfigLine(off)
+                  == QStringLiteral("off ([webhook] enabled=false)"),
+              "webhook: config line off by default");
+        WebhookConfig noUrl;
+        noUrl.enabled = true;
+        check(webhookConfigLine(noUrl).startsWith(QStringLiteral("no url")),
+              "webhook: config line missing url");
+        WebhookConfig slackCfg;
+        slackCfg.enabled = true;
+        slackCfg.url = QStringLiteral("https://example.test/hook");
+        slackCfg.format = QStringLiteral("slack");
+        check(webhookConfigLine(slackCfg)
+                  == QStringLiteral("slack -> https://example.test/hook"),
+              "webhook: config line enabled");
+    }
+
+    // --- alert webhooks (M69): live loopback delivery
+    {
+        QTcpServer server;
+        const bool listening = server.listen(QHostAddress::LocalHost, 0);
+        check(listening, "webhook: loopback receiver listening");
+        QByteArray received;
+        bool statusOk = true;
+        QObject::connect(
+            &server, &QTcpServer::newConnection, &server, [&]() {
+                QTcpSocket *socket = server.nextPendingConnection();
+                QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                                 [&, socket]() {
+                                     received += socket->readAll();
+                                     if (!received.contains("\r\n\r\n")) {
+                                         return;
+                                     }
+                                     const QByteArray reply =
+                                         statusOk
+                                             ? QByteArrayLiteral(
+                                                   "HTTP/1.1 200 OK\r\n"
+                                                   "Content-Length: 2\r\n"
+                                                   "Connection: close\r\n\r\nok")
+                                             : QByteArrayLiteral(
+                                                   "HTTP/1.1 500 Error\r\n"
+                                                   "Content-Length: 3\r\n"
+                                                   "Connection: close\r\n\r\nerr");
+                                     socket->write(reply);
+                                     socket->flush();
+                                 });
+            });
+
+        auto waitDelivery = [&app](AlertWebhook &hook, bool &ok,
+                                   QString &error) {
+            QEventLoop loop;
+            bool done = false;
+            QObject::connect(&hook, &AlertWebhook::deliveryFinished, &loop,
+                             [&](bool delivered, const QString &err) {
+                                 ok = delivered;
+                                 error = err;
+                                 done = true;
+                                 loop.quit();
+                             });
+            for (int i = 0; i < 200 && !done; ++i) {
+                QThread::msleep(25);
+                app.processEvents();
+            }
+            return done;
+        };
+
+        WebhookConfig config;
+        config.enabled = true;
+        config.url = QStringLiteral("http://127.0.0.1:%1/hook")
+                         .arg(server.serverPort());
+        config.timeoutMs = 3000;
+
+        AlertWebhook hook;
+        hook.setConfig(config);
+
+        Alert alert;
+        alert.id = QStringLiteral("host_cpu");
+        alert.title = QStringLiteral("Host CPU 97% (critical)");
+        alert.detail = QStringLiteral("host cpu 97.2% >= 95%");
+        alert.severity = QStringLiteral("critical");
+        alert.atMs = 1700000000000LL;
+
+        bool ok = false;
+        QString error;
+        hook.processEvents({alert}, {alert}, 1700000000000LL);
+        const bool delivered = waitDelivery(hook, ok, error);
+        check(delivered, "webhook: live delivery finished");
+        check(ok, "webhook: live delivery 200 ok");
+        check(received.startsWith("POST /hook HTTP/1.1"),
+              "webhook: live request POST path");
+        check(received.toLower().contains("content-type: application/json"),
+              "webhook: live request content type");
+        check(received.contains("\"version\":\"4\""),
+              "webhook: live body carries v4 payload");
+        check(hook.statusLine().contains(QStringLiteral("1 sent, 0 failed")),
+              "webhook: live status line counts sent");
+
+        statusOk = false;
+        Alert second;
+        second.id = QStringLiteral("app_rss");
+        second.title = QStringLiteral("Focused app RSS 2.4 GB (warn)");
+        second.detail = QStringLiteral("cursor rss 2400 MB >= 1024 MB");
+        second.severity = QStringLiteral("warning");
+        second.atMs = 1700000000000LL;
+
+        ok = true;
+        error.clear();
+        hook.processEvents({second}, {alert, second}, 1700000060000LL);
+        const bool failedDelivery = waitDelivery(hook, ok, error);
+        check(failedDelivery, "webhook: failing delivery finished");
+        check(!ok && error.contains(QStringLiteral("500")),
+              "webhook: non-2xx reported as failure");
+        check(hook.statusLine().contains(QStringLiteral("1 failed")),
+              "webhook: failure counted");
+
+        hook.processEvents({}, {alert}, 1700000120000LL);
+        const bool resolvedDelivery = waitDelivery(hook, ok, error);
+        check(resolvedDelivery, "webhook: resolved delivery finished");
+        check(received.contains("\"status\":\"resolved\""),
+              "webhook: resolved event posted when alert vanishes");
+
+        AlertWebhook disabledHook;
+        bool disabledDelivered = false;
+        QObject::connect(&disabledHook, &AlertWebhook::deliveryFinished,
+                         &disabledHook,
+                         [&](bool, const QString &) {
+                             disabledDelivered = true;
+                         });
+        disabledHook.processEvents({alert}, {alert}, 1700000180000LL);
+        for (int i = 0; i < 8; ++i) {
+            QThread::msleep(25);
+            app.processEvents();
+        }
+        check(!disabledDelivered, "webhook: disabled by default sends nothing");
+    }
+
+
+    {
+        DisplaySnapshot snap;
+        snap.appName = QStringLiteral("cursor");
+        snap.pid = QStringLiteral("36904");
+        snap.cpuValid = true;
+        snap.cpuPercent = 12.5;
+        snap.rssKb = 3141788;
+        snap.hostAvailable = true;
+        snap.hostWarming = false;
+        snap.hostCpuPercent = 21.25;
+        snap.hostStealPercent = 0.5;
+        snap.hostMemAvailableKb = 6278908;
+        snap.hostMemTotalKb = 15482276;
+        snap.hostLoad1 = 4.46;
+        snap.hostNetRxPerSec = 2048.0;
+        snap.hostNetTxPerSec = 512.0;
+        snap.disksAvailable = true;
+        snap.disksWarming = false;
+        DiskRow sda;
+        sda.name = QStringLiteral("sda");
+        sda.readKbPerSec = 100.0;
+        sda.writeKbPerSec = 25.0;
+        sda.utilPercent = 4.5;
+        DiskRow nvme;
+        nvme.name = QStringLiteral("nvme0n1");
+        nvme.readKbPerSec = 900.0;
+        nvme.writeKbPerSec = 75.0;
+        nvme.utilPercent = 12.5;
+        snap.disks = {sda, nvme};
+        snap.tcpHealthAvailable = true;
+        snap.tcpHealth.inSegsPerSec = 1234.5;
+        snap.tcpHealth.outSegsPerSec = 678.25;
+        snap.tcpHealth.retransPerSec = 3.5;
+        snap.tcpHealth.retransPercent = 0.25;
+        snap.tcpHealth.currEstab = 42;
+
+        const ExportRow row = exportRowFrom(snap, 1793016000000LL);
+        check(row.atMs == 1793016000000LL, "export row: timestamp kept");
+        check(row.appName == QStringLiteral("cursor")
+                  && row.pid == QStringLiteral("36904"),
+              "export row: app identity");
+        check(qFuzzyCompare(row.appCpuPercent, 12.5)
+                  && row.appRssKb == 3141788,
+              "export row: app cpu + rss");
+        check(qFuzzyCompare(row.hostCpuPercent, 21.25)
+                  && qFuzzyCompare(row.hostStealPercent, 0.5)
+                  && row.hostMemAvailableKb == 6278908
+                  && row.hostMemTotalKb == 15482276
+                  && qFuzzyCompare(row.load1, 4.46),
+              "export row: host block");
+        check(qFuzzyCompare(row.diskReadKbPerSec, 1000.0)
+                  && qFuzzyCompare(row.diskWriteKbPerSec, 100.0)
+                  && qFuzzyCompare(row.diskUtilPercent, 12.5),
+              "export row: disk sums + max util");
+        check(qFuzzyCompare(row.netRxKbPerSec, 2.0)
+                  && qFuzzyCompare(row.netTxKbPerSec, 0.5),
+              "export row: net bytes/s to kB/s");
+        check(qFuzzyCompare(row.tcpInSegsPerSec, 1234.5)
+                  && qFuzzyCompare(row.tcpRetransPercent, 0.25)
+                  && row.tcpCurrEstab == 42,
+              "export row: tcp counters");
+
+        DisplaySnapshot warm;
+        warm.appName = QStringLiteral("--");
+        warm.pid = QStringLiteral("--");
+        warm.hostAvailable = true;
+        warm.hostWarming = true;
+        warm.hostCpuPercent = 99.0;
+        warm.disksAvailable = true;
+        warm.disksWarming = true;
+        warm.disks = {sda};
+        warm.tcpHealthAvailable = false;
+        warm.tcpHealth.inSegsPerSec = 5.0;
+        const ExportRow warmRow = exportRowFrom(warm, 1793016001000LL);
+        check(warmRow.appName.isEmpty() && warmRow.pid.isEmpty(),
+              "export row: no-focus app left unset");
+        check(warmRow.appCpuPercent < 0.0 && warmRow.appRssKb < 0,
+              "export row: no-focus app cpu/rss gated");
+        check(warmRow.hostCpuPercent < 0.0 && warmRow.hostMemTotalKb < 0,
+              "export row: host warming tick gated");
+        check(warmRow.diskReadKbPerSec < 0.0 && warmRow.diskUtilPercent < 0.0,
+              "export row: disk warming tick gated");
+        check(warmRow.tcpInSegsPerSec < 0.0 && warmRow.tcpCurrEstab < 0,
+              "export row: unavailable tcp counters gated");
+
+        ExportMeta meta;
+        meta.hostname = QStringLiteral("testbox");
+        meta.platform = QStringLiteral("linux");
+        meta.version = QStringLiteral("0.8.9");
+        meta.intervalMs = 2000;
+
+        const QList<ExportRow> rows = {row, warmRow};
+        const QString csv = exportCsv(rows, meta);
+        const QStringList csvLines =
+            csv.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        check(csvLines.size() == 3, "csv: header + one row per sample");
+        check(csvLines.first().startsWith(
+                  QStringLiteral("# hostname;interval;timestamp;APP;app_pid;")),
+              "csv: sadf-style '#' header line");
+        const QStringList header =
+            csvLines.first().mid(2).split(QLatin1Char(';'));
+        const QStringList firstFields = csvLines.at(1).split(QLatin1Char(';'));
+        const QStringList secondFields = csvLines.at(2).split(QLatin1Char(';'));
+        check(firstFields.size() == header.size()
+                  && secondFields.size() == header.size(),
+              "csv: every row matches the header width");
+        check(firstFields.at(0) == QStringLiteral("testbox")
+                  && firstFields.at(1) == QStringLiteral("2"),
+              "csv: hostname + interval seconds");
+        check(firstFields.at(2) == QStringLiteral("2026-10-26 12:00:00 UTC"),
+              "csv: UTC timestamp in sadf shape");
+        check(firstFields.at(3) == QStringLiteral("cursor")
+                  && firstFields.at(4) == QStringLiteral("36904"),
+              "csv: app name + pid fields");
+        check(firstFields.at(5) == QStringLiteral("12.50")
+                  && firstFields.at(7) == QStringLiteral("21.25")
+                  && firstFields.at(12) == QStringLiteral("1000.00"),
+              "csv: 2-decimal floats");
+        check(firstFields.at(8) == QStringLiteral("0.50")
+                  && firstFields.at(19) == QStringLiteral("3.50")
+                  && firstFields.at(20) == QStringLiteral("0.25"),
+              "csv: sub-unit floats keep 2 decimals");
+        check(secondFields.at(5) == QStringLiteral("-1")
+                  && secondFields.at(7) == QStringLiteral("-1")
+                  && secondFields.at(11) == QStringLiteral("-1")
+                  && secondFields.at(20) == QStringLiteral("-1"),
+              "csv: -1 sentinel for not-applicable values");
+        check(csv.endsWith(QLatin1Char('\n')), "csv: newline-terminated");
+
+        const QJsonObject root = QJsonDocument::fromJson(
+            exportJson(rows, meta).toUtf8()).object();
+        check(root.contains(QStringLiteral("syspeek")),
+              "json: own namespace, not sysstat");
+        const QJsonObject body = root.value(QStringLiteral("syspeek")).toObject();
+        check(body.value(QStringLiteral("version")).toString()
+                  == QStringLiteral("0.8.9")
+                  && body.value(QStringLiteral("platform")).toString()
+                  == QStringLiteral("linux")
+                  && body.value(QStringLiteral("hostname")).toString()
+                  == QStringLiteral("testbox")
+                  && body.value(QStringLiteral("intervalMs")).toInt() == 2000,
+              "json: envelope metadata");
+        const QJsonArray samples =
+            body.value(QStringLiteral("samples")).toArray();
+        check(samples.size() == 2, "json: one object per sample");
+        const QJsonObject first = samples.at(0).toObject();
+        check(first.contains(QStringLiteral("timestamp"))
+                  && first.contains(QStringLiteral("app"))
+                  && first.contains(QStringLiteral("host"))
+                  && first.contains(QStringLiteral("disk"))
+                  && first.contains(QStringLiteral("network"))
+                  && first.contains(QStringLiteral("tcp")),
+              "json: sadf-style per-sample domains");
+        const QJsonObject stamp =
+            first.value(QStringLiteral("timestamp")).toObject();
+        check(stamp.value(QStringLiteral("date")).toString()
+                  == QStringLiteral("2026-10-26")
+                  && stamp.value(QStringLiteral("time")).toString()
+                  == QStringLiteral("12:00:00")
+                  && stamp.value(QStringLiteral("tz")).toString()
+                  == QStringLiteral("UTC"),
+              "json: timestamp date/time/tz split");
+        const QJsonObject firstHost =
+            first.value(QStringLiteral("host")).toObject();
+        const QJsonObject firstDisk =
+            first.value(QStringLiteral("disk")).toObject();
+        check(qFuzzyCompare(firstHost.value(QStringLiteral("cpuPercent"))
+                                .toDouble(), 21.25)
+                  && firstHost.value(QStringLiteral("memTotalKb")).toInt()
+                  == 15482276
+                  && qFuzzyCompare(firstDisk.value(
+                                       QStringLiteral("readKbPerSec"))
+                                       .toDouble(),
+                                   1000.0),
+              "json: measured values carried");
+        const QJsonObject second = samples.at(1).toObject();
+        const QJsonObject secondHost =
+            second.value(QStringLiteral("host")).toObject();
+        const QJsonObject secondApp =
+            second.value(QStringLiteral("app")).toObject();
+        check(secondHost.value(QStringLiteral("cpuPercent")).isNull()
+                  && secondHost.value(QStringLiteral("load1")).isNull()
+                  && secondApp.value(QStringLiteral("name")).isNull()
+                  && second.value(QStringLiteral("tcp"))
+                          .toObject()
+                          .value(QStringLiteral("currEstab"))
+                          .isNull(),
+              "json: unavailable values are null");
+
+        check(normalizedExportFormat(QStringLiteral("JSON"))
+                  == QStringLiteral("json")
+                  && normalizedExportFormat(QStringLiteral(" csv "))
+                          == QStringLiteral("csv")
+                  && normalizedExportFormat(QStringLiteral("xml"))
+                          == QStringLiteral("csv"),
+              "export: format normalization falls back to csv");
+        check(exportRows(rows, meta, QStringLiteral("json"))
+                      .trimmed()
+                      .startsWith(QLatin1Char('{'))
+                  && exportRows(rows, meta, QStringLiteral("csv"))
+                         .startsWith(QLatin1Char('#')),
+              "export: dispatch honours the format");
+
+        const QString emptyCsv =
+            exportCsv({}, meta);
+        check(emptyCsv.count(QLatin1Char('\n')) == 1,
+              "csv: header-only file when no samples exist");
+    }
+
+    {
+        // M71: per-socket tcp_info byte deltas become per-pid rates.
+        linuxproc::TcpDiagInfo a;
+        a.inode = 111;
+        a.hasInfo = true;
+        a.bytesReceived = 1000;
+        a.bytesSent = 500;
+        linuxproc::TcpDiagInfo b;
+        b.inode = 222;
+        b.hasInfo = true;
+        b.bytesReceived = 4096;
+        b.bytesSent = 0;
+
+        QHash<unsigned long long, ProcessNetPrior> prior;
+        QHash<unsigned long long, ProcessNetRate> rates =
+            processNetSocketRates({a, b}, 1000, prior);
+        check(rates.value(111).rxPerSec < 0.0
+                  && rates.value(222).txPerSec < 0.0,
+              "net: first tick per socket is warming (no rate)");
+
+        a.bytesReceived = 3000;
+        a.bytesSent = 1500;
+        b.bytesReceived = 4096;
+        rates = processNetSocketRates({a, b}, 1000, prior);
+        check(rates.value(111).rxPerSec == 2000.0
+                  && rates.value(111).txPerSec == 1000.0,
+              "net: byte delta over the interval yields bytes/s");
+        check(rates.value(222).rxPerSec == 0.0
+                  && rates.value(222).txPerSec == 0.0,
+              "net: idle socket reports an honest zero");
+
+        a.bytesReceived = 10;
+        a.bytesSent = 10;
+        rates = processNetSocketRates({a}, 1000, prior);
+        check(rates.value(111).rxPerSec == 0.0
+                  && rates.value(111).txPerSec == 0.0,
+              "net: recycled inode rebases to zero, never negative");
+
+        linuxproc::TcpDiagInfo noInfo;
+        noInfo.inode = 333;
+        noInfo.hasInfo = false;
+        rates = processNetSocketRates({noInfo}, 1000, prior);
+        check(rates.isEmpty(), "net: sockets without tcp_info are skipped");
+
+        QHash<unsigned long long, ProcessNetRate> socketRates;
+        ProcessNetRate known;
+        known.rxPerSec = 2048.0;
+        known.txPerSec = 1024.0;
+        socketRates.insert(111, known);
+        ProcessNetRate warm;
+        socketRates.insert(222, warm);
+        ProcessNetRate heavy;
+        heavy.rxPerSec = 8192.0;
+        heavy.txPerSec = 4096.0;
+        socketRates.insert(999, heavy);
+        QHash<unsigned long long, int> inodePid;
+        inodePid.insert(111, 500);
+        inodePid.insert(222, 500);
+        inodePid.insert(999, 501);
+        const QHash<int, ProcessNetPidRate> pidRates =
+            processNetPidRates(socketRates, inodePid);
+        check(pidRates.size() == 2 && pidRates.value(500).sockets == 2,
+              "net: pid aggregation counts sockets");
+        check(pidRates.value(500).rxPerSec == 2048.0
+                  && pidRates.value(500).txPerSec == 1024.0,
+              "net: pid rates sum warmed sockets only");
+        check(pidRates.value(501).rxPerSec == 8192.0
+                  && pidRates.value(501).rxPerSec >= 0.0,
+              "net: unattributed sockets are absent from the pid map");
+
+        const QList<ProcessNetTalker> talkers =
+            processNetTopTalkers(pidRates, 1);
+        check(talkers.size() == 1 && talkers.first().pid == 501,
+              "net: top talkers sorted by throughput and limited");
+
+        const QList<ProcessNetTalker> allTalkers =
+            processNetTopTalkers(pidRates, 8);
+        check(allTalkers.size() == 2, "net: zero-traffic pids filtered");
+
+        QHash<unsigned long long, ProcessNetRate> coldSockets;
+        coldSockets.insert(222, warm);
+        const QHash<int, ProcessNetPidRate> coldOnly =
+            processNetPidRates(coldSockets, inodePid);
+        check(coldOnly.value(500).rxPerSec < 0.0
+                  && coldOnly.value(500).sockets == 1
+                  && processNetTopTalkers(coldOnly, 8).isEmpty(),
+              "net: warming pids stay out of the talker list");
+
+        linuxproc::SocketInfo listen4;
+        listen4.proto = QStringLiteral("tcp4");
+        listen4.state = QStringLiteral("LISTEN");
+        listen4.localPort = 8080;
+        listen4.inode = 111;
+        linuxproc::SocketInfo listen6;
+        listen6.proto = QStringLiteral("tcp6");
+        listen6.state = QStringLiteral("LISTEN");
+        listen6.localPort = 443;
+        listen6.inode = 111;
+        linuxproc::SocketInfo established;
+        established.proto = QStringLiteral("tcp4");
+        established.state = QStringLiteral("ESTABLISHED");
+        established.localPort = 9000;
+        established.inode = 111;
+        linuxproc::SocketInfo otherPid;
+        otherPid.proto = QStringLiteral("tcp4");
+        otherPid.state = QStringLiteral("LISTEN");
+        otherPid.localPort = 5432;
+        otherPid.inode = 777;
+        const QList<quint16> ports = processNetListenPorts(
+            {listen4, listen6, established, otherPid}, {111});
+        check(ports == QList<quint16>({443, 8080}),
+              "net: listen ports filtered, deduped and sorted");
+
+        check(formatNetRate(-1.0) == QStringLiteral("--"),
+              "net: unknown rate renders as dashes");
+        check(formatNetRate(512.0) == QStringLiteral("512 B/s")
+                  && formatNetRate(2048.0) == QStringLiteral("2 KB/s")
+                  && formatNetRate(5.0 * 1024 * 1024)
+                         == QStringLiteral("5.0 MB/s"),
+              "net: rate formatting scales");
+        check(formatListenPorts({}) == QStringLiteral("--")
+                  && formatListenPorts({22, 80, 443, 8080})
+                         == QStringLiteral("22, 80, 443 +1")
+                  && formatListenPorts({5432}) == QStringLiteral("5432"),
+              "net: port formatting elides long lists");
+        check(processNetSummaryText(0, 0)
+                  == QStringLiteral("no tcp sockets")
+                  && processNetSummaryText(11, 35)
+                         == QStringLiteral("tcp sockets: 11 tracked, "
+                                           "35 other users"),
+              "net: summary states attribution honesty");
+    }
+
+    {
+        class FakeInodeBackend : public NullBackend {
+        public:
+            QList<unsigned long long> socketInodes(int pid) override {
+                if (pid == 700) {
+                    return {111, 0, 222};
+                }
+                if (pid == 701) {
+                    return {333};
+                }
+                return {};
+            }
+        };
+        FakeInodeBackend backend;
+        const QHash<unsigned long long, int> map =
+            processNetInodePid(backend, {700, 701, 702});
+        check(map.size() == 3 && map.value(111) == 700
+                  && map.value(222) == 700 && map.value(333) == 701,
+              "net: inode map skips zero inodes and unreadable pids");
     }
 
     std::printf("%d failure(s)\n", failures);

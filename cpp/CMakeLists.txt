@@ -40,6 +40,8 @@ add_library(syspeek_core STATIC
     src/CpuSampler.h
     src/AlertEngine.cpp
     src/AlertEngine.h
+    src/AlertWebhook.cpp
+    src/AlertWebhook.h
     src/Notifier.cpp
     src/Notifier.h
     src/HostSampler.cpp
@@ -175,6 +177,12 @@ add_library(syspeek_core STATIC
     src/AppLog.h
     src/ProbeRun.cpp
     src/ProbeRun.h
+    src/MetricsExport.cpp
+    src/MetricsExport.h
+    src/ExportRun.cpp
+    src/ExportRun.h
+    src/ProcessNetStatus.cpp
+    src/ProcessNetStatus.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
@@ -233,6 +241,8 @@ elseif(WIN32)
 endif()
 
 target_include_directories(syspeek_core PUBLIC src)
+target_compile_definitions(syspeek_core PUBLIC
+    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\"")
 target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::Network)
 if(APPLE)
     target_link_libraries(syspeek_core PUBLIC
@@ -255,8 +265,6 @@ target_compile_options(syspeek_core PRIVATE
 
 add_executable(syspeek src/main.cpp)
 target_link_libraries(syspeek PRIVATE syspeek_core)
-target_compile_definitions(syspeek PRIVATE
-    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\"")
 if(WIN32)
     target_sources(syspeek PRIVATE
         packaging/windows/syspeek.rc)

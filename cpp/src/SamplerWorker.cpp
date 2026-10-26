@@ -79,7 +79,12 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         m_health.reset();
         m_slo.record(false, QDateTime::currentMSecsSinceEpoch());
         snap.slo = m_slo.report(m_sloSpec);
-        fillHostTail(snap, {});
+        const QList<linuxproc::SocketInfo> sockets =
+            m_backend->capabilities().perProcessNet
+                ? m_backend->readNetSockets()
+                : QList<linuxproc::SocketInfo>{};
+        fillProcessNet(snap, sockets);
+        fillHostTail(snap, sockets);
         return snap;
     }
 
@@ -325,6 +330,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     snap.endpoints = endpoints;
     snap.dbConnections = dbConnections;
 
+    fillProcessNet(snap, sockets);
+
     m_backend->processInstrumentation(focus.identity.pid, snap.instrumentation);
 
     SecurityInput securityInput;
@@ -460,4 +467,100 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
         snapshot.tcpHealth.currEstab = established;
     }
 #endif
+}
+
+void SamplerWorker::fillProcessNet(
+    DisplaySnapshot &snapshot, const QList<linuxproc::SocketInfo> &sockets) {
+
+    if (!m_backend->capabilities().perProcessNet) {
+        return;
+    }
+    snapshot.processNetAvailable = true;
+
+    // The inode -> pid map costs one /proc/<pid>/fd walk per refresh, so it
+    // is rebuilt on a 2 s cadence instead of every tick (a socket that
+    // appears in between is attributed on the next refresh).
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_netInodePid.isEmpty() || now - m_netMapStampMs >= 2000) {
+        m_netInodePid = processNetInodePid(*m_backend, m_backend->allPids());
+        m_netMapStampMs = now;
+    }
+
+    qint64 windowMs = m_intervalMs;
+    if (m_netRateStampMs > 0) {
+        windowMs = qBound<qint64>(qint64(100), now - m_netRateStampMs,
+                                  qint64(60000));
+    }
+    m_netRateStampMs = now;
+
+    QHash<int, QList<unsigned long long>> inodesOfPid;
+    for (auto it = m_netInodePid.constBegin(); it != m_netInodePid.constEnd();
+         ++it) {
+        inodesOfPid[it.value()].append(it.key());
+    }
+
+    QList<linuxproc::TcpDiagInfo> diag;
+#if defined(Q_OS_LINUX)
+    diag = m_backend->queryTcpDiag();
+#endif
+    const QHash<unsigned long long, ProcessNetRate> socketRates =
+        processNetSocketRates(diag, windowMs, m_netPrior);
+    const QHash<int, ProcessNetPidRate> pidRates =
+        processNetPidRates(socketRates, m_netInodePid);
+
+    double focusRx = 0.0;
+    double focusTx = 0.0;
+    bool focusKnown = false;
+    for (ProcessRow &row : snapshot.processes) {
+        const auto it = pidRates.constFind(row.pid);
+        if (it != pidRates.constEnd()) {
+            row.netRxPerSec = it->rxPerSec;
+            row.netTxPerSec = it->txPerSec;
+            if (it->rxPerSec >= 0.0) {
+                focusRx += it->rxPerSec;
+                focusTx += it->txPerSec;
+                focusKnown = true;
+            }
+        }
+        row.listenPorts =
+            processNetListenPorts(sockets, inodesOfPid.value(row.pid));
+    }
+    if (focusKnown) {
+        snapshot.focusNetRxPerSec = focusRx;
+        snapshot.focusNetTxPerSec = focusTx;
+    }
+
+    int tracked = 0;
+    int unattributed = 0;
+    bool anyKnown = false;
+    for (const linuxproc::TcpDiagInfo &info : diag) {
+        if (info.inode == 0) {
+            continue;
+        }
+        if (m_netInodePid.contains(info.inode)) {
+            ++tracked;
+        } else {
+            ++unattributed;
+        }
+    }
+    for (auto it = pidRates.constBegin(); it != pidRates.constEnd(); ++it) {
+        if (it->rxPerSec >= 0.0) {
+            anyKnown = true;
+            break;
+        }
+    }
+    snapshot.processNetTracked = tracked;
+    snapshot.processNetUnattributed = unattributed;
+    snapshot.processNetWarming = !anyKnown;
+
+    QList<ProcessNetTalker> talkers = processNetTopTalkers(pidRates, 8);
+    for (ProcessNetTalker &talker : talkers) {
+        talker.name = m_backend->comm(talker.pid);
+        if (talker.name.isEmpty()) {
+            talker.name = QStringLiteral("pid %1").arg(talker.pid);
+        }
+        talker.listenPorts =
+            processNetListenPorts(sockets, inodesOfPid.value(talker.pid));
+    }
+    snapshot.processNetTalkers = talkers;
 }

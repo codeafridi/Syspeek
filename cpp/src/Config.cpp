@@ -363,6 +363,30 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("webhook"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.webhook.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        const QString url =
+            settings.value(QStringLiteral("url")).toString().trimmed();
+        if (!url.isEmpty()) {
+            config.webhook.url = url;
+        }
+        const QString format =
+            settings.value(QStringLiteral("format")).toString().trimmed();
+        if (format == QLatin1String("generic")
+            || format == QLatin1String("slack")) {
+            config.webhook.format = format;
+        }
+        const int timeout = settings.value(QStringLiteral("timeout_ms")).toInt();
+        if (timeout > 0) {
+            config.webhook.timeoutMs = clampInt(timeout, 500, 60000);
+        }
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("slo"));
     {
         const QString name = settings.value(QStringLiteral("name")).toString();

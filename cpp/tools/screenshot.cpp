@@ -9,6 +9,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStackedWidget>
+#include <QStringList>
 
 #include <cmath>
 #include <cstdio>
@@ -81,6 +82,9 @@ DisplaySnapshot demoSnapshot(int tick) {
     proc.threads = 148;
     proc.fds = 1204;
     proc.cpuPercent = 12.4;
+    proc.netRxPerSec = 1'258'291.0;
+    proc.netTxPerSec = 196'608.0;
+    proc.listenPorts = {9222};
     proc.name = QStringLiteral("cursor");
     proc.memory = QStringLiteral("612.4 MB");
     s.processes = {proc};
@@ -99,6 +103,37 @@ DisplaySnapshot demoSnapshot(int tick) {
         row.memory = QString::fromUtf8(mem);
         s.processes.append(row);
     }
+    s.processes[1].netRxPerSec = 262'144.0;
+    s.processes[1].netTxPerSec = 65'536.0;
+    s.processes[1].listenPorts = {3000, 3001};
+    s.processes.last().netRxPerSec = 0.0;
+    s.processes.last().netTxPerSec = 0.0;
+    s.processNetAvailable = true;
+    s.processNetTracked = 14;
+    s.processNetUnattributed = 39;
+    s.focusNetRxPerSec = 1'258'291.0;
+    s.focusNetTxPerSec = 196'608.0;
+    ProcessNetTalker talkerA;
+    talkerA.pid = 2092707;
+    talkerA.sockets = 4;
+    talkerA.rxPerSec = 1'258'291.0;
+    talkerA.txPerSec = 196'608.0;
+    talkerA.name = QStringLiteral("cursor");
+    talkerA.listenPorts = {9222};
+    ProcessNetTalker talkerB;
+    talkerB.pid = 2092708;
+    talkerB.sockets = 2;
+    talkerB.rxPerSec = 262'144.0;
+    talkerB.txPerSec = 65'536.0;
+    talkerB.name = QStringLiteral("node");
+    talkerB.listenPorts = {3000, 3001};
+    ProcessNetTalker talkerC;
+    talkerC.pid = 8842;
+    talkerC.sockets = 1;
+    talkerC.rxPerSec = 12'288.0;
+    talkerC.txPerSec = 40'960.0;
+    talkerC.name = QStringLiteral("rsync");
+    s.processNetTalkers = {talkerA, talkerB, talkerC};
 
     ConnectionRow conn;
     conn.proto = QStringLiteral("tcp");
@@ -252,6 +287,11 @@ DisplaySnapshot demoSnapshot(int tick) {
     return s;
 }
 
+void tracePhase(const char *what) {
+    std::fprintf(stderr, "[shot] %s\n", what);
+    std::fflush(stderr);
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -274,6 +314,7 @@ int main(int argc, char *argv[]) {
     }
 
     DashboardPanel panel;
+    tracePhase("panel constructed");
     auto driveHistory = [&app, &panel]() {        // Synthetic alert lifecycle: quiet -> warning -> +critical ->
         // resolve -> clear -> refire, so tiles/chart/timeline all move.
         const qint64 baseMs = QDateTime::currentMSecsSinceEpoch()
@@ -474,16 +515,14 @@ int main(int argc, char *argv[]) {
             report.src = QStringLiteral("wlp0s20f3");
             report.tests = 10;
             report.ok = true;
-            const QList<const char *> hosts = {
-                QStringLiteral("gateway.local").toUtf8().constData(),
-                QStringLiteral("core1-rtr.isp").toUtf8().constData(),
-                QStringLiteral("edge1.isp").toUtf8().constData(),
-                QStringLiteral("peer TransitNet").toUtf8().constData(),
-                dst.toUtf8().constData()};
+            const QStringList hosts = {QStringLiteral("gateway.local"),
+                                       QStringLiteral("core1-rtr.isp"),
+                                       QStringLiteral("edge1.isp"),
+                                       QStringLiteral("peer TransitNet"), dst};
             for (int h = 0; h < hops; ++h) {
                 PathHop hop;
                 hop.index = h + 1;
-                hop.host = QString::fromUtf8(hosts.at(h));
+                hop.host = hosts.at(h);
                 hop.sent = 10;
                 hop.bestMs = 2.0 + h * 1.5;
                 hop.worstMs = 8.0 + h * 2.0;
@@ -819,6 +858,13 @@ int main(int argc, char *argv[]) {
     settingsInfo.verbsLine =
         QStringLiteral("install.sh run|start|stop|restart|status|enable|"
                        "disable|update|uninstall|logs|vers");
+    settingsInfo.metricsLine = QStringLiteral("http://127.0.0.1:9107/metrics");
+    settingsInfo.webhookLine =
+        QStringLiteral("generic -> https://alerts.example.test/syspeek"
+                       " - 4 sent, 0 failed; last ok 17:42 (1 firing)");
+    settingsInfo.exportLine =
+        QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
+                       "syspeek-history-20261026-174210.csv");
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;
@@ -826,6 +872,7 @@ int main(int argc, char *argv[]) {
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
 
+    panel.resize(1020, 1040);
     panel.show();
     app.processEvents();
 
@@ -839,8 +886,11 @@ int main(int argc, char *argv[]) {
     }
     const QString out = argc > 1 ? QString::fromUtf8(argv[1])
                                  : QStringLiteral("panel.png");
+    tracePhase("drive history");
     driveHistory();
+    tracePhase("drive statsd");
     driveStatsd();
+    tracePhase("grab");
     QScrollArea *grabScroll = nullptr;
     if (argc > 4
         && QString::fromUtf8(argv[4]) == QStringLiteral("full")) {
