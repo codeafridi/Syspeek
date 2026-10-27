@@ -6,6 +6,10 @@
 #include <QStandardPaths>
 #include <QTimer>
 
+#if defined(Q_OS_MACOS)
+#include <unistd.h>
+#endif
+
 namespace {
 
 enum class QueryKind { Systemctl, Launchctl };

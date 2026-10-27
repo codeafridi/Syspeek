@@ -1223,14 +1223,19 @@ int main(int argc, char *argv[]) {
             }
 
             emitted.clear();
-            niceUp->click();
-            check(emitted.size() == 1,
-                  "actions: NICE +5 emits immediately");
-            if (emitted.size() == 1) {
-                const ProcessAction action = emitted.at(0);
-                check(action.kind == ProcessActionKind::Renice
-                          && action.niceValue == 5 && action.relative,
-                      "actions: NICE +5 is a relative renice of 5");
+            if (niceUp->isEnabled()) {
+                niceUp->click();
+                check(emitted.size() == 1,
+                      "actions: NICE +5 emits immediately");
+                if (emitted.size() == 1) {
+                    const ProcessAction action = emitted.at(0);
+                    check(action.kind == ProcessActionKind::Renice
+                              && action.niceValue == 5 && action.relative,
+                          "actions: NICE +5 is a relative renice of 5");
+                }
+            } else {
+                check(!caps.processRenice,
+                      "actions: NICE is disabled only where renice is absent");
             }
         }
 
