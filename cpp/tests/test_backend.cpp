@@ -1,4 +1,3 @@
-#include "platform/NullNotifier.h"
 #include "platform/PlatformFactory.h"
 #include "platform/PortCatalog.h"
 #include "platform/null/NullBackend.h"
@@ -118,12 +117,6 @@ int main(int argc, char *argv[]) {
     check(&systemBackend() == &systemBackend(), "factory: singleton stable");
     check(systemBackend().platformName() == backend->platformName(),
           "factory: singleton matches factory kind");
-
-    NullNotifier notifier;
-    check(notifier.name() == QStringLiteral("null"), "notifier: null name");
-    Alert probe;
-    probe.title = QStringLiteral("t");
-    check(!notifier.send(probe), "notifier: null send is a no-op");
 
     check(portcatalog::serviceForPort(5432) == QStringLiteral("postgres"),
           "portcatalog: 5432 postgres");

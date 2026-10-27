@@ -12,7 +12,6 @@
 
 #include "IncidentStatus.h"
 #include "WatchdogStatus.h"
-#include "Notifier.h"
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
 #include "SyntheticStatus.h"
@@ -64,8 +63,6 @@ public:
     void expireSilence(const QString &matcher);
 
 public:
-
-    void setNotifier(std::unique_ptr<Notifier> notifier);
 
     void setWebhookConfig(const WebhookConfig &config);
 
@@ -144,7 +141,6 @@ private:
     QList<double> m_hostCpuHistory;
     QList<double> m_stealHistory;
     AlertInput m_alertInput;
-    std::unique_ptr<Notifier> m_notifier;
     AlertWebhook *m_webhook = nullptr;
     QList<ExportRow> m_exportRows;
     int m_exportIntervalMs = 1000;

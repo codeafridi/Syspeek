@@ -2,7 +2,6 @@
 
 #include "DashboardPanel.h"
 #include "Theme.h"
-#include "platform/NotifierFactory.h"
 #include "platform/PlatformFactory.h"
 
 #ifdef Q_OS_MACOS
@@ -66,7 +65,6 @@ HudWindow::HudWindow(QWidget *parent)
 #endif
     setObjectName(QStringLiteral("hudRoot"));
 
-    m_notifier = createNotifier();
     m_webhook = new AlertWebhook(this);
     connect(m_webhook, &AlertWebhook::deliveryFinished, this,
             [this](bool, const QString &) {
@@ -506,10 +504,6 @@ void HudWindow::setJournalSnapshot(const JournalSnapshot &snapshot) {
     evaluateAlerts();
 }
 
-void HudWindow::setNotifier(std::unique_ptr<Notifier> notifier) {
-    m_notifier = std::move(notifier);
-}
-
 void HudWindow::setWebhookConfig(const WebhookConfig &config) {
     if (m_webhook != nullptr) {
         m_webhook->setConfig(config);
@@ -781,8 +775,8 @@ void HudWindow::evaluateAlerts() {
     const QList<Alert> active = m_alerts.active();
 
     // A live silence keeps the monitor evaluating (the page still shows the
-    // breach) and only mutes the outbound paths: desktop notification,
-    // webhook delivery and incident creation.
+    // breach) and only mutes the outbound paths: webhook delivery and
+    // incident creation.
     QList<Alert> loudFired;
     for (const Alert &alert : fired) {
         if (activeSilenceFor(m_silences, alert.id, now) == nullptr) {
@@ -796,11 +790,6 @@ void HudWindow::evaluateAlerts() {
         }
     }
 
-    if (m_notifier != nullptr) {
-        for (const Alert &alert : loudFired) {
-            m_notifier->send(alert);
-        }
-    }
     if (m_webhook != nullptr) {
         m_webhook->processEvents(loudFired, loudActive, now);
     }

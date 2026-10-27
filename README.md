@@ -42,8 +42,10 @@ telemetry** — nothing leaves your machine unless you point a scraper at it.
   Traces (OTLP), Profiles, Databases (PostgreSQL), Security, Settings, Cost,
   Incidents, SLO, Alerts.
 - **Alerts & incidents** — local thresholds (CPU, memory, FD-table, steal,
-  failed services, journal errors) with desktop notifications and an incident
-  timeline.
+  failed services, journal errors) shown on the Alerts page with an incident
+  timeline. No desktop popups, by design — a HUD that steals focus is worse
+  than no HUD; point `[webhook]` at your own receiver if you want to be
+  paged.
 - **Docker & Kubernetes** — containers, problem pods, node capacity, cost
   model, deprecated-API detection.
 

@@ -23,22 +23,6 @@
 #include <QTreeWidgetItem>
 
 #include <cstdio>
-#include <memory>
-
-namespace {
-
-class FakeNotifier : public Notifier {
-public:
-    int count = 0;
-    QList<Alert> alerts;
-    bool send(const Alert &alert) override {
-        ++count;
-        alerts.append(alert);
-        return true;
-    }
-};
-
-} // namespace
 
 static DisplaySnapshot makeSnapshot(const char *app,
                                     const char *pid,
@@ -58,10 +42,6 @@ int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
     HudWindow hud;
-
-    auto fake = std::make_unique<FakeNotifier>();
-    FakeNotifier *fakePtr = fake.get();
-    hud.setNotifier(std::move(fake));
 
     int failures = 0;
     auto check = [&failures](bool condition, const char *message) {
@@ -700,14 +680,21 @@ int main(int argc, char *argv[]) {
     }
 
     {
-        // M75: a live silence mutes the outbound paths (desktop
-        // notification here) while the monitor keeps evaluating.
+        // M75: a live silence mutes the outbound paths (incident creation
+        // here) while the monitor keeps evaluating.
         QTemporaryDir silenceDir;
         const QByteArray previousConfig =
             qgetenv("SYSPEEK_CONFIG");
         qputenv("SYSPEEK_CONFIG",
                 silenceDir.filePath(QStringLiteral("config.ini")).toUtf8());
-        const int baseCount = fakePtr->count;
+        auto openIncidents = [&hud]() {
+            auto *label =
+                hud.findChild<QLabel *>(QStringLiteral("ddIncidents"));
+            return label == nullptr
+                ? -1
+                : int(label->text().count(QLatin1String("OPEN")));
+        };
+        const int baseOpen = openIncidents();
         hud.addSilence(QStringLiteral("app_cpu"), 10);
 
         auto *silenceSummary =
@@ -722,16 +709,16 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < 4; ++i) {
             hud.setSnapshot(hot);
         }
-        check(fakePtr->count == baseCount,
-              "a silenced monitor raises no desktop notification");
+        check(openIncidents() == baseOpen,
+              "a silenced monitor opens no incident");
 
         hud.expireSilence(QStringLiteral("app_cpu"));
         hud.setSnapshot(withProcs);
         for (int i = 0; i < 4; ++i) {
             hud.setSnapshot(hot);
         }
-        check(fakePtr->count == baseCount + 1,
-              "the same monitor notifies again once the window is closed");
+        check(openIncidents() == baseOpen + 1,
+              "the same monitor opens an incident once the window is closed");
 
         const QString written = silenceDir.filePath(
             QStringLiteral("config.ini"));
@@ -994,7 +981,11 @@ int main(int argc, char *argv[]) {
     hud.setSnapshot(hot);
     hud.setSnapshot(hot);
     hud.setSnapshot(hot);
-    check(fakePtr->count >= 1, "notification fired for a breached rule");
+    auto *breachIncidents =
+        hud.findChild<QLabel *>(QStringLiteral("ddIncidents"));
+    check(breachIncidents != nullptr
+              && breachIncidents->text().contains(QStringLiteral("OPEN")),
+          "a breached rule opens an incident");
     auto *dashAlerts = hud.findChild<QLabel *>(QStringLiteral("ddAlerts"));
     check(dashAlerts != nullptr
               && dashAlerts->text().contains(QStringLiteral("CPU")),

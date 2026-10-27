@@ -42,8 +42,6 @@ add_library(syspeek_core STATIC
     src/AlertEngine.h
     src/AlertWebhook.cpp
     src/AlertWebhook.h
-    src/Notifier.cpp
-    src/Notifier.h
     src/HostSampler.cpp
     src/HostSampler.h
     src/IoRateTracker.cpp
@@ -204,9 +202,6 @@ add_library(syspeek_core STATIC
     src/platform/PlatformFactory.h
     src/platform/PortCatalog.cpp
     src/platform/PortCatalog.h
-    src/platform/NotifierFactory.cpp
-    src/platform/NotifierFactory.h
-    src/platform/NullNotifier.h
     src/platform/null/NullBackend.cpp
     src/platform/null/NullBackend.h)
 
@@ -227,8 +222,6 @@ elseif(APPLE)
         src/platform/mac/MacGpu.h
         src/platform/mac/MacFocusProvider.mm
         src/platform/mac/MacFocusProvider.h
-        src/platform/mac/MacNotifier.mm
-        src/platform/mac/MacNotifier.h
         src/platform/mac/MacLogSource.mm
         src/platform/mac/MacLogSource.h
         src/platform/mac/MacOverlay.mm
@@ -243,9 +236,7 @@ elseif(WIN32)
         src/platform/win/WinFocusProvider.cpp
         src/platform/win/WinFocusProvider.h
         src/platform/win/WinLogSource.cpp
-        src/platform/win/WinLogSource.h
-        src/platform/win/WindowsNotifier.cpp
-        src/platform/win/WindowsNotifier.h)
+        src/platform/win/WinLogSource.h)
     if(TARGET Qt6::DBus)
         target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
     endif()

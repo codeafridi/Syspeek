@@ -1145,8 +1145,8 @@ QWidget *DashboardPanel::buildAlertsView() {
 
     // --- Silences (M75, Alertmanager model): mute one monitor for a while
     // without disabling it. The rule keeps evaluating and the ACTIVE ALERTS
-    // card keeps showing the breach, but no notification, webhook or
-    // incident is raised while the window is live.
+    // card keeps showing the breach, but no webhook or incident is raised
+    // while the window is live.
     m_silenceTarget = new QComboBox(view);
     m_silenceTarget->setObjectName(QStringLiteral("ddSilenceTarget"));
     m_silenceTarget->setMinimumWidth(1);
@@ -5567,7 +5567,7 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
             ? QStringLiteral("<span style=\"color:%1;\">[%2]</span>")
                 .arg(ui_theme::statusColor(severity), severity)
             : QStringLiteral("[%1]").arg(severity);
-        // A live silence mutes the notification paths but the breach is
+        // A live silence mutes the outbound paths but the breach is
         // still real, so the row keeps its severity and gains the window.
         const SilenceRule *silence =
             activeSilenceFor(m_silences, alert.id, silenceNow);

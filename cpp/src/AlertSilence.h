@@ -6,7 +6,7 @@
 
 // Alert silences: a temporary, authored suppression of one monitor without
 // disabling the monitor itself (the rule keeps evaluating and the page keeps
-// showing the breach, but no notification/webhook/incident is raised).
+// showing the breach, but no webhook delivery or incident is raised).
 //
 // Model grounded on the shipped Alertmanager 0.34.1 linux-amd64 release
 // (/tmp/opencode/m69/alertmanager-0.34.1.linux-amd64):

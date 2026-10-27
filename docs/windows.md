@@ -115,7 +115,6 @@ the whole removal in one step.
 | FIM | live | QFileSystemWatcher (ReadDirectoryChangesW backend), default roots from the machine drive |
 | Containers / k8s / DBM / TLS / OTLP / DogStatsD | live | same as Linux (network APIs) |
 | Security posture | live | UAC / SecureBoot / CFG / ASLR / SEHOP registry checks |
-| Notifications | live | Shell_NotifyIconW tray balloon |
 | Cgroups / PSI / dpkg SBOM / Profile threads | gated | n/a on Windows ("not supported on this OS") |
 
 ## Collection discipline
