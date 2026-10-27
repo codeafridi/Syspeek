@@ -289,7 +289,33 @@ Thresholds and polling intervals are configurable in
 `http://127.0.0.1:9107/metrics` (localhost only, on by default) in the
 Prometheus text exposition format — point your scraper or Grafana agent config
 at it (nothing leaves your machine unless you do). Disable with
-`[metrics] enabled=false` or move it with `port=`.
+`[metrics] enabled=false`, move it with `port=`, or bind it to an interface
+with `bind=`:
+
+```ini
+[metrics]
+enabled = true
+port    = 9107
+bind    = 127.0.0.1
+token   =
+```
+
+A non-loopback `bind` (e.g. `0.0.0.0` or a LAN address) is **refused unless
+`token` is set** — the server falls back to `127.0.0.1` and the HUD log says
+why, so a scrape endpoint never lands on the network unauthenticated by
+accident. With a token, scrapes must send `Authorization: Bearer <token>`;
+anything else gets `401` + `WWW-Authenticate: Bearer` and no samples. The
+comparison is constant-time, and the Settings page states the live endpoint
+and whether auth is on. Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: syspeek
+    authorization:
+      credentials: <token>
+    static_configs:
+      - targets: ["127.0.0.1:9107"]
+```
 
 **Alert webhooks** — off by default. Point `[webhook]` at your own endpoint to
 POST fired/resolved alert events out of the HUD (nothing is sent until you set

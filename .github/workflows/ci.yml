@@ -152,6 +152,15 @@ jobs:
               print("history ok: %d/%d samples, total %d, %d bytes, span %d ms"
                     % (hist["count"], hist["capacity"], hist["total"],
                        hist["bytes"], hist["spanMs"]))
+          met = d.get("metrics", {})
+          assert met.get("bind") == "127.0.0.1", met
+          assert met.get("authRequired") is False, met
+          assert met.get("refusedNonLoopback") is True, met
+          assert met.get("tokenGuarded") is True, met
+          assert met.get("headerAccepted") is True, met
+          assert met.get("headerRejected") is True, met
+          print("metrics endpoint ok: bind %s port %d auth %s"
+                % (met["bind"], met["port"], met["authRequired"]))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
@@ -320,6 +329,15 @@ jobs:
           print("history ok: %d/%d samples, total %d, %d bytes"
                 % (hist["count"], hist["capacity"], hist["total"],
                    hist["bytes"]))
+          met = d.get("metrics", {})
+          assert met.get("bind") == "127.0.0.1", met
+          assert met.get("authRequired") is False, met
+          assert met.get("refusedNonLoopback") is True, met
+          assert met.get("tokenGuarded") is True, met
+          assert met.get("headerAccepted") is True, met
+          assert met.get("headerRejected") is True, met
+          print("metrics endpoint ok: bind %s port %d auth %s"
+                % (met["bind"], met["port"], met["authRequired"]))
           depth = d.get("selfDepth", {})
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth

@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "DisplaySnapshot.h"
+#include "MetricsEndpoint.h"
 
 #include <QByteArray>
 #include <QHash>
@@ -18,6 +19,7 @@ public:
                            QObject *parent = nullptr);
 
     quint16 port() const { return m_port; }
+    MetricsEndpoint endpoint() const { return m_endpoint; }
 
 public slots:
     void start();
@@ -30,6 +32,8 @@ private slots:
 
 private:
     MetricsConfig m_config;
+    MetricsEndpoint m_endpoint;
+    QByteArray m_token;
     QTcpServer *m_server = nullptr;
     QHash<QTcpSocket *, QByteArray> m_buffers;
     DisplaySnapshot m_snapshot;

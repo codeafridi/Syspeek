@@ -76,6 +76,8 @@ struct HistoryConfig {
 struct MetricsConfig {
     bool enabled = true;
     int port = 9107;
+    QString bindAddress = QStringLiteral("127.0.0.1");
+    QString token;
 };
 
 struct WebhookConfig {

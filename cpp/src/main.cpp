@@ -15,6 +15,7 @@
 #include "StatsdSource.h"
 #include "DbmSource.h"
 #include "MetricsServer.h"
+#include "MetricsEndpoint.h"
 #include "DumpReport.h"
 #include "HistoryLog.h"
 #include "AppLog.h"
@@ -513,8 +514,7 @@ int main(int argc, char *argv[]) {
         settingsInfo.verbsLine = settingsVerbsLine();
         settingsInfo.metricsLine =
             config.metrics.enabled
-                ? QStringLiteral("http://127.0.0.1:%1/metrics")
-                      .arg(config.metrics.port)
+                ? metricsEndpointText(resolveMetricsEndpoint(config.metrics))
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
         settingsInfo.historyLine =

@@ -413,6 +413,13 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (port > 0) {
             config.metrics.port = clampInt(port, 1, 65535);
         }
+        const QString bind =
+            settings.value(QStringLiteral("bind")).toString().trimmed();
+        if (!bind.isEmpty()) {
+            config.metrics.bindAddress = bind;
+        }
+        config.metrics.token =
+            settings.value(QStringLiteral("token")).toString().trimmed();
     }
     settings.endGroup();
 

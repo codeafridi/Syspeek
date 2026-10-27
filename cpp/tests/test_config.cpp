@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "MetricsEndpoint.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -238,6 +239,59 @@ int main(int argc, char *argv[]) {
               "silences: saveSilences replaces the group and keeps the window");
         check(loaded.health.cpuWarnPercent == 70.0,
               "silences: saving keeps the rest of the file");
+    }
+
+    {
+        // M76: [metrics] bind + token — the scrape endpoint can move off
+        // loopback only when a bearer token guards it.
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "enabled=true\n"
+            "port=9200\n"
+            "bind=0.0.0.0\n"
+            "token=  s3cret-token  \n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.enabled && c.metrics.port == 9200,
+              "metrics: enabled and port still load");
+        check(c.metrics.bindAddress == QStringLiteral("0.0.0.0"),
+              "metrics: the bind address loads");
+        check(c.metrics.token == QStringLiteral("s3cret-token"),
+              "metrics: the token loads trimmed");
+
+        const MetricsEndpoint endpoint = resolveMetricsEndpoint(c.metrics);
+        check(endpoint.bindAddress == QStringLiteral("0.0.0.0")
+                  && endpoint.authRequired && !endpoint.bindDowngraded,
+              "metrics: an authored LAN bind with a token is honoured");
+    }
+    {
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "bind=0.0.0.0\n"
+            "token=\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.bindAddress == QStringLiteral("0.0.0.0")
+                  && c.metrics.token.isEmpty(),
+              "metrics: an empty token stays empty");
+        const MetricsEndpoint endpoint = resolveMetricsEndpoint(c.metrics);
+        check(endpoint.bindAddress == QStringLiteral("127.0.0.1")
+                  && endpoint.bindDowngraded,
+              "metrics: a LAN bind without a token downgrades to loopback");
+    }
+    {
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "port=99999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.port == 65535, "metrics: an out-of-range port clamps");
+        check(c.metrics.bindAddress == QStringLiteral("127.0.0.1")
+                  && c.metrics.token.isEmpty(),
+              "metrics: untouched keys keep the loopback default");
     }
 
     {

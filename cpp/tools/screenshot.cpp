@@ -921,7 +921,8 @@ int main(int argc, char *argv[]) {
     settingsInfo.verbsLine =
         QStringLiteral("install.sh run|start|stop|restart|status|enable|"
                        "disable|update|uninstall|logs|vers");
-    settingsInfo.metricsLine = QStringLiteral("http://127.0.0.1:9107/metrics");
+    settingsInfo.metricsLine = QStringLiteral(
+        "http://127.0.0.1:9107/metrics (no auth, loopback only)");
     settingsInfo.webhookLine =
         QStringLiteral("generic -> https://alerts.example.test/syspeek"
                        " - 4 sent, 0 failed; last ok 17:42 (1 firing)");

@@ -29,6 +29,8 @@
 #include "FimStatus.h"
 #include "AlertWebhook.h"
 #include "AlertSilence.h"
+#include "MetricsEndpoint.h"
+#include "MetricsServer.h"
 #include "MonitorBands.h"
 #include "MetricsExport.h"
 #include "GpuStatus.h"
@@ -41,6 +43,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QElapsedTimer>
+#include <QHostAddress>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -3102,6 +3106,222 @@ int main(int argc, char *argv[]) {
               "healthy-only: cpu or rss above its monitor line hides the row");
         check(!processRowBreaches(100.0, 9.0, 0.0, 0.0),
               "healthy-only: a disabled monitor (0) never hides a row");
+    }
+
+    {
+        // M76: metrics endpoint policy (bind + bearer auth).
+        check(metricsAddressIsLoopback(QStringLiteral("127.0.0.1"))
+                  && metricsAddressIsLoopback(QStringLiteral("127.0.0.42"))
+                  && metricsAddressIsLoopback(QStringLiteral("::1"))
+                  && metricsAddressIsLoopback(QStringLiteral("localhost"))
+                  && metricsAddressIsLoopback(QString()),
+              "metrics: loopback addresses are recognised");
+        check(!metricsAddressIsLoopback(QStringLiteral("0.0.0.0"))
+                  && !metricsAddressIsLoopback(QStringLiteral("192.168.1.5"))
+                  && !metricsAddressIsLoopback(QStringLiteral("::"))
+                  && !metricsAddressIsLoopback(QStringLiteral("example.com"))
+                  && !metricsAddressIsLoopback(QStringLiteral("*")),
+              "metrics: wildcard, LAN and hostname binds are not loopback");
+
+        MetricsEndpoint plain =
+            resolveMetricsEndpoint(MetricsConfig{});
+        check(plain.bindAddress == QStringLiteral("127.0.0.1")
+                  && plain.port == 9107 && !plain.authRequired
+                  && !plain.bindDowngraded,
+              "metrics: the default endpoint is loopback with no auth");
+
+        MetricsConfig explicitLoopback;
+        explicitLoopback.bindAddress = QStringLiteral("localhost");
+        explicitLoopback.port = 9200;
+        const MetricsEndpoint localhost =
+            resolveMetricsEndpoint(explicitLoopback);
+        check(localhost.bindAddress == QStringLiteral("127.0.0.1")
+                  && localhost.port == 9200,
+              "metrics: localhost resolves to the loopback address");
+
+        MetricsConfig exposed;
+        exposed.bindAddress = QStringLiteral("0.0.0.0");
+        const MetricsEndpoint refused = resolveMetricsEndpoint(exposed);
+        check(refused.bindAddress == QStringLiteral("127.0.0.1")
+                  && refused.bindDowngraded
+                  && refused.note.contains(QStringLiteral("without a token")),
+              "metrics: a wildcard bind without a token falls back to loopback");
+
+        exposed.token = QStringLiteral("s3cret-token");
+        const MetricsEndpoint guarded = resolveMetricsEndpoint(exposed);
+        check(guarded.bindAddress == QStringLiteral("0.0.0.0")
+                  && guarded.authRequired && !guarded.bindDowngraded
+                  && guarded.note.contains(QStringLiteral("bearer token")),
+              "metrics: a token unlocks the requested wildcard bind");
+
+        MetricsConfig tokenOnly;
+        tokenOnly.token = QStringLiteral("s3cret-token");
+        const MetricsEndpoint localToken = resolveMetricsEndpoint(tokenOnly);
+        check(localToken.bindAddress == QStringLiteral("127.0.0.1")
+                  && localToken.authRequired,
+              "metrics: a token works on loopback too");
+
+        check(metricsEndpointText(plain)
+                  == QStringLiteral("http://127.0.0.1:9107/metrics "
+                                    "(no auth, loopback only)"),
+              "metrics: the default endpoint text states no auth");
+        check(metricsEndpointText(guarded)
+                  .contains(QStringLiteral("http://0.0.0.0:9107/metrics"))
+                  && metricsEndpointText(guarded)
+                         .contains(QStringLiteral("bearer token required")),
+              "metrics: an authenticated bind says so in the endpoint text");
+        check(metricsEndpointText(refused)
+                  .contains(QStringLiteral("refusing to expose 0.0.0.0")),
+              "metrics: a downgraded bind explains itself in the endpoint text");
+
+        check(metricsTokenMatches(QByteArrayLiteral("abc123"),
+                                  QByteArrayLiteral("abc123"))
+                  && !metricsTokenMatches(QByteArrayLiteral("abc124"),
+                                          QByteArrayLiteral("abc123"))
+                  && !metricsTokenMatches(QByteArrayLiteral("abc12"),
+                                          QByteArrayLiteral("abc123"))
+                  && !metricsTokenMatches(QByteArray(), QByteArrayLiteral("abc123"))
+                  && !metricsTokenMatches(QByteArrayLiteral("abc123"), QByteArray()),
+              "metrics: the token compare is exact and rejects empty sides");
+        check(metricsAuthorizationValue(QStringLiteral(" s3cret "))
+                  == QByteArrayLiteral("Bearer s3cret"),
+              "metrics: the Authorization value carries the Bearer scheme");
+
+        const QByteArray token = QByteArrayLiteral("s3cret-token");
+        check(metricsRequestAuthorized(
+                  QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                    "Host: 127.0.0.1\r\n"
+                                    "Authorization: Bearer s3cret-token\r\n"
+                                    "\r\n"),
+                  token),
+              "metrics: a Bearer header with the token authorizes the scrape");
+        check(metricsRequestAuthorized(
+                  QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                    "authorization:bearer s3cret-token\r\n"
+                                    "\r\n"),
+                  token),
+              "metrics: the header name and scheme are case-insensitive");
+        check(!metricsRequestAuthorized(
+                  QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                    "Authorization: Bearer S3CRET-TOKEN\r\n"
+                                    "\r\n"),
+                  token),
+              "metrics: the token itself stays case-sensitive");
+        check(!metricsRequestAuthorized(
+                  QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                    "Authorization: Basic s3cret-token\r\n"
+                                    "\r\n"),
+                  token)
+                  && !metricsRequestAuthorized(
+                      QByteArrayLiteral("GET /metrics HTTP/1.1\r\n\r\n"), token)
+                  && !metricsRequestAuthorized(
+                      QByteArrayLiteral("Authorization: s3cret-token\r\n\r\n"),
+                      token),
+              "metrics: a missing, wrong-scheme or bare header is refused");
+        check(metricsRequestAuthorized(QByteArrayLiteral("GET /metrics"),
+                                       QByteArray()),
+              "metrics: with no token configured every scrape is allowed");
+    }
+
+    {
+        // M76: the live endpoint answers 401 without the token, 200 with it,
+        // 200 for HEAD and 404 for anything else.
+        auto roundTrip = [](quint16 port, const QByteArray &request) {
+            QTcpSocket socket;
+            QByteArray response;
+            QElapsedTimer timer;
+            timer.start();
+            socket.connectToHost(QHostAddress::LocalHost, port);
+            while (socket.state() != QAbstractSocket::ConnectedState
+                   && timer.elapsed() < 3000) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            }
+            if (socket.state() != QAbstractSocket::ConnectedState) {
+                return response;
+            }
+            socket.write(request);
+            socket.flush();
+            while (timer.elapsed() < 3000) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                response += socket.readAll();
+                if (socket.state() == QAbstractSocket::UnconnectedState) {
+                    break;
+                }
+            }
+            response += socket.readAll();
+            return response;
+        };
+
+        MetricsConfig cfg;
+        cfg.port = 0;
+        MetricsServer server(cfg);
+        server.start();
+        const quint16 anonymousPort = server.port();
+        check(anonymousPort > 0, "metrics server: an ephemeral loopback port binds");
+
+        DisplaySnapshot live;
+        live.hostAvailable = true;
+        live.hostCpuPercent = 12.5;
+        server.setSnapshot(live);
+        const QByteArray okResponse = roundTrip(
+            anonymousPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n\r\n"));
+        check(okResponse.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
+                  && okResponse.contains(QByteArrayLiteral(
+                         "syspeek_host_cpu_percent 12.500")),
+              "metrics server: no token configured serves the exposition");
+        server.stop();
+
+        cfg.token = QStringLiteral("s3cret-token");
+        MetricsServer guardedServer(cfg);
+        guardedServer.start();
+        const quint16 guardedPort = guardedServer.port();
+        check(guardedPort > 0, "metrics server: the authenticated server binds");
+        guardedServer.setSnapshot(live);
+
+        const QByteArray denied = roundTrip(
+            guardedPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n\r\n"));
+        check(denied.startsWith(QByteArrayLiteral("HTTP/1.1 401 Unauthorized"))
+                  && denied.contains(QByteArrayLiteral("WWW-Authenticate: Bearer")),
+              "metrics server: a scrape without the token gets 401 + challenge");
+        check(!denied.contains(QByteArrayLiteral("syspeek_host_cpu_percent")),
+              "metrics server: a refused scrape leaks no samples");
+
+        const QByteArray wrongToken = roundTrip(
+            guardedPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                              "Authorization: Bearer s3cret-tokeN\r\n\r\n"));
+        check(wrongToken.startsWith(
+                  QByteArrayLiteral("HTTP/1.1 401 Unauthorized")),
+              "metrics server: a wrong token is refused");
+
+        const QByteArray authorized = roundTrip(
+            guardedPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                              "Authorization: Bearer s3cret-token\r\n\r\n"));
+        check(authorized.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
+                  && authorized.contains(QByteArrayLiteral(
+                         "syspeek_host_cpu_percent 12.500")),
+              "metrics server: the token unlocks the exposition");
+
+        const QByteArray headResponse = roundTrip(
+            guardedPort,
+            QByteArrayLiteral("HEAD /metrics HTTP/1.1\r\n"
+                              "Authorization: Bearer s3cret-token\r\n\r\n"));
+        check(headResponse.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
+                  && headResponse.contains(QByteArrayLiteral("Content-Length:"))
+                  && !headResponse.contains(
+                         QByteArrayLiteral("syspeek_host_cpu_percent")),
+              "metrics server: HEAD reports the length without the body");
+
+        const QByteArray notFound = roundTrip(
+            guardedPort,
+            QByteArrayLiteral("GET /nope HTTP/1.1\r\n"
+                              "Authorization: Bearer s3cret-token\r\n\r\n"));
+        check(notFound.startsWith(QByteArrayLiteral("HTTP/1.1 404 Not Found")),
+              "metrics server: an unknown path stays a 404");
+        guardedServer.stop();
     }
 
     std::printf("%d failure(s)\n", failures);

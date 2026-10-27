@@ -1080,6 +1080,29 @@ int main(int argc, char *argv[]) {
         }
         check(generalText.contains(QStringLiteral("export&nbsp;")),
               "settings GENERAL card carries the export row");
+
+        {
+            // M76: the GENERAL card states the live metrics endpoint, its
+            // bind and whether a token guards it.
+            SettingsInfo metricsInfo = info;
+            metricsInfo.metricsLine =
+                QStringLiteral("http://0.0.0.0:9107/metrics "
+                               "(bearer token required)");
+            hud.setSettingsInfo(metricsInfo);
+            QString metricsText;
+            for (QLabel *label :
+                 hud.findChildren<QLabel *>(QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("prometheus&nbsp;"))) {
+                    metricsText = label->text();
+                }
+            }
+            check(metricsText.contains(
+                      QStringLiteral("http://0.0.0.0:9107/metrics"))
+                      && metricsText.contains(
+                          QStringLiteral("bearer token required")),
+                  "settings GENERAL card states the metrics auth state");
+            hud.setSettingsInfo(info);
+        }
         check(exportButtons.size() == 2,
               "settings DIAGNOSTICS card carries both export buttons");
 

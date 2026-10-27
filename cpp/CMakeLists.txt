@@ -153,6 +153,8 @@ add_library(syspeek_core STATIC
     src/PrometheusStatus.h
     src/MetricsServer.cpp
     src/MetricsServer.h
+    src/MetricsEndpoint.cpp
+    src/MetricsEndpoint.h
     src/WatchdogStatus.cpp
     src/WatchdogStatus.h
     src/TlsSource.cpp

@@ -1,6 +1,7 @@
 #include "DumpReport.h"
 
 #include "HistoryLog.h"
+#include "MetricsEndpoint.h"
 
 #include "ProcessDiskStatus.h"
 
@@ -531,6 +532,55 @@ QString dumpReportJson(int maxProcs) {
         reopened.close();
         QFile::remove(probePath);
         root.insert(QStringLiteral("history"), history);
+    }
+
+    {
+        QJsonObject metrics;
+        const MetricsEndpoint endpoint =
+            resolveMetricsEndpoint(MetricsConfig{});
+        metrics.insert(QStringLiteral("bind"), endpoint.bindAddress);
+        metrics.insert(QStringLiteral("port"), endpoint.port);
+        metrics.insert(QStringLiteral("authRequired"), endpoint.authRequired);
+        metrics.insert(QStringLiteral("downgraded"), endpoint.bindDowngraded);
+
+        MetricsConfig exposed;
+        exposed.bindAddress = QStringLiteral("0.0.0.0");
+        const MetricsEndpoint refused = resolveMetricsEndpoint(exposed);
+        metrics.insert(QStringLiteral("refusedNonLoopback"),
+                       refused.bindDowngraded && !refused.authRequired
+                           && refused.bindAddress
+                                  == QStringLiteral("127.0.0.1"));
+
+        exposed.token = QStringLiteral("probe-token-0123456789");
+        const MetricsEndpoint guarded = resolveMetricsEndpoint(exposed);
+        metrics.insert(QStringLiteral("tokenGuarded"),
+                       guarded.authRequired && !guarded.bindDowngraded
+                           && guarded.bindAddress
+                                  == QStringLiteral("0.0.0.0"));
+
+        const QByteArray token = exposed.token.toUtf8();
+        metrics.insert(
+            QStringLiteral("headerAccepted"),
+            metricsRequestAuthorized(
+                QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                  "Host: 127.0.0.1\r\n"
+                                  "Authorization: Bearer probe-token-0123456789"
+                                  "\r\n\r\n"),
+                token));
+        metrics.insert(
+            QStringLiteral("headerRejected"),
+            !metricsRequestAuthorized(
+                QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                  "Authorization: Bearer probe-token-0\r\n"
+                                  "\r\n"),
+                token)
+                && !metricsRequestAuthorized(
+                    QByteArrayLiteral("GET /metrics HTTP/1.1\r\n\r\n"),
+                    token));
+        metrics.insert(QStringLiteral("loopbackOnlyText"),
+                       metricsEndpointText(endpoint).contains(
+                           QStringLiteral("loopback only")));
+        root.insert(QStringLiteral("metrics"), metrics);
     }
 
     QJsonObject services;
