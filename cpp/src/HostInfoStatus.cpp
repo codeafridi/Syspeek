@@ -34,7 +34,7 @@
 
 namespace {
 
-bool macSysctlString(const char *key, QString &out) {
+[[maybe_unused]] bool macSysctlString(const char *key, QString &out) {
 #if defined(Q_OS_MACOS)
     size_t size = 0;
     if (sysctlbyname(key, nullptr, &size, nullptr, 0) != 0 || size == 0) {
@@ -53,7 +53,7 @@ bool macSysctlString(const char *key, QString &out) {
 #endif
 }
 
-bool macSysctlInt(const char *key, int &out) {
+[[maybe_unused]] bool macSysctlInt(const char *key, int &out) {
 #if defined(Q_OS_MACOS)
     int value = 0;
     size_t size = sizeof(value);
@@ -69,7 +69,7 @@ bool macSysctlInt(const char *key, int &out) {
 #endif
 }
 
-bool macSysctlCaches(const char *key, unsigned long long &out) {
+[[maybe_unused]] bool macSysctlCaches(const char *key, unsigned long long &out) {
 #if defined(Q_OS_MACOS)
     unsigned long long value = 0;
     size_t size = sizeof(value);
@@ -85,7 +85,7 @@ bool macSysctlCaches(const char *key, unsigned long long &out) {
 #endif
 }
 
-QString macSwapUsageTotalKb() {
+[[maybe_unused]] QString macSwapUsageTotalKb() {
 #if defined(Q_OS_MACOS)
     QString usage;
     if (!macSysctlString("vm.swapusage", usage)) {
@@ -424,9 +424,10 @@ HostInfo collectHostInfoMac() {
 #if defined(Q_OS_WIN)
 HostInfo collectHostInfoWin() {
     // Datadog gohai-style inventory; API/registry grounds (kept PEs):
-    // agent.exe carries the strings HARDWARE\DESCRIPTION\System\
-    // CentralProcessor\0 + ProcessorNameString + GetActiveProcessorCount
-    // + GetLogicalDriveStringsW + GetVolumeInformation + GetAdaptersAddresses;
+    // agent.exe carries the registry path HARDWARE / DESCRIPTION / System /
+    // CentralProcessor (value ProcessorNameString), plus GetActiveProcessor-
+    // Count, GetLogicalDriveStringsW, GetVolumeInformation and
+    // GetAdaptersAddresses;
     // windows_exporter adds LogicalDisk / "Free Space" / Hypervisor /
     // RtlGetVersion; SystemInformer quotes RtlGetVersion. All Win32/registry,
     // nothing WMI/PowerShell.

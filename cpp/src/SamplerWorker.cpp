@@ -442,6 +442,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
 
 void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
                                  const QList<linuxproc::SocketInfo> &sockets) {
+    Q_UNUSED(sockets);
 #if defined(Q_OS_LINUX)
     linuxproc::KernelLimits kernel;
     if (m_backend->kernelLimits(kernel) && kernel.available) {

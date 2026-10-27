@@ -1817,8 +1817,9 @@ int main(int argc, char *argv[]) {
             const QString file = dir.filePath(QStringLiteral("fim_probe.txt"));
             {
                 QFile out(file);
-                out.open(QIODevice::WriteOnly);
-                out.write("one");
+                check(out.open(QIODevice::WriteOnly)
+                          && out.write("one") == 3,
+                      "fim: the fixture file is written");
             }
             MacFimStream stream;
             int fired = 0;
@@ -1836,8 +1837,9 @@ int main(int argc, char *argv[]) {
             if (started) {
                 {
                     QFile out(file);
-                    out.open(QIODevice::Append);
-                    out.write("two");
+                    check(out.open(QIODevice::Append)
+                              && out.write("two") == 3,
+                          "fim: the fixture file is appended");
                 }
                 for (int i = 0; i < 100 && fired < 1; ++i) {
                     QThread::msleep(50);
@@ -1846,8 +1848,9 @@ int main(int argc, char *argv[]) {
                 check(fired >= 1, "fim: mac fsevents fired on modify");
                 {
                     QFile out(dir.filePath(QStringLiteral("fim_new.txt")));
-                    out.open(QIODevice::WriteOnly);
-                    out.write("new");
+                    check(out.open(QIODevice::WriteOnly)
+                              && out.write("new") == 3,
+                          "fim: the new fixture file is written");
                 }
                 for (int i = 0; i < 100 && fired < 2; ++i) {
                     QThread::msleep(50);
@@ -2892,8 +2895,9 @@ int main(int argc, char *argv[]) {
         const QString junkPath = dir.filePath(QStringLiteral("junk.bin"));
         {
             QFile junk(junkPath);
-            junk.open(QIODevice::WriteOnly);
-            junk.write(QByteArray(256, 'x'));
+            check(junk.open(QIODevice::WriteOnly)
+                      && junk.write(QByteArray(256, 'x')) == 256,
+                  "history: the corrupt-file fixture is written");
         }
         HistoryLog junkLog;
         check(junkLog.open(junkPath, 4) && junkLog.count() == 0,

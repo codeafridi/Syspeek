@@ -1,6 +1,7 @@
 #include "MetricsExport.h"
 
 #include <QDateTime>
+#include <QTimeZone>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -52,7 +53,7 @@ QJsonValue stringOrNull(const QString &value) {
 }
 
 QDateTime utc(qint64 ms) {
-    return QDateTime::fromMSecsSinceEpoch(ms > 0 ? ms : 0, Qt::UTC);
+    return QDateTime::fromMSecsSinceEpoch(ms > 0 ? ms : 0, QTimeZone::UTC);
 }
 
 QString intervalSeconds(int intervalMs) {
