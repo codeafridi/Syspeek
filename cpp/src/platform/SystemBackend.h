@@ -27,6 +27,10 @@ struct PlatformCapabilities {
     bool perProcessDisk = false;
     bool perProcessDiskScan = false;
     bool gpu = false;
+    // Per-process GPU attribution exists on this OS by some mechanism
+    // (Linux fdinfo, Windows PDH GPU Engine); macOS reports device only.
+    bool gpuProcessData = false;
+    // The fdinfo client API specifically (Linux): per-process engine deltas.
     bool gpuClients = false;
 };
 

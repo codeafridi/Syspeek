@@ -343,6 +343,8 @@ int main(int argc, char *argv[]) {
     {
         const bool gpuCapable = systemBackend().capabilities().gpu;
         const bool gpuClients = systemBackend().capabilities().gpuClients;
+        const bool gpuProcessData =
+            systemBackend().capabilities().gpuProcessData;
         auto *gpuUtil = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileUtil"));
         auto *gpuMem = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileMem"));
         auto *gpuProcs = hud.findChild<QLabel *>(QStringLiteral("ddGpuTileProcs"));
@@ -377,8 +379,12 @@ int main(int argc, char *argv[]) {
                              QStringLiteral("1 process using the gpu")),
                   "panel gpu summary states the process count");
             check(gpuNote != nullptr
-                      && (gpuClients
-                              ? gpuNote->text().contains(QStringLiteral("fdinfo"))
+                      && (gpuProcessData
+                              ? (gpuClients
+                                     ? gpuNote->text().contains(
+                                           QStringLiteral("fdinfo"))
+                                     : gpuNote->text().contains(
+                                           QStringLiteral("system gpu counters")))
                               : gpuNote->text().contains(
                                     QStringLiteral("device usage only"))),
                   "panel gpu note states the per-process surface honestly");

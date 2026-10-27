@@ -381,6 +381,7 @@ QString dumpReportJson(int maxProcs) {
         const PlatformCapabilities caps = backend.capabilities();
         gpu.insert(QStringLiteral("capable"), caps.gpu);
         gpu.insert(QStringLiteral("clients"), caps.gpuClients);
+        gpu.insert(QStringLiteral("processData"), caps.gpuProcessData);
         const GpuReading reading = backend.gpuInfo();
         gpu.insert(QStringLiteral("ok"), reading.ok);
         if (!reading.note.isEmpty()) {

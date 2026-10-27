@@ -570,6 +570,7 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     caps.sbom = true;
     caps.perProcessDisk = true;
     caps.gpu = true;
+    caps.gpuProcessData = true;
     return caps;
 }
 

@@ -138,6 +138,7 @@ private:
     bool m_osProcessDiskScan = true;
     bool m_osGpu = true;
     bool m_osGpuClients = true;
+    bool m_osGpuProcess = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;

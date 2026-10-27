@@ -234,6 +234,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osProcessDiskScan = osCaps.perProcessDiskScan;
     m_osGpu = osCaps.gpu;
     m_osGpuClients = osCaps.gpuClients;
+    m_osGpuProcess = osCaps.gpuProcessData;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -3713,17 +3714,21 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             m_gpuTileProcs->setText(
                 QString::number(gpu.processes.size()));
             m_gpuDevices->setText(gpuDeviceText(gpu));
-            if (!snapshot.gpuClientsAvailable) {
+            if (!m_osGpuProcess) {
                 m_gpuProcessNote->setText(
                     QStringLiteral("per-process gpu: %1 reports device "
                                    "usage only").arg(m_osName));
-            } else if (snapshot.gpuWarming) {
+            } else if (m_osGpuClients) {
                 m_gpuProcessNote->setText(
-                    QStringLiteral("gpu clients: warming up (engine deltas)"));
+                    snapshot.gpuWarming
+                        ? QStringLiteral("gpu clients: warming up "
+                                         "(engine deltas)")
+                        : QStringLiteral("gpu clients: per-process engine "
+                                         "time from /proc/<pid>/fdinfo"));
             } else {
                 m_gpuProcessNote->setText(
-                    QStringLiteral("gpu clients: per-process engine time "
-                                   "from /proc/<pid>/fdinfo"));
+                    QStringLiteral("gpu processes: per-process engine time "
+                                   "from the system gpu counters"));
             }
             for (const GpuProcess &process : gpu.processes) {
                 auto *item = new QTreeWidgetItem();

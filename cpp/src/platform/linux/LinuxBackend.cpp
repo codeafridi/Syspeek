@@ -25,6 +25,7 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.perProcessDisk = true;
     caps.perProcessDiskScan = true;
     caps.gpu = true;
+    caps.gpuProcessData = true;
     caps.gpuClients = true;
     return caps;
 }
