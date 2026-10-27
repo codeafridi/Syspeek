@@ -84,6 +84,13 @@ void TimeseriesChart::setCapacity(int capacity) {
     }
 }
 
+void TimeseriesChart::setBands(const QList<ChartBand> &bands,
+                               ChartBandStyle style) {
+    m_bands = bands;
+    m_bandStyle = style;
+    update();
+}
+
 void TimeseriesChart::setPaused(bool paused) {
     m_paused = paused;
     if (paused) {
@@ -220,6 +227,14 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
         low = std::min(low, v);
         high = std::max(high, v);
     }
+    for (const ChartBand &band : m_bands) {
+        if (m_bandStyle == ChartBandStyle::Off) {
+            break;
+        }
+        low = std::min(low, band.value);
+        high = std::max(high, band.value);
+        any = true;
+    }
     if (!any) {
         // Empty panel: draw grid only.
     }
@@ -253,6 +268,45 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
                                 static_cast<qreal>(fm.height())),
                          Qt::AlignCenter, m_unit);
         painter.restore();
+    }
+
+    // Monitor bands (Grafana line+area, absolute mode): a dashed line at the
+    // edited threshold plus a faint fill on the breaching side. Drawn under
+    // the series so the data stays readable.
+    if (m_bandStyle != ChartBandStyle::Off && !m_bands.isEmpty()) {
+        for (const ChartBand &band : m_bands) {
+            if (band.value < bottom || band.value > top) {
+                continue;
+            }
+            const qreal bandY = plot.bottom()
+                - (band.value - bottom) / (top - bottom) * plot.height();
+            if (m_bandStyle == ChartBandStyle::LineAndArea) {
+                QColor fill = band.color;
+                fill.setAlpha(30);
+                const qreal areaTop = band.above ? plot.top() : bandY;
+                const qreal areaBottom = band.above ? bandY : plot.bottom();
+                if (areaBottom > areaTop) {
+                    painter.fillRect(
+                        QRectF(plot.left() + 1.0, areaTop, plot.width() - 2.0,
+                               areaBottom - areaTop), fill);
+                }
+            }
+            QPen bandPen{band.color};
+            bandPen.setStyle(Qt::DashLine);
+            bandPen.setWidthF(1.2);
+            painter.setPen(bandPen);
+            painter.drawLine(QPointF(plot.left(), bandY),
+                             QPointF(plot.right(), bandY));
+            if (!band.label.isEmpty()) {
+                const QString text = band.label;
+                const qreal textW = fm.horizontalAdvance(text) + 4.0;
+                const qreal textY = band.above ? bandY - 11.0 : bandY + 1.0;
+                painter.setPen(QPen(band.color, 1.0));
+                painter.drawText(QRectF(plot.right() - textW - 3.0, textY,
+                                        textW, 11.0),
+                                 Qt::AlignRight | Qt::AlignVCenter, text);
+            }
+        }
     }
 
     // X time labels: like DD, four stops across the window mirroring

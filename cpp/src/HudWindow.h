@@ -58,6 +58,11 @@ public:
     void applyMonitorChange(const AlertRule &rule);
     void resetMonitors();
 
+    // M75 silences: authored quiet windows over single monitors.
+    void setSilences(const QList<SilenceRule> &rules);
+    void addSilence(const QString &matcher, int minutes);
+    void expireSilence(const QString &matcher);
+
 public:
 
     void setNotifier(std::unique_ptr<Notifier> notifier);
@@ -134,6 +139,7 @@ private:
     QRect m_savedGeometry;
     AlertEngine m_alerts;
     IncidentTracker m_incidents;
+    QList<SilenceRule> m_silences;
     QList<double> m_cpuHistory;
     QList<double> m_hostCpuHistory;
     QList<double> m_stealHistory;

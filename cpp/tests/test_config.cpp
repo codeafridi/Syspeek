@@ -177,6 +177,70 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M75: [silences] — a rolling duration authored in the file and an
+        // absolute window the HUD wrote (survives a restart).
+        QTemporaryDir dirSilence;
+        const qint64 absoluteEnd = 4102444800000LL;
+        const QString path = writeConfig(dirSilence, QByteArrayLiteral(
+            "[silences]\n"
+            "host_cpu=30m\n"
+            "host_cpu_comment=disk rebuild\n"
+            "host_cpu_author=ops\n"
+            "app_cpu_until=4102444800000\n"
+            "app_cpu_comment=rollout\n"
+            "journal_errors=10x\n"
+            "bogus=0s\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.silences.rules.size() == 3,
+              "silences: rolling, absolute and zero-second windows all load");
+        const SilenceRule *rolling = nullptr;
+        const SilenceRule *absolute = nullptr;
+        for (const SilenceRule &rule : c.silences.rules) {
+            if (rule.matcher == QStringLiteral("host_cpu")) {
+                rolling = &rule;
+            } else if (rule.matcher == QStringLiteral("app_cpu")) {
+                absolute = &rule;
+            }
+        }
+        check(rolling != nullptr
+                  && rolling->endsAtMs - rolling->startsAtMs == 1800000,
+              "silences: a duration key becomes a milliseconds window");
+        check(rolling != nullptr
+                  && rolling->comment == QStringLiteral("disk rebuild")
+                  && rolling->author == QStringLiteral("ops"),
+              "silences: comment and author ride the matcher key");
+        check(absolute != nullptr && absolute->endsAtMs == absoluteEnd
+                  && absolute->comment == QStringLiteral("rollout"),
+              "silences: an _until key keeps its absolute expiry");
+    }
+    {
+        // saveSilences roundtrip (the HUD writes what the page authored).
+        QTemporaryDir dirSilenceSave;
+        const QString path = writeConfig(dirSilenceSave, QByteArrayLiteral(
+            "[silences]\n"
+            "host_cpu=30m\n"));
+        QList<SilenceRule> rules;
+        SilenceRule rule;
+        rule.matcher = QStringLiteral("host_cpu");
+        rule.startsAtMs = 1000;
+        rule.endsAtMs = 4102444800000LL;
+        rule.comment = QStringLiteral("snoozed from the alerts page");
+        rule.author = QStringLiteral("local");
+        rules.append(rule);
+        saveSilences(path, rules);
+        QString error;
+        const Config loaded = loadConfig(path, &error);
+        check(loaded.silences.rules.size() == 1
+                  && loaded.silences.rules.at(0).endsAtMs == 4102444800000LL
+                  && loaded.silences.rules.at(0).comment
+                         == QStringLiteral("snoozed from the alerts page"),
+              "silences: saveSilences replaces the group and keeps the window");
+        check(loaded.health.cpuWarnPercent == 70.0,
+              "silences: saving keeps the rest of the file");
+    }
+
+    {
         QTemporaryDir dir4;
         const QString path = writeConfig(dir4, QByteArrayLiteral(
             "[fim]\n"

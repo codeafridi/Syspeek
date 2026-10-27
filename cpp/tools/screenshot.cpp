@@ -938,6 +938,32 @@ int main(int argc, char *argv[]) {
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
 
+    {
+        // M75 silences: two live quiet windows and one expired, so the
+        // Alerts page shows counts, remaining times and the muted-alert mark.
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        QList<SilenceRule> silences;
+        auto addSilence = [nowMs, &silences](const QString &matcher,
+                                            const QString &comment,
+                                            qint64 startOffsetMs,
+                                            qint64 endOffsetMs) {
+            SilenceRule rule;
+            rule.matcher = matcher;
+            rule.startsAtMs = nowMs + startOffsetMs;
+            rule.endsAtMs = nowMs + endOffsetMs;
+            rule.author = QStringLiteral("ops");
+            rule.comment = comment;
+            silences.append(rule);
+        };
+        addSilence(QStringLiteral("host_cpu"),
+                   QStringLiteral("index rebuild window"), -420000, 1500000);
+        addSilence(QStringLiteral("a-cpu"),
+                   QStringLiteral("same window, alert id"), -420000, 1500000);
+        addSilence(QStringLiteral("disk"), QStringLiteral("one-off cleanup"),
+                   -7200000, -3600000);
+        panel.setSilences(silences);
+    }
+
     auto driveHistoryLog = [&app, &panel]() {
         // Local history ring (M74): a full hour of 1 s samples with a
         // rewound selection so the tiles, card, scrubber, detail line and

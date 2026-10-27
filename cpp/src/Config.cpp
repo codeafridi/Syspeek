@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -365,6 +366,43 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("silences"));
+    for (const QString &key : settings.childKeys()) {
+        if (key.endsWith(QStringLiteral("_comment"))
+            || key.endsWith(QStringLiteral("_author"))) {
+            continue;
+        }
+        QString matcher = key;
+        qint64 endsAtMs = 0;
+        qint64 startsAtMs = 0;
+        if (key.endsWith(QStringLiteral("_until"))) {
+            matcher = key.left(key.size() - 6);
+            bool ok = false;
+            endsAtMs = settings.value(key).toString().toLongLong(&ok);
+            if (!ok || endsAtMs <= 0) {
+                continue;
+            }
+        } else {
+            const qint64 duration =
+                parseSilenceDurationMs(settings.value(key).toString());
+            if (duration < 0) {
+                continue;
+            }
+            startsAtMs = QDateTime::currentMSecsSinceEpoch();
+            endsAtMs = startsAtMs + duration;
+        }
+        SilenceRule rule;
+        rule.matcher = matcher;
+        rule.startsAtMs = startsAtMs;
+        rule.endsAtMs = endsAtMs;
+        rule.comment =
+            settings.value(matcher + QStringLiteral("_comment")).toString();
+        rule.author =
+            settings.value(matcher + QStringLiteral("_author")).toString();
+        config.silences.rules.append(rule);
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("metrics"));
     {
         if (settings.contains(QStringLiteral("enabled"))) {
@@ -517,6 +555,29 @@ void saveAlertOverrides(const QString &path,
                           rule.threshold);
         settings.setValue(rule.id + QStringLiteral("_cycles"),
                           rule.sustained);
+    }
+    settings.endGroup();
+    settings.sync();
+}
+
+void saveSilences(const QString &path, const QList<SilenceRule> &rules) {
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("silences"));
+    settings.remove(QString());
+    for (const SilenceRule &rule : rules) {
+        if (rule.matcher.isEmpty() || rule.endsAtMs <= 0) {
+            continue;
+        }
+        settings.setValue(rule.matcher + QStringLiteral("_until"),
+                          QString::number(rule.endsAtMs));
+        if (!rule.comment.isEmpty()) {
+            settings.setValue(rule.matcher + QStringLiteral("_comment"),
+                              rule.comment);
+        }
+        if (!rule.author.isEmpty()) {
+            settings.setValue(rule.matcher + QStringLiteral("_author"),
+                              rule.author);
+        }
     }
     settings.endGroup();
     settings.sync();

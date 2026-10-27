@@ -8,6 +8,8 @@
 #include "MetricStore.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
+#include "AlertSilence.h"
+#include "MonitorBands.h"
 #include "SyntheticStatus.h"
 #include "TraceStatus.h"
 #include "PathStatus.h"
@@ -31,6 +33,8 @@ class QSlider;
 class QPushButton;
 class QDoubleSpinBox;
 class QSpinBox;
+class QComboBox;
+class QCheckBox;
 class Sparkline;
 class TimeseriesChart;
 
@@ -104,12 +108,19 @@ public:
     // refreshes them without re-emitting editor signals (block during fill).
     void setMonitors(const QList<AlertRule> &rules);
 
+    // M75: alert silences (Alertmanager model). The panel renders the
+    // authored windows and lets the user snooze a monitor from the Alerts
+    // page; the engine keeps evaluating, notification paths stay quiet.
+    void setSilences(const QList<SilenceRule> &rules);
+
 signals:
     void collapseRequested();
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
     void historyExportRequested(const QString &format);
     void historySeekRequested(int index);
+    void silenceRequested(const QString &monitorId, int minutes);
+    void silenceExpireRequested(const QString &monitorId);
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
@@ -332,6 +343,21 @@ private:
     QLabel *m_alResolved = nullptr;
     TimeseriesChart *m_chartAlertTrans = nullptr;
     QLabel *m_alertTimeline = nullptr;
+    QList<SilenceRule> m_silences;
+    QComboBox *m_silenceTarget = nullptr;
+    QSpinBox *m_silenceMinutes = nullptr;
+    QPushButton *m_silenceAdd = nullptr;
+    QPushButton *m_silenceExpire = nullptr;
+    QLabel *m_silenceSummary = nullptr;
+    QLabel *m_silenceList = nullptr;
+    QCheckBox *m_procHealthyOnly = nullptr;
+    QLabel *m_procFilterNote = nullptr;
+    QList<ProcessRow> m_lastProcessRows;
+    bool m_procFilterActive = false;
+    void updateSilencesPanel();
+    void requestSilence();
+    void expireSelectedSilence();
+    void populateProcessTree(const QList<ProcessRow> &rows);
     QSet<QString> m_alertSeen;
     quint64 m_alertsFired = 0;
     quint64 m_alertsResolved = 0;

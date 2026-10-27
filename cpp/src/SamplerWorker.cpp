@@ -178,6 +178,7 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         if (row.name.isEmpty()) {
             row.name = QString::number(node.pid);
         }
+        row.rssKb = static_cast<double>(info.rssKb);
         row.memory = formatMemoryKb(info.rssKb);
         rows.append(row);
     }

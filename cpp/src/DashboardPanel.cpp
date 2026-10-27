@@ -12,7 +12,9 @@
 #include "TimeseriesChart.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QColor>
 #include <QDateTime>
 #include <QFont>
@@ -36,6 +38,23 @@
 #include <algorithm>
 
 namespace {
+
+QList<ChartBand> chartBandsFrom(const QList<MonitorBand> &bands) {
+    QList<ChartBand> chartBands;
+    for (const MonitorBand &band : bands) {
+        ChartBand chartBand;
+        chartBand.value = band.value;
+        chartBand.above = band.above;
+        chartBand.label = bandLabelText(band);
+        chartBand.color = QColor(band.state == QStringLiteral("Error")
+                                     ? ui_theme::crit()
+                                     : band.state == QStringLiteral("Warning")
+                                           ? ui_theme::warn()
+                                           : ui_theme::ok());
+        chartBands.append(chartBand);
+    }
+    return chartBands;
+}
 
 QFont panelTitleFont() {
     QFont font;
@@ -439,7 +458,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
-        "#ddProcNetNote, #ddProcDiskNote, #ddTalkers, #ddDiskTopNote,\n        #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,\n        #ddHistDetail { color: %MUTED%; }"
+        "#ddProcNetNote, #ddProcDiskNote, #ddProcFilterNote, #ddTalkers,"
+        " #ddDiskTopNote,"
+        " #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,"
+        " #ddHistDetail, #ddSilenceSummary, #ddSilenceList { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
@@ -509,10 +531,26 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddKubeDiagnosis, #ddKubeTimeline { color: %DIM%; }"
         "#ddSettingsInfo { color: %DIM%; }"
         "#ddSettingsPath { color: %MUTED%; font-size: 9px; }"
-        "#ddCopy { color: %DIM%; background-color: transparent;"
+        "#ddCopy, #ddSilenceAdd, #ddSilenceExpire { color: %DIM%;"
+        "  background-color: transparent;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
         "  padding: 2px 10px; font-size: 9px; }"
-        "#ddCopy:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddCopy:hover, #ddSilenceAdd:hover, #ddSilenceExpire:hover {"
+        "  color: %TEXT%; border-color: %MUTED%; }"
+        "#ddSilenceAdd { color: %ACCENT%; }"
+        "QComboBox, QSpinBox, QDoubleSpinBox { color: %TEXT%;"
+        "  background-color: %SURFACE%; border: 1px solid %BORDER%;"
+        "  border-radius: 2px; padding: 2px 5px; font-size: 10px; }"
+        "QComboBox::drop-down { border: 0px; width: 14px; }"
+        "QComboBox QAbstractItemView { background-color: %SURFACE%;"
+        "  color: %TEXT%; selection-background-color: %HOVER%;"
+        "  border: 1px solid %BORDER%; }"
+        "QCheckBox { color: %DIM%; font-size: 9px; }"
+        "QCheckBox::indicator { width: 11px; height: 11px;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  background-color: %SURFACE%; }"
+        "QCheckBox::indicator:checked { background-color: %ACCENT%;"
+        "  border-color: %ACCENT%; }"
         "#ddHistFirst, #ddHistPrev, #ddHistNext, #ddHistLast {"
         "  color: %DIM%; background-color: transparent;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
@@ -1105,6 +1143,59 @@ QWidget *DashboardPanel::buildAlertsView() {
     layout->addWidget(makeCard(QStringLiteral("EVENT HISTORY"),
                                m_alertTimeline, view), 1);
 
+    // --- Silences (M75, Alertmanager model): mute one monitor for a while
+    // without disabling it. The rule keeps evaluating and the ACTIVE ALERTS
+    // card keeps showing the breach, but no notification, webhook or
+    // incident is raised while the window is live.
+    m_silenceTarget = new QComboBox(view);
+    m_silenceTarget->setObjectName(QStringLiteral("ddSilenceTarget"));
+    m_silenceTarget->setMinimumWidth(1);
+    m_silenceMinutes = new QSpinBox(view);
+    m_silenceMinutes->setObjectName(QStringLiteral("ddSilenceMinutes"));
+    m_silenceMinutes->setRange(1, 24 * 60);
+    m_silenceMinutes->setValue(30);
+    m_silenceMinutes->setSuffix(QStringLiteral(" min"));
+    m_silenceAdd = new QPushButton(QStringLiteral("SNOOZE"), view);
+    m_silenceAdd->setObjectName(QStringLiteral("ddSilenceAdd"));
+    m_silenceAdd->setCursor(Qt::PointingHandCursor);
+    m_silenceExpire = new QPushButton(QStringLiteral("EXPIRE"), view);
+    m_silenceExpire->setObjectName(QStringLiteral("ddSilenceExpire"));
+    m_silenceExpire->setCursor(Qt::PointingHandCursor);
+    connect(m_silenceAdd, &QPushButton::clicked, this,
+            &DashboardPanel::requestSilence);
+    connect(m_silenceExpire, &QPushButton::clicked, this,
+            &DashboardPanel::expireSelectedSilence);
+
+    m_silenceSummary = new QLabel(QStringLiteral("--"), view);
+    m_silenceSummary->setObjectName(QStringLiteral("ddSilenceSummary"));
+    m_silenceSummary->setFont(monoFont(10));
+    m_silenceSummary->setMinimumWidth(1);
+    m_silenceSummary->setWordWrap(false);
+    m_silenceList = new QLabel(QStringLiteral("--"), view);
+    m_silenceList->setObjectName(QStringLiteral("ddSilenceList"));
+    m_silenceList->setFont(monoFont(10));
+    m_silenceList->setMinimumWidth(1);
+    m_silenceList->setWordWrap(false);
+
+    auto *silenceBox = new QWidget(view);
+    auto *silenceLayout = new QVBoxLayout(silenceBox);
+    silenceLayout->setContentsMargins(0, 0, 0, 0);
+    silenceLayout->setSpacing(5);
+    auto *silenceRow = new QHBoxLayout();
+    silenceRow->setSpacing(6);
+    silenceRow->addWidget(m_silenceTarget, 2);
+    silenceRow->addWidget(m_silenceMinutes, 1);
+    silenceRow->addWidget(m_silenceAdd);
+    silenceRow->addWidget(m_silenceExpire);
+    silenceLayout->addLayout(silenceRow);
+    silenceLayout->addWidget(m_silenceSummary);
+    silenceLayout->addWidget(m_silenceList);
+
+    layout->addWidget(makeBanner(QStringLiteral("SILENCES"),
+        ui_theme::ok(), view));
+    layout->addWidget(makeCard(QStringLiteral("QUIET WINDOWS"),
+                               silenceBox, view), 1);
+
     // Fit the viewport width: width-only clamps (heights stay natural).
     m_alerts->setMinimumWidth(1);
     m_alertTimeline->setMinimumWidth(1);
@@ -1380,9 +1471,24 @@ QWidget *DashboardPanel::buildProcessesView() {
     m_procDiskNote->setObjectName(QStringLiteral("ddProcDiskNote"));
     m_procDiskNote->setFont(monoFont(10));
     m_procDiskNote->setMinimumWidth(1);
+    m_procHealthyOnly = new QCheckBox(QStringLiteral("HEALTHY ONLY"), procBox);
+    m_procHealthyOnly->setObjectName(QStringLiteral("ddProcHealthy"));
+    m_procHealthyOnly->setToolTip(QStringLiteral(
+        "hide rows below the focused-app CPU / RSS monitor lines"));
+    m_procFilterNote = new QLabel(QString(), procBox);
+    m_procFilterNote->setObjectName(QStringLiteral("ddProcFilterNote"));
+    m_procFilterNote->setFont(monoFont(10));
+    m_procFilterNote->setMinimumWidth(1);
+    connect(m_procHealthyOnly, &QCheckBox::toggled, this,
+            [this](bool checked) {
+                m_procFilterActive = checked;
+                populateProcessTree(m_lastProcessRows);
+            });
     procBoxLayout->addWidget(m_procs, 1);
     procBoxLayout->addWidget(m_procNetNote);
     procBoxLayout->addWidget(m_procDiskNote);
+    procBoxLayout->addWidget(m_procHealthyOnly);
+    procBoxLayout->addWidget(m_procFilterNote);
     layout->addWidget(makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
 
     // --- CPU / load history (Syspeek-own fleet counters).
@@ -3041,6 +3147,84 @@ void DashboardPanel::setMonitors(const QList<AlertRule> &rules) {
             spin->setValue(rule.sustained);
         }
     }
+
+    // M75: the chart bands are the SAME editable monitors the alert engine
+    // evaluates, so dragging a threshold moves the line on the chart instead
+    // of letting the chart and the alert drift apart.
+    if (m_chartCpu != nullptr) {
+        m_chartCpu->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("app_cpu")})));
+    }
+    if (m_chartHostCpu != nullptr) {
+        m_chartHostCpu->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("host_cpu")})));
+    }
+
+    if (m_silenceTarget != nullptr) {
+        const QString previous = m_silenceTarget->currentText();
+        const QSignalBlocker blocker(m_silenceTarget);
+        m_silenceTarget->clear();
+        for (const AlertRule &rule : rules) {
+            m_silenceTarget->addItem(rule.id, rule.id);
+        }
+        const int restored = m_silenceTarget->findText(previous);
+        if (restored >= 0) {
+            m_silenceTarget->setCurrentIndex(restored);
+        }
+    }
+}
+
+void DashboardPanel::setSilences(const QList<SilenceRule> &rules) {
+    m_silences = rules;
+    updateSilencesPanel();
+}
+
+void DashboardPanel::updateSilencesPanel() {
+    if (m_silenceSummary == nullptr || m_silenceList == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    m_silenceSummary->setText(silenceSummaryText(m_silences, now));
+    QString text;
+    QStringList rows;
+    for (const SilenceRule &rule : m_silences) {
+        rows.append(silenceRowText(rule, now).toHtmlEscaped());
+    }
+    if (rows.isEmpty()) {
+        text = QStringLiteral("no silence windows");
+    } else {
+        text = rows.mid(0, 6).join(QStringLiteral("<br/>"));
+    }
+    m_silenceList->setTextFormat(Qt::RichText);
+    m_silenceList->setText(text);
+}
+
+void DashboardPanel::requestSilence() {
+    if (m_silenceTarget == nullptr || m_silenceMinutes == nullptr) {
+        return;
+    }
+    QString matcher = m_silenceTarget->currentData().toString();
+    if (matcher.isEmpty()) {
+        matcher = m_silenceTarget->currentText().trimmed();
+    }
+    if (matcher.isEmpty()) {
+        return;
+    }
+    emit silenceRequested(matcher, m_silenceMinutes->value());
+}
+
+void DashboardPanel::expireSelectedSilence() {
+    if (m_silenceTarget == nullptr) {
+        return;
+    }
+    QString matcher = m_silenceTarget->currentData().toString();
+    if (matcher.isEmpty()) {
+        matcher = m_silenceTarget->currentText().trimmed();
+    }
+    if (matcher.isEmpty()) {
+        return;
+    }
+    emit silenceExpireRequested(matcher);
 }
 
 void DashboardPanel::copySettingCommand() {
@@ -4809,12 +4993,54 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_depTileRatio->setText(QStringLiteral("--"));
     }
 
+    m_lastProcessRows = snapshot.processes;
+    populateProcessTree(m_lastProcessRows);
+}
+
+void DashboardPanel::populateProcessTree(const QList<ProcessRow> &rows) {
+    if (m_procs == nullptr) {
+        return;
+    }
     m_populating = true;
     m_procs->clear();
     QList<QTreeWidgetItem *> byDepth;
     QList<QTreeWidgetItem *> allItems;
     QSet<int> present;
-    for (const ProcessRow &row : snapshot.processes) {
+
+    // "healthy only" (M75): keep breaching rows plus their ancestors so the
+    // tree still reads as a tree, and say so instead of showing an empty box
+    // when everything is quiet.
+    QVector<bool> keep(rows.size(), false);
+    if (m_procFilterActive) {
+        QVector<int> parent(rows.size(), -1);
+        QVector<int> stack;
+        for (int i = 0; i < rows.size(); ++i) {
+            while (!stack.isEmpty()
+                   && rows.at(stack.last()).depth >= rows.at(i).depth) {
+                stack.removeLast();
+            }
+            parent[i] = stack.isEmpty() ? -1 : stack.last();
+            stack.append(i);
+        }
+        for (int i = 0; i < rows.size(); ++i) {
+            const double rssGb = rows.at(i).rssKb / (1024.0 * 1024.0);
+            if (!processRowBreaches(rows.at(i).cpuPercent, rssGb,
+                                    m_settings.cpuHighPercent,
+                                    m_settings.rssWarnGb)) {
+                continue;
+            }
+            for (int j = i; j >= 0; j = parent.at(j)) {
+                keep[j] = true;
+            }
+        }
+    }
+    int hiddenRows = 0;
+    for (int index = 0; index < rows.size(); ++index) {
+        const ProcessRow &row = rows.at(index);
+        if (m_procFilterActive && !keep.at(index)) {
+            ++hiddenRows;
+            continue;
+        }
         auto *item = new QTreeWidgetItem();
         item->setData(0, Qt::UserRole, row.pid);
         item->setText(0, row.name.isEmpty() ? QStringLiteral("pid %1").arg(row.pid)
@@ -4857,6 +5083,18 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             !m_collapsedPids.contains(item->data(0, Qt::UserRole).toInt()));
     }
     m_populating = false;
+
+    if (m_procFilterNote != nullptr) {
+        m_procFilterNote->setText(
+            m_procFilterActive
+                ? QStringLiteral("%1 of %2 rows hidden by HEALTHY ONLY "
+                                 "(cpu < %3%, rss < %4 GB)")
+                      .arg(hiddenRows)
+                      .arg(rows.size())
+                      .arg(m_settings.cpuHighPercent, 0, 'f', 0)
+                      .arg(m_settings.rssWarnGb, 0, 'f', 1)
+                : QString());
+    }
 }
 
 void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
@@ -5202,6 +5440,11 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
 }
 
 void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
+    // Silence windows age every tick, so refresh their remaining times here
+    // as well as on setSilences.
+    updateSilencesPanel();
+    const qint64 silenceNow = QDateTime::currentMSecsSinceEpoch();
+
     // Monitor-status tile counts (gridded per DD status vocabulary:
     // status:critical / status:warning / status:ok live in the agent).
     int crit = 0;
@@ -5324,8 +5567,18 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
             ? QStringLiteral("<span style=\"color:%1;\">[%2]</span>")
                 .arg(ui_theme::statusColor(severity), severity)
             : QStringLiteral("[%1]").arg(severity);
-        text += QStringLiteral("%1 %2&nbsp;&nbsp;%3<br/>")
-                    .arg(marker, alert.title, alert.detail);
+        // A live silence mutes the notification paths but the breach is
+        // still real, so the row keeps its severity and gains the window.
+        const SilenceRule *silence =
+            activeSilenceFor(m_silences, alert.id, silenceNow);
+        const QString quiet = silence == nullptr
+            ? QString()
+            : QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                             "[silenced %2]</span>")
+                  .arg(ui_theme::muted(),
+                       formatSilenceRemaining(silence->endsAtMs - silenceNow));
+        text += QStringLiteral("%1 %2&nbsp;&nbsp;%3%4<br/>")
+                    .arg(marker, alert.title, alert.detail, quiet);
     }
     m_alerts->setText(text);
 }

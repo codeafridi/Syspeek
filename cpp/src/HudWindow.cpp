@@ -251,6 +251,10 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::exportHistory);
     connect(m_panel, &DashboardPanel::historySeekRequested, this,
             &HudWindow::seekHistory);
+    connect(m_panel, &DashboardPanel::silenceRequested, this,
+            &HudWindow::addSilence);
+    connect(m_panel, &DashboardPanel::silenceExpireRequested, this,
+            &HudWindow::expireSilence);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -711,21 +715,98 @@ void HudWindow::resetMonitors() {
     setMonitors(m_alerts.rules());
 }
 
+void HudWindow::setSilences(const QList<SilenceRule> &rules) {
+    m_silences = rules;
+    if (m_panel != nullptr) {
+        m_panel->setSilences(m_silences);
+    }
+}
+
+void HudWindow::addSilence(const QString &matcher, int minutes) {
+    const QString pattern = matcher.trimmed();
+    if (pattern.isEmpty() || minutes <= 0) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    SilenceRule rule;
+    rule.matcher = pattern;
+    rule.startsAtMs = now;
+    rule.endsAtMs = now + qint64(minutes) * 60 * 1000;
+    rule.author = qEnvironmentVariable("USER");
+    if (rule.author.isEmpty()) {
+        rule.author = qEnvironmentVariable("USERNAME");
+    }
+    if (rule.author.isEmpty()) {
+        rule.author = QStringLiteral("local");
+    }
+    rule.comment = QStringLiteral("snoozed from the alerts page");
+
+    // Re-snoozing the same matcher replaces its window instead of stacking
+    // a second rule the user cannot see separately.
+    QList<SilenceRule> rules;
+    for (const SilenceRule &existing : m_silences) {
+        if (existing.matcher.compare(pattern, Qt::CaseInsensitive) != 0) {
+            rules.append(existing);
+        }
+    }
+    rules.append(rule);
+    setSilences(rules);
+    saveSilences(defaultConfigPath(), m_silences);
+}
+
+void HudWindow::expireSilence(const QString &matcher) {
+    const QString pattern = matcher.trimmed();
+    if (pattern.isEmpty()) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    bool changed = false;
+    for (SilenceRule &rule : m_silences) {
+        if (rule.matcher.compare(pattern, Qt::CaseInsensitive) == 0
+            && rule.endsAtMs > now) {
+            rule.endsAtMs = now;
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+    setSilences(m_silences);
+    saveSilences(defaultConfigPath(), m_silences);
+}
+
 void HudWindow::evaluateAlerts() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const QList<Alert> fired = m_alerts.update(m_alertInput, now);
+    const QList<Alert> active = m_alerts.active();
+
+    // A live silence keeps the monitor evaluating (the page still shows the
+    // breach) and only mutes the outbound paths: desktop notification,
+    // webhook delivery and incident creation.
+    QList<Alert> loudFired;
+    for (const Alert &alert : fired) {
+        if (activeSilenceFor(m_silences, alert.id, now) == nullptr) {
+            loudFired.append(alert);
+        }
+    }
+    QList<Alert> loudActive;
+    for (const Alert &alert : active) {
+        if (activeSilenceFor(m_silences, alert.id, now) == nullptr) {
+            loudActive.append(alert);
+        }
+    }
+
     if (m_notifier != nullptr) {
-        for (const Alert &alert : fired) {
+        for (const Alert &alert : loudFired) {
             m_notifier->send(alert);
         }
     }
-    const QList<Alert> active = m_alerts.active();
     if (m_webhook != nullptr) {
-        m_webhook->processEvents(fired, active, now);
+        m_webhook->processEvents(loudFired, loudActive, now);
     }
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
-        m_incidents.update(active, now);
+        m_incidents.update(loudActive, now);
         m_panel->setIncidents(m_incidents.incidents());
     }
 }

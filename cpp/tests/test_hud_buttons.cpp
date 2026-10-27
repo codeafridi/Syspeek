@@ -1,9 +1,15 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
 #include "HistoryLog.h"
+#include "TimeseriesChart.h"
 #include "platform/PlatformFactory.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QTemporaryDir>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QSpinBox>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -540,6 +546,207 @@ int main(int argc, char *argv[]) {
         lastButton->click();
         check(!seeks.isEmpty() && seeks.last() == 899,
               "latest jumps back to the live sample");
+    }
+
+    {
+        // M75: the Alerts page carries authored silence windows and the
+        // monitor threshold bands ride the CPU charts.
+        auto *silenceTarget =
+            hud.findChild<QComboBox *>(QStringLiteral("ddSilenceTarget"));
+        auto *silenceMinutes =
+            hud.findChild<QSpinBox *>(QStringLiteral("ddSilenceMinutes"));
+        auto *silenceAdd =
+            hud.findChild<QPushButton *>(QStringLiteral("ddSilenceAdd"));
+        auto *silenceExpire =
+            hud.findChild<QPushButton *>(QStringLiteral("ddSilenceExpire"));
+        auto *silenceSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddSilenceSummary"));
+        auto *silenceList =
+            hud.findChild<QLabel *>(QStringLiteral("ddSilenceList"));
+        check(silenceTarget != nullptr && silenceMinutes != nullptr
+                  && silenceAdd != nullptr && silenceExpire != nullptr
+                  && silenceSummary != nullptr && silenceList != nullptr,
+              "panel builds the silences controls and card lines");
+
+        QList<AlertRule> monitorRules = defaultAlertRules();
+        for (AlertRule &rule : monitorRules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.threshold = 63.0;
+            }
+        }
+        panel->setMonitors(monitorRules);
+        check(silenceTarget->count() == monitorRules.size()
+                  && silenceTarget->findText(QStringLiteral("host_cpu")) >= 0,
+              "panel silence picker lists every editable monitor");
+
+        bool banded = false;
+        for (TimeseriesChart *chart :
+             hud.findChildren<TimeseriesChart *>()) {
+            for (const ChartBand &band : chart->bands()) {
+                if (band.value == 63.0) {
+                    banded = true;
+                }
+            }
+        }
+        check(banded, "monitor threshold reaches the cpu chart as a band");
+
+        QStringList requested;
+        int requestedMinutes = 0;
+        QStringList expired;
+        QObject::connect(panel, &DashboardPanel::silenceRequested,
+                         [&requested, &requestedMinutes](const QString &id,
+                                                        int minutes) {
+                             requested.append(id);
+                             requestedMinutes = minutes;
+                         });
+        QObject::connect(panel, &DashboardPanel::silenceExpireRequested,
+                         [&expired](const QString &id) { expired.append(id); });
+        silenceTarget->setCurrentIndex(
+            silenceTarget->findText(QStringLiteral("host_cpu")));
+        silenceMinutes->setValue(45);
+        silenceAdd->click();
+        check(requested == QStringList{QStringLiteral("host_cpu")}
+                  && requestedMinutes == 45,
+              "SNOOZE asks the owner for a 45 minute host_cpu window");
+        silenceExpire->click();
+        check(expired == QStringList{QStringLiteral("host_cpu")},
+              "EXPIRE asks the owner to close that window");
+
+        const qint64 silenceNow = QDateTime::currentMSecsSinceEpoch();
+        SilenceRule rule;
+        rule.matcher = QStringLiteral("host_cpu");
+        rule.startsAtMs = silenceNow - 1000;
+        rule.endsAtMs = silenceNow + 600000;
+        rule.author = QStringLiteral("ops");
+        rule.comment = QStringLiteral("snoozed");
+        panel->setSilences({rule});
+        check(silenceSummary->text().contains(QStringLiteral("1 active"))
+                  && silenceList->text().contains(QStringLiteral("host_cpu"))
+                  && silenceList->text().contains(QStringLiteral("10m left")),
+              "panel renders an authored silence with its remaining time");
+
+        Alert silencedAlert;
+        silencedAlert.id = QStringLiteral("host_cpu");
+        silencedAlert.title = QStringLiteral("Host CPU high");
+        silencedAlert.severity = QStringLiteral("high");
+        silencedAlert.detail = QStringLiteral("93%");
+        panel->setAlerts({silencedAlert});
+        auto *albums =
+            hud.findChild<QLabel *>(QStringLiteral("ddAlerts"));
+        check(albums != nullptr
+                  && albums->text().contains(QStringLiteral("[silenced")),
+              "a silenced monitor keeps its breach row but notes the window");
+
+        panel->setSilences({});
+        check(silenceSummary->text().contains(QStringLiteral("none"))
+                  && !silenceList->text().contains(QStringLiteral("host_cpu")),
+              "an empty silence list says so instead of staying blank");
+    }
+
+    {
+        // M75: HEALTHY ONLY keeps breaching rows plus their ancestors.
+        auto *healthy =
+            hud.findChild<QCheckBox *>(QStringLiteral("ddProcHealthy"));
+        auto *filterNote =
+            hud.findChild<QLabel *>(QStringLiteral("ddProcFilterNote"));
+        auto *tree = hud.findChild<QTreeWidget *>(QStringLiteral("ddProcs"));
+        check(healthy != nullptr && filterNote != nullptr && tree != nullptr,
+              "the process page offers the HEALTHY ONLY filter");
+
+        DisplaySnapshot filterSnapshot;
+        filterSnapshot.hostAvailable = true;
+        ProcessRow root;
+        root.pid = 10;
+        root.depth = 0;
+        root.cpuPercent = 4.0;
+        root.rssKb = 512.0 * 1024.0;
+        root.name = QStringLiteral("root-app");
+        root.memory = QStringLiteral("512 MB");
+        ProcessRow busy;
+        busy.pid = 11;
+        busy.depth = 1;
+        busy.cpuPercent = 96.0;
+        busy.rssKb = 1024.0 * 1024.0;
+        busy.name = QStringLiteral("busy-child");
+        busy.memory = QStringLiteral("1.0 GB");
+        ProcessRow quiet;
+        quiet.pid = 12;
+        quiet.depth = 1;
+        quiet.cpuPercent = 1.0;
+        quiet.rssKb = 64.0 * 1024.0;
+        quiet.name = QStringLiteral("quiet-child");
+        quiet.memory = QStringLiteral("64 MB");
+        filterSnapshot.processes = {root, busy, quiet};
+        hud.setSnapshot(filterSnapshot);
+        check(tree->topLevelItemCount() == 1
+                  && tree->topLevelItem(0)->childCount() == 2,
+              "the unfiltered tree keeps every row");
+
+        healthy->setChecked(true);
+        check(tree->topLevelItemCount() == 1
+                  && tree->topLevelItem(0)->childCount() == 1
+                  && tree->topLevelItem(0)->child(0)->text(0)
+                         == QStringLiteral("busy-child"),
+              "HEALTHY ONLY hides healthy rows and keeps the breaching child");
+        check(filterNote->text().contains(QStringLiteral("1 of 3 rows hidden")),
+              "the filter states how many rows it hid");
+
+        healthy->setChecked(false);
+        check(tree->topLevelItem(0)->childCount() == 2
+                  && filterNote->text().isEmpty(),
+              "clearing the filter restores the full tree and the note");
+
+        hud.setSnapshot(withProcs);
+    }
+
+    {
+        // M75: a live silence mutes the outbound paths (desktop
+        // notification here) while the monitor keeps evaluating.
+        QTemporaryDir silenceDir;
+        const QByteArray previousConfig =
+            qgetenv("SYSPEEK_CONFIG");
+        qputenv("SYSPEEK_CONFIG",
+                silenceDir.filePath(QStringLiteral("config.ini")).toUtf8());
+        const int baseCount = fakePtr->count;
+        hud.addSilence(QStringLiteral("app_cpu"), 10);
+
+        auto *silenceSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddSilenceSummary"));
+        check(silenceSummary != nullptr
+                  && silenceSummary->text().contains(QStringLiteral("1 active")),
+              "a snooze from the page reaches the silences card");
+
+        DisplaySnapshot hot = withProcs;
+        hot.cpuPercent = 99.0;
+        hot.cpuValid = true;
+        for (int i = 0; i < 4; ++i) {
+            hud.setSnapshot(hot);
+        }
+        check(fakePtr->count == baseCount,
+              "a silenced monitor raises no desktop notification");
+
+        hud.expireSilence(QStringLiteral("app_cpu"));
+        hud.setSnapshot(withProcs);
+        for (int i = 0; i < 4; ++i) {
+            hud.setSnapshot(hot);
+        }
+        check(fakePtr->count == baseCount + 1,
+              "the same monitor notifies again once the window is closed");
+
+        const QString written = silenceDir.filePath(
+            QStringLiteral("config.ini"));
+        QFile silenceFile(written);
+        const bool saved = silenceFile.open(QIODevice::ReadOnly);
+        const QString savedText = saved
+            ? QString::fromUtf8(silenceFile.readAll()) : QString();
+        check(savedText.contains(QStringLiteral("app_cpu_until")),
+              "an authored silence persists to the config file");
+        if (previousConfig.isEmpty()) {
+            qunsetenv("SYSPEEK_CONFIG");
+        } else {
+            qputenv("SYSPEEK_CONFIG", previousConfig);
+        }
+        hud.setSnapshot(withProcs);
     }
 
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));

@@ -187,6 +187,10 @@ add_library(syspeek_core STATIC
     src/GpuStatus.h
     src/HistoryLog.cpp
     src/HistoryLog.h
+    src/AlertSilence.cpp
+    src/AlertSilence.h
+    src/MonitorBands.cpp
+    src/MonitorBands.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
     src/KubeStatus.cpp

@@ -30,6 +30,7 @@ struct ProcessRow {
     double diskReadPerSec = -1.0;
     double diskWritePerSec = -1.0;
     QList<quint16> listenPorts;
+    double rssKb = 0.0;
     QString name;
     QString memory;
 };

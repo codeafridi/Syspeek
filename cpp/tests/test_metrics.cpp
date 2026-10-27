@@ -28,6 +28,8 @@
 #include "HostInfoStatus.h"
 #include "FimStatus.h"
 #include "AlertWebhook.h"
+#include "AlertSilence.h"
+#include "MonitorBands.h"
 #include "MetricsExport.h"
 #include "GpuStatus.h"
 #include "HistoryLog.h"
@@ -2933,6 +2935,175 @@ int main(int argc, char *argv[]) {
         check(historyRecordText(emptyRecord).contains(QStringLiteral("--")),
               "history: an empty sample renders dashes, never zeros");
     }
+    {
+        // M75: alert silences — Alertmanager's three-state window over one
+        // monitor, matcher patterns, Go-style durations and the page text.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        SilenceRule past;
+        past.matcher = QStringLiteral("host_cpu");
+        past.startsAtMs = now - 600000;
+        past.endsAtMs = now - 1000;
+        check(silenceStateAt(past, now) == QStringLiteral("expired")
+                  && !silenceLive(past, now),
+              "silence: a closed window reads expired");
+
+        SilenceRule future = past;
+        future.startsAtMs = now + 60000;
+        future.endsAtMs = now + 3600000;
+        check(silenceStateAt(future, now) == QStringLiteral("pending"),
+              "silence: before startsAt reads pending");
+
+        SilenceRule live;
+        live.matcher = QStringLiteral("host_cpu");
+        live.startsAtMs = now - 1000;
+        live.endsAtMs = now + 1800000;
+        live.comment = QStringLiteral("disk rebuild");
+        live.author = QStringLiteral("ops");
+        check(silenceStateAt(live, now) == QStringLiteral("active")
+                  && silenceLive(live, now),
+              "silence: inside the window reads active");
+
+        check(silenceMatches(live, QStringLiteral("host_cpu"))
+                  && silenceMatches(live, QStringLiteral("HOST_CPU"))
+                  && !silenceMatches(live, QStringLiteral("app_cpu")),
+              "silence: an exact matcher matches one monitor, case-insensitive");
+
+        SilenceRule wildcard;
+        wildcard.matcher = QStringLiteral("host_*");
+        wildcard.startsAtMs = now - 1000;
+        wildcard.endsAtMs = now + 600000;
+        check(silenceMatches(wildcard, QStringLiteral("host_steal"))
+                  && silenceMatches(wildcard, QStringLiteral("host_cpu"))
+                  && !silenceMatches(wildcard, QStringLiteral("app_cpu")),
+              "silence: '*' matches any run, so one rule can cover a family");
+
+        SilenceRule question;
+        question.matcher = QStringLiteral("app_cp?");
+        question.startsAtMs = now - 1000;
+        question.endsAtMs = now + 60000;
+        check(silenceMatches(question, QStringLiteral("app_cpu"))
+                  && !silenceMatches(question, QStringLiteral("app_cpu2")),
+              "silence: '?' matches exactly one character");
+
+        SilenceRule longer = live;
+        longer.endsAtMs = now + 7200000;
+        QList<SilenceRule> rules{live, longer, past};
+        const SilenceRule *chosen =
+            activeSilenceFor(rules, QStringLiteral("host_cpu"), now);
+        check(chosen != nullptr && chosen->endsAtMs == longer.endsAtMs,
+              "silence: the newest expiry wins for overlapping windows");
+        check(activeSilenceFor(rules, QStringLiteral("app_cpu"), now) == nullptr,
+              "silence: an unlisted monitor stays loud");
+        check(activeSilenceFor(rules, QStringLiteral("host_cpu"),
+                               now + 7200001) == nullptr,
+              "silence: past the last expiry nothing is muted");
+
+        const QStringList silenced = silencedMonitorIds(
+            rules, {QStringLiteral("host_cpu"), QStringLiteral("app_cpu")}, now);
+        check(silenced == QStringList{QStringLiteral("host_cpu")},
+              "silence: silencedMonitorIds reports only live matches");
+        check(silencedIdsFor(rules,
+                             {QStringLiteral("app_cpu"),
+                              QStringLiteral("host_cpu")},
+                             now)
+                  == QList<QString>{QStringLiteral("host_cpu")},
+              "silence: silencedIdsFor keeps the requested order");
+
+        check(parseSilenceDurationMs(QStringLiteral("45s")) == 45000
+                  && parseSilenceDurationMs(QStringLiteral("30m")) == 1800000
+                  && parseSilenceDurationMs(QStringLiteral("2h")) == 7200000
+                  && parseSilenceDurationMs(QStringLiteral("1h30m"))
+                         == 5400000
+                  && parseSilenceDurationMs(QStringLiteral("90")) == 90000,
+              "silence: Go durations and bare seconds parse");
+        check(parseSilenceDurationMs(QStringLiteral("10x")) == -1
+                  && parseSilenceDurationMs(QStringLiteral("1h30")) == -1
+                  && parseSilenceDurationMs(QString()) == -1
+                  && parseSilenceDurationMs(QStringLiteral("-5")) == -1,
+              "silence: malformed and negative durations are rejected");
+
+        check(formatSilenceRemaining(20000) == QStringLiteral("20s left")
+                  && formatSilenceRemaining(300000)
+                         == QStringLiteral("5m left")
+                  && formatSilenceRemaining(7500000)
+                         == QStringLiteral("2h 5m left")
+                  && formatSilenceRemaining(3 * 86400000)
+                         == QStringLiteral("3d left")
+                  && formatSilenceRemaining(0) == QStringLiteral("expired"),
+              "silence: remaining time renders in the amtool scale");
+
+        check(silenceSummaryText({}, now).contains(QStringLiteral("none"))
+                  && silenceSummaryText(rules, now)
+                         .contains(QStringLiteral("2 active"))
+                  && silenceSummaryText(rules, now)
+                         .contains(QStringLiteral("1 expired")),
+              "silence: summary states empty vs per-state counts");
+        const QString rowText = silenceRowText(live, now);
+        check(rowText.contains(QStringLiteral("host_cpu"))
+                  && rowText.contains(QStringLiteral("active"))
+                  && rowText.contains(QStringLiteral("30m left"))
+                  && rowText.contains(QStringLiteral("ops"))
+                  && rowText.contains(QStringLiteral("disk rebuild")),
+              "silence: a row carries matcher, state, window, author, comment");
+        check(silencedNoteText({QStringLiteral("host_cpu")}, rules, now)
+                  .contains(QStringLiteral("silenced: host_cpu"))
+                  && silencedNoteText({}, rules, now).isEmpty(),
+              "silence: the muted-monitor note is per live window");
+    }
+
+    {
+        // M75: monitor-driven chart bands (Grafana threshold vocabulary) and
+        // the healthy-only process predicate.
+        check(bandStateForSeverity(QStringLiteral("critical"))
+                      == QStringLiteral("Error")
+                  && bandStateForSeverity(QStringLiteral("warning"))
+                         == QStringLiteral("Warning")
+                  && bandStateForSeverity(QStringLiteral("ok"))
+                         == QStringLiteral("OK"),
+              "bands: severity maps onto the Grafana state words");
+
+        QList<AlertRule> rules = defaultAlertRules();
+        for (AlertRule &rule : rules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.threshold = 75.0;
+            }
+        }
+        const QList<MonitorBand> bands = monitorBandsFor(
+            rules, {QStringLiteral("app_cpu"), QStringLiteral("host_cpu")});
+        check(bands.size() == 2, "bands: one band per requested monitor");
+        check(bands.at(0).value <= bands.at(1).value,
+              "bands: steps stay sorted by value");
+        bool sawCpu = false;
+        for (const MonitorBand &band : bands) {
+            if (band.id == QStringLiteral("app_cpu")) {
+                sawCpu = band.value == 75.0 && band.above
+                    && band.state == QStringLiteral("Error")
+                    && band.unit == QStringLiteral("%");
+            }
+        }
+        check(sawCpu, "bands: the edited threshold and direction carry over");
+        check(monitorBandsFor(rules, {QStringLiteral("nope")}).isEmpty(),
+              "bands: an unknown monitor id yields no band");
+
+        MonitorBand lower;
+        lower.value = 10.0;
+        lower.unit = QStringLiteral("% free");
+        lower.above = false;
+        lower.state = QStringLiteral("Error");
+        check(bandVisible(lower, 0.0, 100.0)
+                  && !bandVisible(lower, 20.0, 100.0),
+              "bands: a threshold outside the axis is not painted");
+        check(bandLabelText(lower) == QStringLiteral("Error 10% free"),
+              "bands: the label reads like the Grafana threshold step");
+
+        check(processRowBreaches(95.0, 0.2, 90.0, 1.0)
+                  && processRowBreaches(1.0, 1.5, 90.0, 1.0)
+                  && !processRowBreaches(4.0, 0.3, 90.0, 1.0),
+              "healthy-only: cpu or rss above its monitor line hides the row");
+        check(!processRowBreaches(100.0, 9.0, 0.0, 0.0),
+              "healthy-only: a disabled monitor (0) never hides a row");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

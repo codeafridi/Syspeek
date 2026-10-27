@@ -532,6 +532,7 @@ int main(int argc, char *argv[]) {
         hud.setMonitors(config.alertRules.isEmpty()
                             ? defaultAlertRules()
                             : config.alertRules);
+        hud.setSilences(config.silences.rules);
         hud.setWebhookConfig(config.webhook);
         hud.setExportIntervalMs(config.sampleIntervalMs);
         hud.setHistoryStore(historyDefaultPath(),

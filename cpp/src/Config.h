@@ -7,6 +7,7 @@
 #include <QtGlobal>
 
 #include "AlertEngine.h"
+#include "AlertSilence.h"
 
 struct HealthConfig {
     double cpuWarnPercent = 70.0;
@@ -138,6 +139,13 @@ struct FimConfig {
     bool watch = true;
 };
 
+struct SilencesConfig {
+    // [silences]: <matcher>=<duration> for a rolling silence authored in the
+    // config, or <matcher>_until=<epoch ms> + <matcher>_comment=... for one
+    // the HUD authored (absolute bounds survive a restart).
+    QList<SilenceRule> rules;
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
@@ -150,6 +158,7 @@ struct Config {
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
     HistoryConfig history;
+    SilencesConfig silences;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;
@@ -165,5 +174,7 @@ Config loadConfig(const QString &path, QString *errorMessage);
 
 void saveAlertOverrides(const QString &path,
                         const QList<AlertRule> &rules);
+
+void saveSilences(const QString &path, const QList<SilenceRule> &rules);
 
 QString defaultConfigPath();
