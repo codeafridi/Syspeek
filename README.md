@@ -340,6 +340,27 @@ incoming-webhook message (`text` + `attachments[]` with `color`, `title`,
 batch); alerts that clear between ticks produce a `resolved` event. The Settings
 view shows the configured target and the last delivery result.
 
+**Process / unit / container actions** — on by default, and refused loudly
+rather than silently when a permission or an OS does not allow a verb. Every
+verb is available from the page that shows the target: the **Processes** page
+sends signals (TERM/KILL/HUP, pause/resume), changes the nice value
+(`NICE ±5`, relative like `htop`'s priority editor), sets the block-I/O
+priority (`IONICE` class/level) and moves `oom_score_adj`; the **Services**
+page restarts the selected unit through the supervisor (`systemctl restart`,
+`launchctl kickstart -k`, SCM); the **Containers** page starts/stops/restarts
+through the local Docker Engine API. TERM and KILL require a second press on
+the same row — no modal dialog, and the status line names the target. Kill the
+whole feature off with:
+
+```ini
+[actions]
+enabled = false
+```
+
+Actions never run as root and never elevate: a verb your user cannot perform
+comes back with the OS reason (`Operation not permitted`, `systemctl` stderr)
+on the page. Nothing is sent anywhere — the verbs act on this machine only.
+
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:
 Settings → DIAGNOSTICS → **EXPORT CSV** / **EXPORT JSON** (files land in

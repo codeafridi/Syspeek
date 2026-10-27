@@ -534,6 +534,7 @@ int main(int argc, char *argv[]) {
                             : config.alertRules);
         hud.setSilences(config.silences.rules);
         hud.setWebhookConfig(config.webhook);
+        hud.setActionsEnabled(config.actions.enabled);
         hud.setExportIntervalMs(config.sampleIntervalMs);
         hud.setHistoryStore(historyDefaultPath(),
                             config.history.enabled ? config.history.samples : 0);
@@ -612,6 +613,18 @@ int main(int argc, char *argv[]) {
                          logLine(dockerSummaryText(snapshot));
                          hud.setDockerSnapshot(snapshot);
                      });
+    QObject::connect(&hud, &HudWindow::containerActionRequested, docker,
+                     &DockerSource::containerAction);
+    QObject::connect(docker, &DockerSource::containerActionFinished, &hud,
+                     [&hud](const QString &verb, const QString &id, bool ok,
+                            const QString &error) {
+                         const QString text =
+                             ok ? QStringLiteral("docker %1 %2 ok")
+                                      .arg(verb, id.left(12))
+                                : QStringLiteral("docker %1 %2 failed: %3")
+                                      .arg(verb, id.left(12), error);
+                         hud.setContainerActionStatus(text, ok);
+                     });
     dockerThread->start();
 
     auto *kubeThread = new QThread;
@@ -638,6 +651,17 @@ int main(int argc, char *argv[]) {
                      [&hud](const ServicesSnapshot &snapshot) {
                          logLine(servicesSummaryText(snapshot));
                          hud.setServicesSnapshot(snapshot);
+                     });
+    QObject::connect(&hud, &HudWindow::serviceRestartRequested, services,
+                     &ServicesSource::restartUnit);
+    QObject::connect(services, &ServicesSource::unitActionFinished, &hud,
+                     [&hud](const QString &verb, const QString &unit, bool ok,
+                            const QString &error) {
+                         const QString text =
+                             ok ? QStringLiteral("%1 %2 ok").arg(verb, unit)
+                                : QStringLiteral("%1 %2 failed: %3")
+                                      .arg(verb, unit, error);
+                         hud.setServiceActionStatus(text, ok);
                      });
     servicesThread->start();
 

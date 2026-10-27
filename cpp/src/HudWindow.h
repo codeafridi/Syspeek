@@ -5,6 +5,7 @@
 #include "DockerStatus.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
+#include "ProcessActions.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
 
@@ -57,10 +58,22 @@ public:
     void applyMonitorChange(const AlertRule &rule);
     void resetMonitors();
 
+    // M78 verbs: process actions are applied in-process through the platform
+    // seam; service/container verbs are forwarded to their own source
+    // objects (they own the supervisor / Engine API sockets).
+    void applyProcessAction(const ProcessAction &action);
+    void setActionsEnabled(bool enabled);
+    void setServiceActionStatus(const QString &text, bool ok);
+    void setContainerActionStatus(const QString &text, bool ok);
+
     // M75 silences: authored quiet windows over single monitors.
     void setSilences(const QList<SilenceRule> &rules);
     void addSilence(const QString &matcher, int minutes);
     void expireSilence(const QString &matcher);
+
+signals:
+    void serviceRestartRequested(const QString &unit);
+    void containerActionRequested(const QString &id, const QString &verb);
 
 public:
 
@@ -151,6 +164,7 @@ private:
     QPushButton *m_showHideButton = nullptr;
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
+    bool m_actionsEnabled = true;
     bool m_compact = false;
 
     bool m_dragging = false;

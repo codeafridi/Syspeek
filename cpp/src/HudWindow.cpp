@@ -253,6 +253,12 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::addSilence);
     connect(m_panel, &DashboardPanel::silenceExpireRequested, this,
             &HudWindow::expireSilence);
+    connect(m_panel, &DashboardPanel::processActionRequested, this,
+            &HudWindow::applyProcessAction);
+    connect(m_panel, &DashboardPanel::serviceRestartRequested, this,
+            &HudWindow::serviceRestartRequested);
+    connect(m_panel, &DashboardPanel::containerActionRequested, this,
+            &HudWindow::containerActionRequested);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -707,6 +713,44 @@ void HudWindow::resetMonitors() {
     m_alerts.resetRules();
     saveAlertOverrides(defaultConfigPath(), m_alerts.rules());
     setMonitors(m_alerts.rules());
+}
+
+void HudWindow::setActionsEnabled(bool enabled) {
+    m_actionsEnabled = enabled;
+}
+
+void HudWindow::applyProcessAction(const ProcessAction &action) {
+    if (m_panel == nullptr) {
+        return;
+    }
+    if (!m_actionsEnabled) {
+        m_panel->setActionStatus(
+            QStringLiteral("%1 refused: actions are disabled in [actions]")
+                .arg(processActionLabel(action)),
+            false);
+        return;
+    }
+    QString error;
+    const bool ok = systemBackend().applyProcessAction(action, &error);
+    const QString text = processActionResultText(action, ok, error);
+    m_panel->setActionStatus(text, ok);
+    if (ok) {
+        qInfo().noquote() << QStringLiteral("[actions]") << text;
+    } else {
+        qWarning().noquote() << QStringLiteral("[actions]") << text;
+    }
+}
+
+void HudWindow::setServiceActionStatus(const QString &text, bool ok) {
+    if (m_panel != nullptr) {
+        m_panel->setServiceStatus(text, ok);
+    }
+}
+
+void HudWindow::setContainerActionStatus(const QString &text, bool ok) {
+    if (m_panel != nullptr) {
+        m_panel->setContainerStatus(text, ok);
+    }
 }
 
 void HudWindow::setSilences(const QList<SilenceRule> &rules) {

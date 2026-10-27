@@ -6,6 +6,7 @@
 #include "JournalStatus.h"
 #include "KubeStatus.h"
 #include "MetricStore.h"
+#include "ProcessActions.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
 #include "AlertSilence.h"
@@ -113,6 +114,11 @@ public:
     // page; the engine keeps evaluating, notification paths stay quiet.
     void setSilences(const QList<SilenceRule> &rules);
 
+    // M78: last verb outcome, rendered on the page that asked for it.
+    void setActionStatus(const QString &text, bool ok);
+    void setServiceStatus(const QString &text, bool ok);
+    void setContainerStatus(const QString &text, bool ok);
+
 signals:
     void collapseRequested();
     void monitorChanged(const AlertRule &rule);
@@ -121,6 +127,9 @@ signals:
     void historySeekRequested(int index);
     void silenceRequested(const QString &monitorId, int minutes);
     void silenceExpireRequested(const QString &monitorId);
+    void processActionRequested(const ProcessAction &action);
+    void serviceRestartRequested(const QString &unit);
+    void containerActionRequested(const QString &id, const QString &verb);
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
@@ -172,6 +181,11 @@ private:
     bool m_osGpu = true;
     bool m_osGpuClients = true;
     bool m_osGpuProcess = true;
+    bool m_osProcessSignals = true;
+    bool m_osProcessRenice = true;
+    bool m_osProcessIonice = true;
+    bool m_osProcessOomScore = true;
+    bool m_osProcessPause = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
@@ -352,12 +366,32 @@ private:
     QLabel *m_silenceList = nullptr;
     QCheckBox *m_procHealthyOnly = nullptr;
     QLabel *m_procFilterNote = nullptr;
+    QLabel *m_procActionsNote = nullptr;
+    QLabel *m_actionStatus = nullptr;
+    QLabel *m_serviceActionsNote = nullptr;
+    QLabel *m_serviceStatus = nullptr;
+    QLabel *m_containerActionsNote = nullptr;
+    QLabel *m_containerStatus = nullptr;
+    QComboBox *m_servicePick = nullptr;
+    QComboBox *m_containerPick = nullptr;
+    QPushButton *m_serviceRestart = nullptr;
+    QPushButton *m_containerStart = nullptr;
+    QPushButton *m_containerStop = nullptr;
+    QPushButton *m_containerRestart = nullptr;
+    QList<QPushButton *> m_processActionButtons;
     QList<ProcessRow> m_lastProcessRows;
+    int m_confirmPid = 0;
+    ProcessSignal m_confirmSignal = ProcessSignal::Term;
     bool m_procFilterActive = false;
     void updateSilencesPanel();
     void requestSilence();
     void expireSelectedSilence();
     void populateProcessTree(const QList<ProcessRow> &rows);
+    int selectedProcessPid() const;
+    QString selectedProcessName() const;
+    void triggerProcessAction(const QString &id);
+    QPushButton *makeActionButton(const QString &text, const QString &id,
+                                  QWidget *parent);
     QSet<QString> m_alertSeen;
     quint64 m_alertsFired = 0;
     quint64 m_alertsResolved = 0;

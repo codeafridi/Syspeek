@@ -3,6 +3,7 @@
 #include "DiskStatus.h"
 #include "GpuStatus.h"
 #include "LinuxProcess.h"
+#include "ProcessActions.h"
 #include "ProcessIdentity.h"
 #include "ProfileStatus.h"
 #include "SecurityStatus.h"
@@ -32,6 +33,14 @@ struct PlatformCapabilities {
     bool gpuProcessData = false;
     // The fdinfo client API specifically (Linux): per-process engine deltas.
     bool gpuClients = false;
+    // M78 process verbs. Signals exist everywhere; nice is POSIX + Windows
+    // priority classes; ioprio and oom_score_adj are Linux-only surfaces.
+    bool processSignals = false;
+    bool processRenice = false;
+    bool processIonice = false;
+    bool processOomScore = false;
+    // SIGSTOP/SIGCONT: POSIX only (Windows has no process suspend verb here).
+    bool processPause = false;
 };
 
 class SystemBackend {
@@ -120,6 +129,18 @@ public:
         Q_UNUSED(pid);
         Q_UNUSED(ticks);
         Q_UNUSED(startTime);
+        return false;
+    }
+    // M78: apply one process verb. Implementations report the errno / API
+    // error text so the console can state exactly why a verb was refused
+    // instead of pretending it worked.
+    virtual bool applyProcessAction(const ProcessAction &action,
+                                    QString *error) {
+        Q_UNUSED(action);
+        if (error != nullptr) {
+            *error = QStringLiteral("process actions are not supported on %1")
+                         .arg(platformName());
+        }
         return false;
     }
     virtual bool totalCpuTicks(unsigned long long &out) {
@@ -250,5 +271,15 @@ public:
     // own source strategies and do not fill this.
     virtual QList<ServiceRecord> readServices() {
         return QList<ServiceRecord>();
+    }
+    // M78: restart one unit through the platform supervisor. Linux/macOS go
+    // through their own tools in ServicesSource; Windows uses the SCM.
+    virtual bool restartService(const QString &name, QString *error) {
+        Q_UNUSED(name);
+        if (error != nullptr) {
+            *error = QStringLiteral("service restart is not supported on %1")
+                         .arg(platformName());
+        }
+        return false;
     }
 };

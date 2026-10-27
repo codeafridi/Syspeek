@@ -167,3 +167,75 @@ void ServicesSource::emitFailure(const QString &message) {
         m_timer->start(m_intervalMs);
     }
 }
+
+void ServicesSource::restartUnit(const QString &unit) {
+    const QString target = unit.trimmed();
+    if (target.isEmpty()) {
+        emit unitActionFinished(QStringLiteral("restart"), unit, false,
+                                QStringLiteral("no unit selected"));
+        return;
+    }
+
+    QString error;
+    bool ok = false;
+
+#if defined(Q_OS_MACOS)
+    const QString launchctl =
+        QStandardPaths::findExecutable(QStringLiteral("launchctl"));
+    if (launchctl.isEmpty()) {
+        error = QStringLiteral("launchctl not found");
+    } else {
+        QProcess process;
+        process.start(launchctl,
+                      {QStringLiteral("kickstart"), QStringLiteral("-k"),
+                       QStringLiteral("gui/%1/%2").arg(::getuid()).arg(target)});
+        if (!process.waitForFinished(15000)) {
+            process.kill();
+            process.waitForFinished(200);
+            error = QStringLiteral("launchctl kickstart timed out");
+        } else if (process.exitStatus() != QProcess::NormalExit
+                   || process.exitCode() != 0) {
+            error = QString::fromLocal8Bit(process.readAllStandardError())
+                        .trimmed()
+                        .left(160);
+            if (error.isEmpty()) {
+                error = QStringLiteral("launchctl kickstart failed");
+            }
+        } else {
+            ok = true;
+        }
+    }
+#elif defined(Q_OS_WIN)
+    ok = systemBackend().restartService(target, &error);
+#else
+    const QString systemctl =
+        QStandardPaths::findExecutable(QStringLiteral("systemctl"));
+    if (systemctl.isEmpty()) {
+        error = QStringLiteral("systemctl not found");
+    } else {
+        QProcess process;
+        process.start(systemctl, {QStringLiteral("restart"), target});
+        if (!process.waitForFinished(15000)) {
+            process.kill();
+            process.waitForFinished(200);
+            error = QStringLiteral("systemctl restart timed out");
+        } else if (process.exitStatus() != QProcess::NormalExit
+                   || process.exitCode() != 0) {
+            error = QString::fromLocal8Bit(process.readAllStandardError())
+                        .trimmed()
+                        .left(160);
+            if (error.isEmpty()) {
+                error = QStringLiteral("systemctl restart failed");
+            }
+        } else {
+            ok = true;
+        }
+    }
+#endif
+
+    emit unitActionFinished(QStringLiteral("restart"), target, ok, error);
+    if (m_timer != nullptr) {
+        m_timer->stop();
+    }
+    QTimer::singleShot(0, this, &ServicesSource::onTimeout);
+}

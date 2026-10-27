@@ -148,6 +148,13 @@ struct SilencesConfig {
     QList<SilenceRule> rules;
 };
 
+struct ActionsConfig {
+    // [actions] enabled: the master switch for every M78 verb (process
+    // signals, renice/ionice/oom_score_adj, unit restart, container
+    // lifecycle). Off means the console reports the refusal, nothing runs.
+    bool enabled = true;
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
@@ -161,6 +168,7 @@ struct Config {
     MetricsConfig metrics;
     HistoryConfig history;
     SilencesConfig silences;
+    ActionsConfig actions;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;

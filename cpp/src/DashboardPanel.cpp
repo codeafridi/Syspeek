@@ -241,6 +241,7 @@ QString DashboardPanel::unsupportedOsText() const {
 DashboardPanel::DashboardPanel(QWidget *parent)
     : QWidget(parent) {
     setObjectName(QStringLiteral("ddRoot"));
+    qRegisterMetaType<ProcessAction>("ProcessAction");
 
     const PlatformCapabilities osCaps = systemBackend().capabilities();
     m_osTcpCounters = osCaps.tcpCounters;
@@ -256,6 +257,11 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osGpu = osCaps.gpu;
     m_osGpuClients = osCaps.gpuClients;
     m_osGpuProcess = osCaps.gpuProcessData;
+    m_osProcessSignals = osCaps.processSignals;
+    m_osProcessRenice = osCaps.processRenice;
+    m_osProcessIonice = osCaps.processIonice;
+    m_osProcessOomScore = osCaps.processOomScore;
+    m_osProcessPause = osCaps.processPause;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -557,6 +563,15 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "  padding: 3px 12px; font-size: 9px; }"
         "#ddHistFirst:hover, #ddHistPrev:hover, #ddHistNext:hover,"
         " #ddHistLast:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddActionBtn { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  padding: 3px 10px; font-size: 9px; }"
+        "#ddActionBtn:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddActionBtn:disabled { color: %MUTED%; border-color: %BORDER%; }"
+        "#ddProcActionsNote, #ddContainerActionsNote, #ddServiceActionsNote"
+        " { color: %MUTED%; }"
+        "#ddActionStatus, #ddContainerStatus, #ddServiceStatus"
+        " { color: %DIM%; }"
         "#ddHistFirst:disabled, #ddHistPrev:disabled, #ddHistNext:disabled,"
         " #ddHistLast:disabled { color: %MUTED%; }"
         "#ddHistSlider::groove:horizontal { background-color: %BORDER%;"
@@ -1438,8 +1453,9 @@ QWidget *DashboardPanel::buildProcessesView() {
                               QStringLiteral("FDs"), QStringLiteral("RSS"),
                               QStringLiteral("PORTS")});
     m_procs->setRootIsDecorated(true);
-    m_procs->setSelectionMode(QAbstractItemView::NoSelection);
-    m_procs->setFocusPolicy(Qt::NoFocus);
+    m_procs->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_procs->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_procs->setFocusPolicy(Qt::ClickFocus);
     m_procs->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     for (int i = 1; i < 11; ++i) {
         m_procs->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
@@ -1490,6 +1506,96 @@ QWidget *DashboardPanel::buildProcessesView() {
     procBoxLayout->addWidget(m_procHealthyOnly);
     procBoxLayout->addWidget(m_procFilterNote);
     layout->addWidget(makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
+
+    // --- M78 verbs. htop's model: the row is the target, the panel offers
+    // the verbs ("Send signal:", "set IO priority", "Nice value"). Every
+    // button states its refusal honestly when the OS or the permissions say
+    // no instead of silently doing nothing.
+    m_procActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_procActionsNote->setObjectName(QStringLiteral("ddProcActionsNote"));
+    m_procActionsNote->setFont(monoFont(10));
+    m_procActionsNote->setWordWrap(true);
+    m_procActionsNote->setMinimumWidth(1);
+
+    auto *signalRow = new QHBoxLayout();
+    signalRow->setSpacing(6);
+    auto *niceRow = new QHBoxLayout();
+    niceRow->setSpacing(6);
+
+    const auto addButton = [&](QHBoxLayout *row, const QString &text,
+                               const QString &id, bool enabled) {
+        QPushButton *button = makeActionButton(text, id, view);
+        button->setEnabled(enabled);
+        row->addWidget(button);
+        return button;
+    };
+
+    addButton(signalRow, QStringLiteral("TERM"), QStringLiteral("term"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("KILL"), QStringLiteral("kill"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("HUP"), QStringLiteral("hup"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("PAUSE"), QStringLiteral("pause"),
+              m_osProcessSignals && m_osProcessPause);
+    addButton(signalRow, QStringLiteral("RESUME"), QStringLiteral("resume"),
+              m_osProcessSignals && m_osProcessPause);
+    signalRow->addStretch(1);
+
+    addButton(niceRow, QStringLiteral("NICE +5"), QStringLiteral("nice-up"),
+              m_osProcessRenice);
+    addButton(niceRow, QStringLiteral("NICE -5"), QStringLiteral("nice-down"),
+              m_osProcessRenice);
+    addButton(niceRow, QStringLiteral("I/O IDLE"), QStringLiteral("io-idle"),
+              m_osProcessIonice);
+    addButton(niceRow, QStringLiteral("I/O BE"), QStringLiteral("io-be"),
+              m_osProcessIonice);
+    addButton(niceRow, QStringLiteral("OOM +500"), QStringLiteral("oom-up"),
+              m_osProcessOomScore);
+    addButton(niceRow, QStringLiteral("OOM -500"), QStringLiteral("oom-down"),
+              m_osProcessOomScore);
+    niceRow->addStretch(1);
+
+    m_actionStatus = new QLabel(QStringLiteral("--"), view);
+    m_actionStatus->setObjectName(QStringLiteral("ddActionStatus"));
+    m_actionStatus->setFont(monoFont(10));
+    m_actionStatus->setWordWrap(true);
+    m_actionStatus->setMinimumWidth(1);
+
+    auto *actionBox = new QWidget(view);
+    auto *actionLayout = new QVBoxLayout(actionBox);
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(6);
+    actionLayout->addWidget(m_procActionsNote);
+    actionLayout->addLayout(signalRow);
+    actionLayout->addLayout(niceRow);
+    actionLayout->addWidget(m_actionStatus);
+    layout->addWidget(makeBanner(QStringLiteral("ACTIONS"),
+                                 ui_theme::crit(), view));
+    layout->addWidget(makeCard(QStringLiteral("SIGNALS / PRIORITY"),
+                               actionBox, view));
+
+    if (!m_osProcessSignals) {
+        m_procActionsNote->setText(unsupportedOsText());
+    } else {
+        QStringList missing;
+        if (!m_osProcessIonice) {
+            missing.append(QStringLiteral("i/o priority"));
+        }
+        if (!m_osProcessOomScore) {
+            missing.append(QStringLiteral("oom_score_adj"));
+        }
+        if (!m_osProcessPause) {
+            missing.append(QStringLiteral("pause/resume"));
+        }
+        m_procActionsNote->setText(
+            missing.isEmpty()
+                ? QStringLiteral("select a row, then a verb; TERM/KILL ask "
+                                 "for a second press")
+                : QStringLiteral("select a row, then a verb - not available "
+                                 "on %1: %2")
+                      .arg(m_osName, missing.join(QStringLiteral(", "))));
+    }
 
     // --- CPU / load history (Syspeek-own fleet counters).
     m_chartProcTotals = new TimeseriesChart(view);
@@ -1928,6 +2034,76 @@ QWidget *DashboardPanel::buildContainersView() {
     layout->addWidget(
         makeCard(QStringLiteral("CONTAINERS"), m_dockerTable, view), 2);
 
+    // --- M78 lifecycle verbs, same Engine API the shipped docker CLI uses.
+    m_containerPick = new QComboBox(view);
+    m_containerPick->setObjectName(QStringLiteral("ddContainerPick"));
+    m_containerPick->setFont(monoFont(10));
+    m_containerPick->setMinimumWidth(1);
+
+    m_containerStart = new QPushButton(QStringLiteral("START"), view);
+    m_containerStart->setObjectName(QStringLiteral("ddActionBtn"));
+    m_containerStop = new QPushButton(QStringLiteral("STOP"), view);
+    m_containerStop->setObjectName(QStringLiteral("ddActionBtn"));
+    m_containerRestart = new QPushButton(QStringLiteral("RESTART"), view);
+    m_containerRestart->setObjectName(QStringLiteral("ddActionBtn"));
+    for (QPushButton *button :
+         {m_containerStart, m_containerStop, m_containerRestart}) {
+        button->setFont(monoFont(10));
+        button->setCursor(Qt::PointingHandCursor);
+        button->setEnabled(false);
+    }
+
+    const auto emitContainer = [this](const QString &verb) {
+        if (m_containerPick == nullptr) {
+            return;
+        }
+        const QString id = m_containerPick->currentData().toString();
+        if (id.isEmpty()) {
+            return;
+        }
+        emit containerActionRequested(id, verb);
+    };
+    connect(m_containerStart, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("start")); });
+    connect(m_containerStop, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("stop")); });
+    connect(m_containerRestart, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("restart")); });
+
+    m_containerStatus = new QLabel(QStringLiteral("--"), view);
+    m_containerStatus->setObjectName(QStringLiteral("ddContainerStatus"));
+    m_containerStatus->setFont(monoFont(10));
+    m_containerStatus->setWordWrap(true);
+    m_containerStatus->setMinimumWidth(1);
+    m_containerActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_containerActionsNote->setObjectName(QStringLiteral("ddContainerActionsNote"));
+    m_containerActionsNote->setFont(monoFont(10));
+    m_containerActionsNote->setWordWrap(true);
+    m_containerActionsNote->setMinimumWidth(1);
+    m_containerActionsNote->setText(QStringLiteral(
+        "start/stop/restart go through the local Docker Engine API; the "
+        "next poll shows the new state"));
+
+    auto *containerPickRow = new QHBoxLayout();
+    containerPickRow->setSpacing(6);
+    containerPickRow->addWidget(m_containerPick, 1);
+    containerPickRow->addWidget(m_containerStart);
+    containerPickRow->addWidget(m_containerStop);
+    containerPickRow->addWidget(m_containerRestart);
+
+    auto *containerActionBox = new QWidget(view);
+    auto *containerActionLayout = new QVBoxLayout(containerActionBox);
+    containerActionLayout->setContentsMargins(0, 0, 0, 0);
+    containerActionLayout->setSpacing(6);
+    containerActionLayout->addLayout(containerPickRow);
+    containerActionLayout->addWidget(m_containerActionsNote);
+    containerActionLayout->addWidget(m_containerStatus);
+
+    layout->addWidget(makeBanner(QStringLiteral("LIFECYCLE"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("CONTAINER ACTIONS"),
+                               containerActionBox, view));
+
     // --- Running-count history (Syspeek-own counter).
     m_chartDocker = new TimeseriesChart(view);
     m_chartDocker->setUnit(QStringLiteral("Count"));
@@ -2178,6 +2354,65 @@ QWidget *DashboardPanel::buildServicesView() {
         makeCard(QStringLiteral("SYSTEMD"), m_servicesSummary, view));
     layout->addWidget(
         makeCard(QStringLiteral("SERVICES"), m_services, view), 2);
+
+    // --- M78 restart verb: the supervisor's own restart path, not a fresh
+    // install of the unit (systemctl restart / launchctl kickstart -k / SCM).
+    m_servicePick = new QComboBox(view);
+    m_servicePick->setObjectName(QStringLiteral("ddServicePick"));
+    m_servicePick->setFont(monoFont(10));
+    m_servicePick->setMinimumWidth(1);
+    m_serviceRestart = new QPushButton(QStringLiteral("RESTART"), view);
+    m_serviceRestart->setObjectName(QStringLiteral("ddActionBtn"));
+    m_serviceRestart->setFont(monoFont(10));
+    m_serviceRestart->setCursor(Qt::PointingHandCursor);
+    m_serviceRestart->setEnabled(false);
+    connect(m_serviceRestart, &QPushButton::clicked, this, [this]() {
+        if (m_servicePick == nullptr) {
+            return;
+        }
+        const QString unit = m_servicePick->currentText();
+        if (!unit.isEmpty()) {
+            emit serviceRestartRequested(unit);
+        }
+    });
+
+    m_serviceStatus = new QLabel(QStringLiteral("--"), view);
+    m_serviceStatus->setObjectName(QStringLiteral("ddServiceStatus"));
+    m_serviceStatus->setFont(monoFont(10));
+    m_serviceStatus->setWordWrap(true);
+    m_serviceStatus->setMinimumWidth(1);
+    m_serviceActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_serviceActionsNote->setObjectName(QStringLiteral("ddServiceActionsNote"));
+    m_serviceActionsNote->setFont(monoFont(10));
+    m_serviceActionsNote->setWordWrap(true);
+    m_serviceActionsNote->setMinimumWidth(1);
+    m_serviceActionsNote->setText(
+        m_osName == QStringLiteral("windows")
+            ? QStringLiteral("restart stops and starts the service through "
+                             "the Windows service manager")
+            : m_osName == QStringLiteral("macos")
+                  ? QStringLiteral("restart uses launchctl kickstart -k for "
+                                   "the selected label")
+                  : QStringLiteral("restart uses systemctl restart for the "
+                                   "selected unit"));
+
+    auto *servicePickRow = new QHBoxLayout();
+    servicePickRow->setSpacing(6);
+    servicePickRow->addWidget(m_servicePick, 1);
+    servicePickRow->addWidget(m_serviceRestart);
+
+    auto *serviceActionBox = new QWidget(view);
+    auto *serviceActionLayout = new QVBoxLayout(serviceActionBox);
+    serviceActionLayout->setContentsMargins(0, 0, 0, 0);
+    serviceActionLayout->setSpacing(6);
+    serviceActionLayout->addLayout(servicePickRow);
+    serviceActionLayout->addWidget(m_serviceActionsNote);
+    serviceActionLayout->addWidget(m_serviceStatus);
+
+    layout->addWidget(makeBanner(QStringLiteral("UNIT ACTIONS"),
+                                 ui_theme::crit(), view));
+    layout->addWidget(makeCard(QStringLiteral("RESTART UNIT"),
+                               serviceActionBox, view));
 
     layout->addWidget(makeBanner(QStringLiteral("CHANGE TIMELINE"),
         ui_theme::warn(), view));
@@ -5001,6 +5236,9 @@ void DashboardPanel::populateProcessTree(const QList<ProcessRow> &rows) {
     if (m_procs == nullptr) {
         return;
     }
+    // The tree is rebuilt every tick; a selected row must survive it or the
+    // action buttons would lose their target once per second.
+    const int previousPid = selectedProcessPid();
     m_populating = true;
     m_procs->clear();
     QList<QTreeWidgetItem *> byDepth;
@@ -5081,6 +5319,10 @@ void DashboardPanel::populateProcessTree(const QList<ProcessRow> &rows) {
     for (QTreeWidgetItem *item : allItems) {
         item->setExpanded(
             !m_collapsedPids.contains(item->data(0, Qt::UserRole).toInt()));
+        if (previousPid > 0
+            && item->data(0, Qt::UserRole).toInt() == previousPid) {
+            m_procs->setCurrentItem(item);
+        }
     }
     m_populating = false;
 
@@ -5111,6 +5353,7 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
     m_dockerTable->clear();
     for (const DockerContainer &container : snapshot.containers) {
         auto *item = new QTreeWidgetItem(m_dockerTable);
+        item->setData(0, Qt::UserRole, container.id);
         item->setText(0, container.name.isEmpty() ? container.id
                                                   : container.name);
         item->setText(1, container.image);
@@ -5161,6 +5404,49 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
         && (snapshot.state == DockerState::Ok
             || snapshot.state == DockerState::Stale)) {
         m_chartDocker->push(static_cast<double>(snapshot.runningCount));
+    }
+
+    // Lifecycle picker: an id can vanish between polls (container removed),
+    // so the previous choice is restored by id and the verbs disable
+    // themselves when nothing is left to act on.
+    if (m_containerPick != nullptr) {
+        const QString previous = m_containerPick->currentData().toString();
+        QSignalBlocker blocker(m_containerPick);
+        m_containerPick->clear();
+        int restore = -1;
+        for (const DockerContainer &container : snapshot.containers) {
+            const QString label =
+                QStringLiteral("%1 (%2)")
+                    .arg(container.name.isEmpty() ? container.id
+                                                  : container.name,
+                         container.id.left(12));
+            m_containerPick->addItem(label, container.id);
+            if (!previous.isEmpty() && container.id == previous) {
+                restore = m_containerPick->count() - 1;
+            }
+        }
+        if (restore >= 0) {
+            m_containerPick->setCurrentIndex(restore);
+        }
+        const bool usable =
+            m_containerPick->count() > 0
+            && (snapshot.state == DockerState::Ok
+                || snapshot.state == DockerState::Stale);
+        for (QPushButton *button :
+             {m_containerStart, m_containerStop, m_containerRestart}) {
+            if (button != nullptr) {
+                button->setEnabled(usable);
+            }
+        }
+        if (m_containerActionsNote != nullptr) {
+            m_containerActionsNote->setText(
+                usable
+                    ? QStringLiteral("start/stop/restart go through the local "
+                                     "Docker Engine API; the next poll shows "
+                                     "the new state")
+                    : QStringLiteral("no container to act on - %1")
+                          .arg(dockerSummaryText(snapshot)));
+        }
     }
 }
 
@@ -5327,6 +5613,51 @@ void DashboardPanel::setServicesSnapshot(const ServicesSnapshot &snapshot) {
     m_servicesChanges->setText(snapshot.available
                                    ? servicesChangesText(snapshot.changes)
                                    : QStringLiteral("--"));
+
+    // M78 restart picker: fill from every unit the sampler knows about,
+    // restore the previous choice by name, disable when there is nothing
+    // to restart.
+    if (m_servicePick != nullptr) {
+        const QString previous = m_servicePick->currentText();
+        QSignalBlocker blocker(m_servicePick);
+        m_servicePick->clear();
+        for (const UnitRow &row : snapshot.units) {
+            m_servicePick->addItem(row.name);
+        }
+        if (!previous.isEmpty()) {
+            const int restore = m_servicePick->findText(previous);
+            if (restore >= 0) {
+                m_servicePick->setCurrentIndex(restore);
+            }
+        }
+        const bool usable = snapshot.available && m_servicePick->count() > 0;
+        if (m_serviceRestart != nullptr) {
+            m_serviceRestart->setEnabled(usable);
+        }
+        if (m_serviceActionsNote != nullptr) {
+            m_serviceActionsNote->setText(
+                usable
+                    ? (m_osName == QStringLiteral("windows")
+                           ? QStringLiteral("restart stops and starts the "
+                                            "service through the Windows "
+                                            "service manager")
+                           : m_osName == QStringLiteral("macos")
+                                 ? QStringLiteral("restart uses launchctl "
+                                                  "kickstart -k for the "
+                                                  "selected label")
+                                 : QStringLiteral("restart uses systemctl "
+                                                  "restart for the selected "
+                                                  "unit"))
+                    : QStringLiteral("no unit list from %1 (%2)")
+                          .arg(m_osName == QStringLiteral("windows")
+                                   ? QStringLiteral("the service manager")
+                                   : QStringLiteral("the supervisor"),
+                               snapshot.errorMessage.isEmpty()
+                                   ? QStringLiteral("waiting for the first "
+                                                    "sample")
+                                   : snapshot.errorMessage));
+        }
+    }
 }
 
 void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
@@ -6027,4 +6358,142 @@ void DashboardPanel::setFimSnapshot(const FimSnapshot &snapshot) {
         m_secTileFim->setText(m_osFim ? QStringLiteral("--")
                                       : QStringLiteral("n/a"));
     }
+}
+
+QPushButton *DashboardPanel::makeActionButton(const QString &text,
+                                              const QString &id,
+                                              QWidget *parent) {
+    auto *button = new QPushButton(text, parent);
+    button->setObjectName(QStringLiteral("ddActionBtn"));
+    button->setFont(monoFont(10));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setProperty("ddActionId", id);
+    m_processActionButtons.append(button);
+    connect(button, &QPushButton::clicked, this,
+            [this, id]() { triggerProcessAction(id); });
+    return button;
+}
+
+int DashboardPanel::selectedProcessPid() const {
+    if (m_procs == nullptr) {
+        return 0;
+    }
+    const QList<QTreeWidgetItem *> selected = m_procs->selectedItems();
+    if (selected.isEmpty()) {
+        return 0;
+    }
+    return selected.first()->data(0, Qt::UserRole).toInt();
+}
+
+QString DashboardPanel::selectedProcessName() const {
+    if (m_procs == nullptr) {
+        return QString();
+    }
+    const QList<QTreeWidgetItem *> selected = m_procs->selectedItems();
+    if (selected.isEmpty()) {
+        return QString();
+    }
+    return selected.first()->text(0);
+}
+
+void DashboardPanel::triggerProcessAction(const QString &id) {
+    const int pid = selectedProcessPid();
+    if (pid <= 0) {
+        setActionStatus(QStringLiteral("select a process row first"), false);
+        return;
+    }
+
+    ProcessAction action;
+    action.pid = pid;
+    action.name = selectedProcessName();
+
+    if (id == QStringLiteral("term")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Term;
+    } else if (id == QStringLiteral("kill")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Kill;
+    } else if (id == QStringLiteral("hup")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Hup;
+    } else if (id == QStringLiteral("pause")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Stop;
+    } else if (id == QStringLiteral("resume")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Cont;
+    } else if (id == QStringLiteral("nice-up")) {
+        action.kind = ProcessActionKind::Renice;
+        action.niceValue = 5;
+        action.relative = true;
+    } else if (id == QStringLiteral("nice-down")) {
+        action.kind = ProcessActionKind::Renice;
+        action.niceValue = -5;
+        action.relative = true;
+    } else if (id == QStringLiteral("io-idle")) {
+        action.kind = ProcessActionKind::Ionice;
+        action.ioClass = IoPriorityClass::Idle;
+        action.ioLevel = 0;
+    } else if (id == QStringLiteral("io-be")) {
+        action.kind = ProcessActionKind::Ionice;
+        action.ioClass = IoPriorityClass::BestEffort;
+        action.ioLevel = 4;
+    } else if (id == QStringLiteral("oom-up")) {
+        action.kind = ProcessActionKind::OomScore;
+        action.oomScoreAdj = 500;
+        action.relative = true;
+    } else if (id == QStringLiteral("oom-down")) {
+        action.kind = ProcessActionKind::OomScore;
+        action.oomScoreAdj = -500;
+        action.relative = true;
+    } else {
+        return;
+    }
+
+    // Destructive signals ask for a second press on the same row instead of
+    // a modal: the HUD stays usable and the status line states the target.
+    if (processActionNeedsConfirm(action)) {
+        if (m_confirmPid != pid || m_confirmSignal != action.signal) {
+            m_confirmPid = pid;
+            m_confirmSignal = action.signal;
+            if (m_actionStatus != nullptr) {
+                m_actionStatus->setStyleSheet(
+                    QStringLiteral("color: %1;").arg(ui_theme::warn()));
+                m_actionStatus->setText(
+                    QStringLiteral("confirm: %1 - press the same button again")
+                        .arg(processActionConfirmText(action)));
+            }
+            return;
+        }
+    }
+
+    m_confirmPid = 0;
+    emit processActionRequested(action);
+}
+
+void DashboardPanel::setActionStatus(const QString &text, bool ok) {
+    if (m_actionStatus == nullptr) {
+        return;
+    }
+    m_actionStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_actionStatus->setText(text);
+}
+
+void DashboardPanel::setServiceStatus(const QString &text, bool ok) {
+    if (m_serviceStatus == nullptr) {
+        return;
+    }
+    m_serviceStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_serviceStatus->setText(text);
+}
+
+void DashboardPanel::setContainerStatus(const QString &text, bool ok) {
+    if (m_containerStatus == nullptr) {
+        return;
+    }
+    m_containerStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_containerStatus->setText(text);
 }

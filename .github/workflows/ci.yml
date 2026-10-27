@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -152,6 +152,18 @@ jobs:
               print("history ok: %d/%d samples, total %d, %d bytes, span %d ms"
                     % (hist["count"], hist["capacity"], hist["total"],
                        hist["bytes"], hist["spanMs"]))
+          act = d.get("actions", {})
+          assert act.get("signals") is True, act
+          assert act.get("spawned") is True, act
+          assert act.get("signalOk") is True, act
+          assert act.get("childExited") is True, act
+          assert act.get("invalidPidRefused") is True, act
+          assert act.get("renice") is True and act.get("reniceOk") is True, act
+          assert act.get("ionice") is True and act.get("ioniceOk") is True, act
+          assert act.get("oomScore") is True and act.get("oomOk") is True, act
+          print("actions ok: TERM/renice/ionice/oom applied to pid %d, "
+                "invalid pid refused (%s)"
+                % (act["childPid"], act.get("invalidPidError")))
           met = d.get("metrics", {})
           assert met.get("bind") == "127.0.0.1", met
           assert met.get("authRequired") is False, met
@@ -338,6 +350,15 @@ jobs:
           assert met.get("headerRejected") is True, met
           print("metrics endpoint ok: bind %s port %d auth %s"
                 % (met["bind"], met["port"], met["authRequired"]))
+          act = d.get("actions", {})
+          assert act.get("signals") is True, act
+          assert act.get("spawned") is True, act
+          assert act.get("signalOk") is True, act
+          assert act.get("childExited") is True, act
+          assert act.get("invalidPidRefused") is True, act
+          assert act.get("renice") is False and act.get("ionice") is False, act
+          print("actions ok: terminate applied to pid %d, refused: %s"
+                % (act["childPid"], act.get("invalidPidError")))
           depth = d.get("selfDepth", {})
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth

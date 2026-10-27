@@ -19,9 +19,14 @@ public:
 public slots:
     void start();
     void stop();
+    // M78: lifecycle verbs for one container (start|stop|restart). Runs on
+    // the source thread; a refresh is scheduled immediately afterwards.
+    void containerAction(const QString &id, const QString &verb);
 
 signals:
     void dockerReady(const DockerSnapshot &snapshot);
+    void containerActionFinished(const QString &verb, const QString &id,
+                                 bool ok, const QString &error);
 
 private slots:
     void onPollTimeout();

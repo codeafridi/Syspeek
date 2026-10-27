@@ -95,6 +95,8 @@ private:
     QHash<int, QList<ThreadSample>> m_threadCache;
     qint64 m_threadCacheAt = 0;
 #endif
+    bool applyProcessAction(const ProcessAction &action, QString *error) override;
+    bool restartService(const QString &name, QString *error) override;
     bool m_tcpCountersOk = false;
 };
 

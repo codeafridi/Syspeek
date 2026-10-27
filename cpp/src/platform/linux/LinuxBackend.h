@@ -43,6 +43,7 @@ public:
     bool processOom(int pid, linuxproc::OomInfo &out) override;
     bool processDiskCounters(int pid, long long &readBytes,
                              long long &writeBytes) override;
+    bool applyProcessAction(const ProcessAction &action, QString *error) override;
     GpuReading gpuInfo() override;
     bool gpuClients(const QList<int> &pids,
                     QList<GpuEngineSample> &out) override;

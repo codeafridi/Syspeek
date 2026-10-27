@@ -6,6 +6,7 @@
 #include "ProcessDiskStatus.h"
 
 #include "DiskStatus.h"
+#include "ProcessActions.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "HostInfoStatus.h"
@@ -18,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QList>
 #include <QThread>
 
@@ -532,6 +534,88 @@ QString dumpReportJson(int maxProcs) {
         reopened.close();
         QFile::remove(probePath);
         root.insert(QStringLiteral("history"), history);
+    }
+
+    {
+        // M78: exercise every verb against a child this process owns, so the
+        // dump proves the seam end to end (capability, syscall, refusal).
+        QJsonObject actions;
+        const PlatformCapabilities caps = systemBackend().capabilities();
+        actions.insert(QStringLiteral("signals"), caps.processSignals);
+        actions.insert(QStringLiteral("renice"), caps.processRenice);
+        actions.insert(QStringLiteral("ionice"), caps.processIonice);
+        actions.insert(QStringLiteral("oomScore"), caps.processOomScore);
+        actions.insert(QStringLiteral("pause"), caps.processPause);
+
+        QProcess child;
+#if defined(Q_OS_WIN)
+        child.start(QStringLiteral("ping"),
+                    {QStringLiteral("-n"), QStringLiteral("60"),
+                     QStringLiteral("127.0.0.1")});
+#else
+        child.start(QStringLiteral("sleep"), {QStringLiteral("60")});
+#endif
+        bool spawned = child.waitForStarted(3000);
+        const int childPid = spawned ? int(child.processId()) : 0;
+        actions.insert(QStringLiteral("childPid"), childPid);
+
+        bool reniceOk = false;
+        bool ioniceOk = false;
+        bool oomOk = false;
+        bool signalOk = false;
+        QString error;
+
+        ProcessAction action;
+        action.pid = childPid;
+        action.name = QStringLiteral("dump-probe");
+
+        if (childPid > 0 && caps.processRenice) {
+            action.kind = ProcessActionKind::Renice;
+            action.niceValue = 0;
+            action.relative = true;
+            reniceOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processIonice) {
+            action.kind = ProcessActionKind::Ionice;
+            action.ioClass = IoPriorityClass::Idle;
+            action.ioLevel = 0;
+            ioniceOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processOomScore) {
+            action.kind = ProcessActionKind::OomScore;
+            action.oomScoreAdj = 0;
+            action.relative = false;
+            oomOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processSignals) {
+            action.kind = ProcessActionKind::Signal;
+            action.signal = ProcessSignal::Term;
+            signalOk = systemBackend().applyProcessAction(action, &error);
+            if (signalOk) {
+                child.waitForFinished(3000);
+            }
+        }
+        if (child.state() != QProcess::NotRunning) {
+            child.kill();
+            child.waitForFinished(2000);
+        }
+        actions.insert(QStringLiteral("spawned"), spawned);
+        actions.insert(QStringLiteral("reniceOk"), reniceOk);
+        actions.insert(QStringLiteral("ioniceOk"), ioniceOk);
+        actions.insert(QStringLiteral("oomOk"), oomOk);
+        actions.insert(QStringLiteral("signalOk"), signalOk);
+        actions.insert(QStringLiteral("childExited"),
+                       spawned && child.state() == QProcess::NotRunning);
+        // A refused verb must state why, not fail silently.
+        ProcessAction bad;
+        bad.pid = -1;
+        bad.kind = ProcessActionKind::Signal;
+        bad.signal = ProcessSignal::Term;
+        QString refusedError;
+        const bool badOk = systemBackend().applyProcessAction(bad, &refusedError);
+        actions.insert(QStringLiteral("invalidPidRefused"), !badOk);
+        actions.insert(QStringLiteral("invalidPidError"), refusedError);
+        root.insert(QStringLiteral("actions"), actions);
     }
 
     {

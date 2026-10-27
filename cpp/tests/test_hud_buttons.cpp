@@ -3,6 +3,7 @@
 #include "HistoryLog.h"
 #include "TimeseriesChart.h"
 #include "platform/PlatformFactory.h"
+#include "ProcessActions.h"
 
 #include <QApplication>
 #include <QDir>
@@ -1155,6 +1156,96 @@ int main(int argc, char *argv[]) {
         check(!hud.isExpanded() && panel->isHidden(),
               "LESS collapses the overlay in place");
         check(moreButton2->text() == QStringLiteral("MORE"), "LESS -> MORE");
+    }
+
+    // ---- M78 process verbs ----
+    {
+        auto *panel = hud.findChild<DashboardPanel *>();
+        auto *procs = hud.findChild<QTreeWidget *>(QStringLiteral("ddProcs"));
+        auto *status =
+            hud.findChild<QLabel *>(QStringLiteral("ddActionStatus"));
+        check(panel != nullptr && procs != nullptr && status != nullptr,
+              "actions: processes page exposes the tree and a status line");
+
+        DisplaySnapshot snap;
+        snap.appName = QStringLiteral("probe");
+        snap.pid = QStringLiteral("4242");
+        ProcessRow row;
+        row.pid = 4242;
+        row.name = QStringLiteral("worker");
+        row.depth = 0;
+        snap.processes.append(row);
+        hud.setSnapshot(snap);
+
+        check(procs->topLevelItemCount() == 1,
+              "actions: the process tree has the fixture row");
+
+        auto *term = static_cast<QPushButton *>(nullptr);
+        auto *niceUp = static_cast<QPushButton *>(nullptr);
+        for (QPushButton *button : panel->findChildren<QPushButton *>()) {
+            if (button->text() == QStringLiteral("TERM")) {
+                term = button;
+            } else if (button->text() == QStringLiteral("NICE +5")) {
+                niceUp = button;
+            }
+        }
+        check(term != nullptr && niceUp != nullptr,
+              "actions: TERM and NICE +5 buttons exist");
+
+        QList<ProcessAction> emitted;
+        QObject::connect(panel, &DashboardPanel::processActionRequested,
+                         panel, [&emitted](const ProcessAction &action) {
+                             emitted.append(action);
+                         });
+
+        const PlatformCapabilities caps = systemBackend().capabilities();
+        if (caps.processSignals && term != nullptr) {
+            term->click();
+            check(emitted.isEmpty()
+                      && status->text().contains(QStringLiteral("select")),
+                  "actions: TERM without a target states it plainly");
+
+            procs->setCurrentItem(procs->topLevelItem(0));
+            term->click();
+            check(emitted.isEmpty()
+                      && status->text().startsWith(QStringLiteral("confirm:")),
+                  "actions: the first TERM press only asks for confirmation");
+
+            term->click();
+            check(emitted.size() == 1,
+                  "actions: the second TERM press emits the action");
+            if (emitted.size() == 1) {
+                const ProcessAction action = emitted.at(0);
+                check(action.pid == 4242
+                          && action.signal == ProcessSignal::Term
+                          && action.name == QStringLiteral("worker"),
+                      "actions: the emitted TERM carries pid, name and signal");
+            }
+
+            emitted.clear();
+            niceUp->click();
+            check(emitted.size() == 1,
+                  "actions: NICE +5 emits immediately");
+            if (emitted.size() == 1) {
+                const ProcessAction action = emitted.at(0);
+                check(action.kind == ProcessActionKind::Renice
+                          && action.niceValue == 5 && action.relative,
+                      "actions: NICE +5 is a relative renice of 5");
+            }
+        }
+
+        // The selection must survive a tree rebuild (the sampler replaces
+        // every item once per tick).
+        procs->setCurrentItem(procs->topLevelItem(0));
+        hud.setSnapshot(snap);
+        check(procs->currentItem() != nullptr
+                  && procs->currentItem()->data(0, Qt::UserRole).toInt() == 4242,
+              "actions: the selected pid survives a repopulate");
+
+        panel->setActionStatus(QStringLiteral("SIGTERM worker (4242) ok"),
+                               true);
+        check(status->text().contains(QStringLiteral("worker")),
+              "actions: the status line renders a result");
     }
 
     std::printf("%d failure(s)\n", failures);

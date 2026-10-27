@@ -18,6 +18,7 @@ public:
     QList<linuxproc::SocketInfo> readNetSockets() override;
     bool hostSecurityPosture(QList<SecurityFinding> &out) override;
     bool readTcpCounters(TcpCounters &out) override;
+    bool applyProcessAction(const ProcessAction &action, QString *error) override;
 
     bool exists(int pid) override;
     QString comm(int pid) override;

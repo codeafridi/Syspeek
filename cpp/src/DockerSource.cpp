@@ -364,3 +364,63 @@ int DockerSource::nextIntervalMs(DockerState state, bool hasIssues) {
 void DockerSource::resetBackoff() {
     m_backoffMs = m_config.backoffStartMs;
 }
+
+void DockerSource::containerAction(const QString &id, const QString &verb) {
+    if (id.isEmpty()) {
+        return;
+    }
+    if (verb != QStringLiteral("start") && verb != QStringLiteral("stop")
+        && verb != QStringLiteral("restart")) {
+        emit containerActionFinished(verb, id, false,
+                                     QStringLiteral("unknown verb"));
+        return;
+    }
+
+    QString error;
+    bool ok = false;
+    // dockerd answers a lifecycle verb only once the container has moved
+    // state, and its own graceful stop grace is 10 s (docker stop -t). A
+    // list/stats-sized timeout would report a slow-but-correct restart as a
+    // failure, so the verb gets its own budget.
+    const int lifecycleMs = qMax(m_config.timeoutMs, 30000);
+    const QString socketPath = engineSocketPath();
+    if (!socketPath.isEmpty()) {
+        DockerEngineClient client(socketPath, lifecycleMs);
+        ok = client.post(QStringLiteral("/containers/%1/%2").arg(id, verb),
+                         nullptr, &error, lifecycleMs);
+    }
+    if (!ok) {
+        const QString cli = m_dockerPath;
+        if (cli.isEmpty()) {
+            if (error.isEmpty()) {
+                error = QStringLiteral("docker not found");
+            }
+        } else {
+            QProcess process;
+            process.start(cli, {verb, id});
+            if (!process.waitForFinished(lifecycleMs)) {
+                process.kill();
+                process.waitForFinished(200);
+                error = QStringLiteral("docker %1 timed out").arg(verb);
+            } else if (process.exitStatus() != QProcess::NormalExit
+                       || process.exitCode() != 0) {
+                error = QString::fromLocal8Bit(
+                            process.readAllStandardError())
+                            .trimmed()
+                            .left(160);
+                if (error.isEmpty()) {
+                    error = QStringLiteral("docker %1 failed").arg(verb);
+                }
+            } else {
+                ok = true;
+            }
+        }
+    }
+
+    emit containerActionFinished(verb, id, ok, error);
+
+    if (m_pollTimer != nullptr) {
+        m_pollTimer->stop();
+    }
+    QTimer::singleShot(0, this, &DockerSource::onPollTimeout);
+}

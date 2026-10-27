@@ -423,8 +423,16 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
-    settings.beginGroup(QStringLiteral("webhook"));
+    settings.beginGroup(QStringLiteral("actions"));
     {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.actions.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("webhook"));    {
         if (settings.contains(QStringLiteral("enabled"))) {
             config.webhook.enabled =
                 settings.value(QStringLiteral("enabled")).toBool();

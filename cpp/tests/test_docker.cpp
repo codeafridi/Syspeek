@@ -3,6 +3,7 @@
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QProcess>
 #include <QHash>
 #include <QStringList>
 #include <cstdio>
@@ -332,6 +333,67 @@ int main() {
                 std::printf(
                     "multiplexed stats wall: %lld ms for %lld requests\n",
                     wallMs, static_cast<long long>(runningIds.size()));
+            }
+
+            // Lifecycle verbs (M78). A verb only answers once the container
+            // moved state and dockerd's graceful-stop grace is 10 s, so this
+            // leg runs on its own budget: with the list/stats timeout a
+            // correct restart reads as a failure (seen live before the fix).
+            DockerEngineClient verbClient(liveSocket, 30000);
+            QString verbError;
+            const bool missingRefused = !verbClient.post(
+                QStringLiteral("/containers/syspeek-no-such-id/restart"),
+                nullptr, &verbError, 30000);
+            check(missingRefused,
+                  "live engine: a lifecycle verb on a missing id is refused");
+
+            QProcess create;
+            create.start(QStringLiteral("docker"),
+                         {QStringLiteral("create"), QStringLiteral("--name"),
+                          QStringLiteral("syspeek-m78-test"),
+                          QStringLiteral("debian:12"),
+                          QStringLiteral("sleep"), QStringLiteral("120")});
+            const bool created = create.waitForFinished(15000)
+                                 && create.exitCode() == 0;
+            if (created) {
+                const QString id = QString::fromUtf8(
+                    create.readAllStandardOutput()).trimmed();
+                QProcess inspect;
+                const auto stateOf = [&inspect](const QString &target) {
+                    inspect.start(QStringLiteral("docker"),
+                                  {QStringLiteral("inspect"),
+                                   QStringLiteral("-f"),
+                                   QStringLiteral("{{.State.Status}}"), target});
+                    inspect.waitForFinished(5000);
+                    return QString::fromUtf8(inspect.readAllStandardOutput())
+                        .trimmed();
+                };
+                QElapsedTimer verbClock;
+                verbClock.start();
+                const bool started = verbClient.post(
+                    QStringLiteral("/containers/%1/start").arg(id), nullptr,
+                    &verbError, 30000);
+                const qint64 startMs = verbClock.elapsed();
+                check(started, "live engine: POST start succeeds");
+                check(stateOf(id) == QLatin1String("running"),
+                      "live engine: the container is running after start");
+                verbClock.restart();
+                const bool stopped = verbClient.post(
+                    QStringLiteral("/containers/%1/stop").arg(id), nullptr,
+                    &verbError, 30000);
+                const qint64 stopMs = verbClock.elapsed();
+                check(stopped, "live engine: POST stop succeeds");
+                check(stateOf(id) == QLatin1String("exited"),
+                      "live engine: the container is exited after stop");
+                std::printf(
+                    "live lifecycle ok: start %lld ms, stop %lld ms\n",
+                    startMs, stopMs);
+                QProcess cleanup;
+                cleanup.start(QStringLiteral("docker"),
+                              {QStringLiteral("rm"), QStringLiteral("-f"), id});
+                cleanup.waitForFinished(15000);
+            } else {
+                std::printf("SKIP live lifecycle: docker create unavailable\n");
             }
         } else if (liveError.contains(QStringLiteral("Permission denied"))) {
             std::printf("SKIP live engine: permission denied in CI\n");

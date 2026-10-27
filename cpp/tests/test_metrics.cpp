@@ -37,6 +37,8 @@
 #include "HistoryLog.h"
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
+#include "ProcessActions.h"
+#include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
 #include <QFile>
 #include <QEventLoop>
@@ -3326,6 +3328,140 @@ int main(int argc, char *argv[]) {
         check(notFound.startsWith(QByteArrayLiteral("HTTP/1.1 404 Not Found")),
               "metrics server: an unknown path stays a 404");
         guardedServer.stop();
+    }
+
+    // ---- M78 process verbs (pure model) ----
+    {
+        check(processSignalNumber(ProcessSignal::Term) == 15
+                  && processSignalNumber(ProcessSignal::Kill) == 9
+                  && processSignalNumber(ProcessSignal::Int) == 2
+                  && processSignalNumber(ProcessSignal::Hup) == 1,
+              "actions: TERM/KILL/INT/HUP map to the POSIX numbers");
+#if defined(Q_OS_MACOS)
+        check(processSignalNumber(ProcessSignal::Stop) == 17
+                  && processSignalNumber(ProcessSignal::Cont) == 19,
+              "actions: darwin SIGSTOP/SIGCONT are 17/19");
+#else
+        check(processSignalNumber(ProcessSignal::Stop) == 19
+                  && processSignalNumber(ProcessSignal::Cont) == 18,
+              "actions: linux SIGSTOP/SIGCONT are 19/18");
+#endif
+        check(processSignalName(ProcessSignal::Hup) == QStringLiteral("SIGHUP")
+                  && processSignalLabel(ProcessSignal::Stop)
+                         == QStringLiteral("pause")
+                  && allProcessSignals().size() == 6,
+              "actions: signal names, verb labels and the six-entry list");
+
+        check(ioPriorityValue(IoPriorityClass::Idle, 0) == (3 << 13)
+                  && ioPriorityValue(IoPriorityClass::BestEffort, 4)
+                         == ((2 << 13) | 4)
+                  && ioPriorityValue(IoPriorityClass::Realtime, 9)
+                         == ((1 << 13) | 7),
+              "actions: ioprio packs class<<13 | level and clamps the level");
+        check(ioPriorityText(IoPriorityClass::Idle, 5)
+                      == QStringLiteral("idle")
+                  && ioPriorityText(IoPriorityClass::BestEffort, 4)
+                         == QStringLiteral("best-effort/4")
+                  && ioPriorityText(IoPriorityClass::None, 0)
+                         == QStringLiteral("none"),
+              "actions: ioprio text drops the level where the kernel does");
+        check(ioPriorityClassName(IoPriorityClass::Realtime)
+                  == QStringLiteral("realtime"),
+              "actions: ioprio class names match ionice's table");
+
+        check(clampNice(-99) == -20 && clampNice(99) == 19
+                  && clampOomScoreAdj(-5000) == -1000
+                  && clampOomScoreAdj(5000) == 1000,
+              "actions: nice and oom_score_adj bounds");
+
+        ProcessAction rel;
+        rel.kind = ProcessActionKind::Renice;
+        rel.pid = 4242;
+        rel.name = QStringLiteral("worker");
+        rel.niceValue = 5;
+        rel.relative = true;
+        check(processActionLabel(rel)
+                  == QStringLiteral("nice worker (4242) +5"),
+              "actions: a relative renice is labelled as a delta");
+        check(processActionNeedsConfirm(rel) == false,
+              "actions: a renice needs no confirmation");
+
+        ProcessAction term;
+        term.pid = 4242;
+        term.name = QStringLiteral("worker");
+        term.signal = ProcessSignal::Term;
+        check(processActionNeedsConfirm(term),
+              "actions: TERM asks for confirmation");
+        check(processActionConfirmText(term)
+                  == QStringLiteral("Send SIGTERM to worker (4242)?"),
+              "actions: TERM confirmation names the target");
+        ProcessAction killAction = term;
+        killAction.signal = ProcessSignal::Kill;
+        check(processActionConfirmText(killAction).contains(
+                  QStringLiteral("Unsaved work")),
+              "actions: KILL confirmation warns about lost work");
+        ProcessAction hup = term;
+        hup.signal = ProcessSignal::Hup;
+        check(processActionNeedsConfirm(hup) == false,
+              "actions: HUP is immediate");
+
+        ProcessAction oomRel;
+        oomRel.kind = ProcessActionKind::OomScore;
+        oomRel.pid = 7;
+        oomRel.name = QStringLiteral("svc");
+        oomRel.oomScoreAdj = -500;
+        oomRel.relative = true;
+        check(processActionLabel(oomRel)
+                  == QStringLiteral("oom_score_adj svc (7) -500"),
+              "actions: a relative oom delta is labelled with its sign");
+        oomRel.relative = false;
+        oomRel.oomScoreAdj = 250;
+        check(processActionLabel(oomRel)
+                  == QStringLiteral("oom_score_adj svc (7) -> 250"),
+              "actions: an absolute oom set is labelled with the value");
+
+        check(processActionResultText(term, true, QString())
+                  == QStringLiteral("SIGTERM worker (4242) ok"),
+              "actions: an ok result names the verb and the target");
+        check(processActionResultText(term, false,
+                                      QStringLiteral("Operation not permitted"))
+                  .contains(QStringLiteral("Operation not permitted")),
+              "actions: a refused verb carries the OS reason");
+        check(processActionResultText(term, false, QString())
+                  == QStringLiteral("SIGTERM worker (4242) failed: failed"),
+              "actions: an empty error still reads as a failure");
+    }
+
+    // ---- M78 unit restart verb (supervisor refusal path) ----
+    {
+        ServicesSource services;
+        QString verb;
+        QString unit;
+        bool ok = true;
+        QString reason;
+        QObject::connect(&services, &ServicesSource::unitActionFinished,
+                         &services,
+                         [&verb, &unit, &ok, &reason](const QString &v,
+                                                      const QString &u,
+                                                      bool success,
+                                                      const QString &error) {
+                             verb = v;
+                             unit = u;
+                             ok = success;
+                             reason = error;
+                         });
+
+        services.restartUnit(QString());
+        check(!ok && verb == QStringLiteral("restart")
+                  && reason == QStringLiteral("no unit selected"),
+              "actions: restarting nothing states it plainly");
+
+        // No live supervisor call here on purpose: `systemctl restart` on a
+        // bogus unit blocks on a polkit prompt, which a test must never
+        // raise on someone's desktop.
+        ok = true;
+        services.restartUnit(QStringLiteral("   "));
+        check(!ok, "actions: a whitespace-only unit is refused too");
     }
 
     std::printf("%d failure(s)\n", failures);

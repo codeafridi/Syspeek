@@ -571,6 +571,7 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     caps.perProcessDisk = true;
     caps.gpu = true;
     caps.gpuProcessData = true;
+    caps.processSignals = true;
     return caps;
 }
 
@@ -1636,4 +1637,94 @@ QString WindowsBackend::processCmdline(int pid) {
     return QString::fromWCharArray(
         reinterpret_cast<const wchar_t *>(cmdUtf16.constData()),
         int(got / sizeof(wchar_t)));
+}
+
+bool WindowsBackend::applyProcessAction(const ProcessAction &action,
+                                        QString *error) {
+    const auto fail = [error](const QString &what, DWORD code) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: win32 error %2").arg(what).arg(code);
+        }
+        return false;
+    };
+    if (action.pid <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("invalid pid");
+        }
+        return false;
+    }
+    if (action.kind != ProcessActionKind::Signal) {
+        if (error != nullptr) {
+            *error = QStringLiteral("only terminate is wired on windows");
+        }
+        return false;
+    }
+    if (action.signal != ProcessSignal::Term
+        && action.signal != ProcessSignal::Kill
+        && action.signal != ProcessSignal::Int) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1 is not supported on windows")
+                         .arg(processSignalName(action.signal));
+        }
+        return false;
+    }
+    HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE,
+                                static_cast<DWORD>(action.pid));
+    if (handle == nullptr) {
+        return fail(QStringLiteral("OpenProcess"), GetLastError());
+    }
+    const BOOL ok = TerminateProcess(handle, 1);
+    const DWORD code = ok ? 0 : GetLastError();
+    CloseHandle(handle);
+    if (!ok) {
+        return fail(processSignalName(action.signal), code);
+    }
+    return true;
+}
+
+bool WindowsBackend::restartService(const QString &name, QString *error) {
+    const auto fail = [error](const QString &what, DWORD code) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: win32 error %2").arg(what).arg(code);
+        }
+        return false;
+    };
+    if (name.trimmed().isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("empty service name");
+        }
+        return false;
+    }
+    const std::wstring wide = name.toStdWString();
+    SC_HANDLE mgr = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (mgr == nullptr) {
+        return fail(QStringLiteral("OpenSCManager"), GetLastError());
+    }
+    SC_HANDLE svc = ::OpenServiceW(mgr, wide.c_str(),
+                                   SERVICE_STOP | SERVICE_START
+                                       | SERVICE_QUERY_STATUS);
+    if (svc == nullptr) {
+        const DWORD code = GetLastError();
+        ::CloseServiceHandle(mgr);
+        return fail(QStringLiteral("OpenService"), code);
+    }
+
+    SERVICE_STATUS status {};
+    if (::ControlService(svc, SERVICE_CONTROL_STOP, &status) != FALSE) {
+        for (int i = 0; i < 50; ++i) {
+            if (::QueryServiceStatus(svc, &status) == FALSE
+                || status.dwCurrentState == SERVICE_STOPPED) {
+                break;
+            }
+            ::Sleep(100);
+        }
+    }
+    const BOOL started = ::StartServiceW(svc, 0, nullptr);
+    const DWORD code = started ? 0 : GetLastError();
+    ::CloseServiceHandle(svc);
+    ::CloseServiceHandle(mgr);
+    if (started == FALSE) {
+        return fail(QStringLiteral("StartService"), code);
+    }
+    return true;
 }

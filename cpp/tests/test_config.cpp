@@ -242,6 +242,30 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M78: [actions] enabled is the master switch for every verb; the
+        // group is optional and an explicit false must survive the load.
+        QTemporaryDir actionsDir;
+        const QString path = writeConfig(actionsDir, QByteArrayLiteral(
+            "[actions]\n"
+            "enabled=false\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.actions.enabled,
+              "actions: enabled=false disables the verbs");
+
+        QTemporaryDir actionsDefaultDir;
+        const QString defaults = writeConfig(actionsDefaultDir,
+                                            QByteArrayLiteral(
+            "[health]\n"
+            "cpu_warn_percent=65\n"));
+        const Config d = loadConfig(defaults, &error);
+        check(d.actions.enabled,
+              "actions: verbs are on by default");
+        check(d.health.cpuWarnPercent == 65.0,
+              "actions: the group does not disturb its neighbours");
+    }
+
+    {
         // M76: [metrics] bind + token — the scrape endpoint can move off
         // loopback only when a bearer token guards it.
         QTemporaryDir metricsDir;

@@ -58,6 +58,7 @@ constexpr int kTcpStateFinWait2 = 9;
 constexpr int kTcpStateTimeWait = 10;
 } // namespace
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <vector>
 
@@ -235,6 +236,9 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.perProcessDisk = true;
     caps.gpu = true;
     caps.perProcessDiskScan = true;
+    caps.processSignals = true;
+    caps.processRenice = true;
+    caps.processPause = true;
     return caps;
 }
 
@@ -915,6 +919,58 @@ QString MacBackend::processCmdline(int pid) {
         parts.append(QString::fromUtf8(a));
     }
     return parts.join(QLatin1Char(' '));
+}
+
+bool MacBackend::applyProcessAction(const ProcessAction &action,
+                                    QString *error) {
+    const auto fail = [error](const QString &what) {
+        const int code = errno;
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: %2")
+                         .arg(what, QString::fromLocal8Bit(std::strerror(code)));
+        }
+        return false;
+    };
+    if (action.pid <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("invalid pid");
+        }
+        return false;
+    }
+    switch (action.kind) {
+    case ProcessActionKind::Signal:
+        if (::kill(action.pid, processSignalNumber(action.signal)) != 0) {
+            return fail(processSignalName(action.signal));
+        }
+        return true;
+    case ProcessActionKind::Renice: {
+        int target = clampNice(action.niceValue);
+        if (action.relative) {
+            errno = 0;
+            const int current =
+                ::getpriority(PRIO_PROCESS, static_cast<id_t>(action.pid));
+            if (current == -1 && errno != 0) {
+                return fail(QStringLiteral("getpriority"));
+            }
+            target = clampNice(current + action.niceValue);
+        }
+        if (::setpriority(PRIO_PROCESS, static_cast<id_t>(action.pid), target)
+            != 0) {
+            return fail(QStringLiteral("setpriority"));
+        }
+        return true;
+    }
+    case ProcessActionKind::Ionice:
+    case ProcessActionKind::OomScore:
+        break;
+    }
+    if (error != nullptr) {
+        *error = QStringLiteral("%1 is not supported on macos")
+                     .arg(action.kind == ProcessActionKind::Ionice
+                              ? QStringLiteral("i/o priority")
+                              : QStringLiteral("oom_score_adj"));
+    }
+    return false;
 }
 
 #endif // Q_OS_MACOS

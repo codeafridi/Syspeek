@@ -193,6 +193,8 @@ add_library(syspeek_core STATIC
     src/MonitorBands.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
+    src/ProcessActions.cpp
+    src/ProcessActions.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp

@@ -4,7 +4,25 @@
 
 #include <QFile>
 
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+
+namespace {
+
+// Kernel ABI mirrored from util-linux ionice 2.41 ("ioprio_get/ioprio_set
+// failed", "0: none, 1: realtime, 2: best-effort, 3: idle"): the class lives
+// in the top 3 bits, the priority in the low 3 (IOPRIO_PRIO_VALUE).
+constexpr int kIoprioWhoProcess = 1;
+
+QString errnoText(int code) {
+    return QString::fromLocal8Bit(std::strerror(code));
+}
+
+} // namespace
 
 QString LinuxBackend::platformName() const {
     return QStringLiteral("linux");
@@ -27,6 +45,11 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.gpu = true;
     caps.gpuProcessData = true;
     caps.gpuClients = true;
+    caps.processSignals = true;
+    caps.processRenice = true;
+    caps.processIonice = true;
+    caps.processOomScore = true;
+    caps.processPause = true;
     return caps;
 }
 
@@ -176,6 +199,88 @@ bool LinuxBackend::gpuClients(const QList<int> &pids,
 
 bool LinuxBackend::sumRssKb(const QList<int> &pids, unsigned long long &out) {
     return linuxproc::sumRssKb(pids, out);
+}
+
+bool LinuxBackend::applyProcessAction(const ProcessAction &action,
+                                      QString *error) {
+    const auto fail = [error](const QString &what) {
+        const int code = errno;
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: %2").arg(what, errnoText(code));
+        }
+        return false;
+    };
+    if (action.pid <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("invalid pid");
+        }
+        return false;
+    }
+    switch (action.kind) {
+    case ProcessActionKind::Signal:
+        if (::kill(action.pid, processSignalNumber(action.signal)) != 0) {
+            return fail(processSignalName(action.signal));
+        }
+        return true;
+    case ProcessActionKind::Renice: {
+        int target = clampNice(action.niceValue);
+        if (action.relative) {
+            errno = 0;
+            const int current =
+                ::getpriority(PRIO_PROCESS, static_cast<id_t>(action.pid));
+            if (current == -1 && errno != 0) {
+                return fail(QStringLiteral("getpriority"));
+            }
+            target = clampNice(current + action.niceValue);
+        }
+        if (::setpriority(PRIO_PROCESS, static_cast<id_t>(action.pid), target)
+            != 0) {
+            return fail(QStringLiteral("setpriority"));
+        }
+        return true;
+    }
+    case ProcessActionKind::Ionice: {
+        const int value = ioPriorityValue(action.ioClass, action.ioLevel);
+        if (::syscall(SYS_ioprio_set, kIoprioWhoProcess, action.pid, value)
+            != 0) {
+            return fail(QStringLiteral("ioprio_set"));
+        }
+        return true;
+    }
+    case ProcessActionKind::OomScore: {
+        const QString path =
+            QStringLiteral("/proc/%1/oom_score_adj").arg(action.pid);
+        int target = clampOomScoreAdj(action.oomScoreAdj);
+        if (action.relative) {
+            QFile readable(path);
+            if (!readable.open(QIODevice::ReadOnly)) {
+                return fail(QStringLiteral("open oom_score_adj"));
+            }
+            bool parseOk = false;
+            const int current = readable.readAll().trimmed().toInt(&parseOk);
+            if (!parseOk) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("oom_score_adj did not parse");
+                }
+                return false;
+            }
+            target = clampOomScoreAdj(current + action.oomScoreAdj);
+        }
+        QFile adj(path);
+        if (!adj.open(QIODevice::WriteOnly)) {
+            return fail(QStringLiteral("open oom_score_adj"));
+        }
+        const QByteArray payload = QByteArray::number(target);
+        if (adj.write(payload) != payload.size()) {
+            return fail(QStringLiteral("write oom_score_adj"));
+        }
+        return true;
+    }
+    }
+    if (error != nullptr) {
+        *error = QStringLiteral("unknown action");
+    }
+    return false;
 }
 
 QList<linuxproc::SocketInfo> LinuxBackend::readNetSockets() {
