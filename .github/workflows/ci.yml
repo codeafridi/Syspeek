@@ -159,11 +159,22 @@ jobs:
           assert act.get("childExited") is True, act
           assert act.get("invalidPidRefused") is True, act
           assert act.get("renice") is True and act.get("reniceOk") is True, act
-          assert act.get("ionice") is True and act.get("ioniceOk") is True, act
-          assert act.get("oomScore") is True and act.get("oomOk") is True, act
-          print("actions ok: TERM/renice/ionice/oom applied to pid %d, "
-                "invalid pid refused (%s)"
-                % (act["childPid"], act.get("invalidPidError")))
+          assert act.get("pause") is True, act
+          if d["platform"] == "linux":
+              assert act.get("ionice") is True and act.get("ioniceOk") is True, act
+              assert act.get("oomScore") is True and act.get("oomOk") is True, act
+              print("actions ok: TERM/renice/ionice/oom applied to pid %d, "
+                    "invalid pid refused (%s)"
+                    % (act["childPid"], act.get("invalidPidError")))
+          else:
+              # macOS ships signals + relative renice; ionice is a Linux
+              # scheduler surface and oom_score_adj has no Darwin analogue, so
+              # both stay gated rather than silently reported as applied.
+              assert act.get("ionice") is False, act
+              assert act.get("oomScore") is False, act
+              print("actions ok (macos): TERM/renice applied to pid %d, "
+                    "ionice/oom gated, invalid pid refused (%s)"
+                    % (act["childPid"], act.get("invalidPidError")))
           met = d.get("metrics", {})
           assert met.get("bind") == "127.0.0.1", met
           assert met.get("authRequired") is False, met
