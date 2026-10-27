@@ -195,6 +195,8 @@ add_library(syspeek_core STATIC
     src/ProcessNetStatus.h
     src/ProcessActions.cpp
     src/ProcessActions.h
+    src/SensorStatus.cpp
+    src/SensorStatus.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
@@ -222,6 +224,8 @@ elseif(APPLE)
         src/platform/mac/MacBackend.h
         src/platform/mac/MacGpu.cpp
         src/platform/mac/MacGpu.h
+        src/platform/mac/MacSensors.cpp
+        src/platform/mac/MacSensors.h
         src/platform/mac/MacFocusProvider.mm
         src/platform/mac/MacFocusProvider.h
         src/platform/mac/MacLogSource.mm
@@ -235,6 +239,8 @@ elseif(WIN32)
     target_sources(syspeek_core PRIVATE
         src/platform/win/WindowsBackend.cpp
         src/platform/win/WindowsBackend.h
+        src/platform/win/WindowsSensors.cpp
+        src/platform/win/WindowsSensors.h
         src/platform/win/WinFocusProvider.cpp
         src/platform/win/WinFocusProvider.h
         src/platform/win/WinLogSource.cpp
@@ -243,7 +249,7 @@ elseif(WIN32)
         target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
     endif()
     target_link_libraries(syspeek_core PUBLIC
-        iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi)
+        iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi setupapi)
     target_compile_definitions(syspeek_core PUBLIC
         WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_WARNINGS)

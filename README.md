@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A local-first HUD that follows the app you're focused on — and a 27-view Datadog-style console for everything your kernel, containers and apps are doing.
+### A local-first HUD that follows the app you're focused on — and a 30-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -281,6 +281,41 @@ status instead of failing.
 - **Kubernetes** — flags problem pods (`CrashLoopBackOff`, image-pull failures,
   `OOMKilled`) and deployments with too few ready replicas, using your current
   `kubectl` context.
+
+## Sensors & battery
+
+The **Sensors** page reads the hardware counters the kernel already exposes, so
+you can see the thing that is actually hot before it throttles:
+
+- **hwmon** (`/sys/class/hwmon` on Linux) — CPU package and per-core
+  temperatures, NVMe/board/chipset sensors, fan speeds, power and current
+  rails, each with its kernel `crit`/`high` limit. Readings at or past a limit
+  are tinted amber/red, the busiest chip is sorted first, and the page charts
+  the hottest sensor plus total sensor power.
+- **Battery and AC** — charge, state (`charging`/`discharging`/`full`), energy
+  now vs full vs design capacity (so health is the ratio), power draw, voltage,
+  cycle count, temperature and the kernel's time-to-empty. On macOS the same
+  numbers come from `IOPSGetPowerSourceDescription` and the `AppleSmartBattery`
+  registry node; on Windows from the battery device class
+  (`IOCTL_BATTERY_QUERY_INFORMATION`/`_STATUS`), where the reported temperature
+  is converted from tenths of a kelvin.
+
+Two monitors are wired to it: **host temperature** (warning, 85 °C by default)
+and **battery low** (warning, below 20 %). Both are editable in
+Settings → MONITORS like every other rule, and both clear themselves the
+moment the reading goes back to normal.
+
+Deliberately honest on the platforms that gate it: per-sensor temperatures on
+macOS need the privileged SMC helper and on Windows a kernel driver, so those
+two report the battery (which is a normal, permission-free API) and print the
+reason on the thermal side instead of showing an empty card. Battery charge,
+energy and AC state never need root anywhere.
+
+Prometheus exports the same numbers as `syspeek_sensor_celsius{chip,sensor,kind}`,
+`syspeek_sensor_limit_celsius`, `syspeek_sensor_fan_rpm`,
+`syspeek_sensor_power_watts`, `syspeek_battery_charge_percent{battery}`,
+`syspeek_battery_energy_watt_hours{battery,state="now|full"}`,
+`syspeek_battery_power_watts` and `syspeek_ac_online{adapter,online}`.
 
 ## Advanced (optional)
 

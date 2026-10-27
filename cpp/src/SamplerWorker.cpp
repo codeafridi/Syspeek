@@ -478,6 +478,7 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
 
     fillProcessDisk(snapshot);
     fillGpu(snapshot);
+    fillSensors(snapshot);
 
     const TcpHealth tcp = m_tcpSampler.sample();
     snapshot.tcpHealth = tcp;
@@ -683,6 +684,25 @@ void SamplerWorker::fillGpu(DisplaySnapshot &snapshot) {
     snapshot.gpu = m_gpuReading;
     snapshot.gpuWarming = m_gpuWarming;
     snapshot.gpuClientsAvailable = m_backend->capabilities().gpuClients;
+}
+
+void SamplerWorker::fillSensors(DisplaySnapshot &snapshot) {
+    const PlatformCapabilities caps = m_backend->capabilities();
+    if (!caps.sensors && !caps.battery) {
+        snapshot.sensors.note = QStringLiteral(
+            "sensors: no unprivileged sensor surface on %1 - thermal and "
+            "battery telemetry need a privileged helper or kernel driver")
+                                    .arg(m_backend->platformName());
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence = qBound<qint64>(qint64(2000), m_intervalMs * 2,
+                                          qint64(5000));
+    if (m_sensorsStampMs == 0 || now - m_sensorsStampMs >= cadence) {
+        m_sensors = m_backend->sensors();
+        m_sensorsStampMs = now;
+    }
+    snapshot.sensors = m_sensors;
 }
 
 void SamplerWorker::fillProcessDisk(DisplaySnapshot &snapshot) {

@@ -7,6 +7,7 @@
 #include "ProcessIdentity.h"
 #include "ProfileStatus.h"
 #include "SecurityStatus.h"
+#include "SensorStatus.h"
 #include "ServicesStatus.h"
 #include "TcpStatus.h"
 
@@ -41,6 +42,13 @@ struct PlatformCapabilities {
     bool processOomScore = false;
     // SIGSTOP/SIGCONT: POSIX only (Windows has no process suspend verb here).
     bool processPause = false;
+    // hwmon-style thermal/fan/power readings (/sys/class/hwmon). macOS needs
+    // the privileged SMC helper Stats ships separately, Windows needs a
+    // kernel driver, so both report false and the page says why.
+    bool sensors = false;
+    // A battery/AC surface exists (power_supply, AppleSmartBattery, the
+    // Windows battery class devices). Data can still be absent on a desktop.
+    bool battery = false;
 };
 
 class SystemBackend {
@@ -182,6 +190,10 @@ public:
     // Device-level GPU state (utilization, memory, temperature, power,
     // clock) plus whatever per-process usage the platform can attribute.
     virtual GpuReading gpuInfo() { return GpuReading{}; }
+    // Hardware sensors (temperatures, fans, power) plus battery and AC
+    // adapter state. Platforms without the surface return an empty snapshot
+    // with a note so the page never renders a silent blank.
+    virtual SensorsSnapshot sensors() { return SensorsSnapshot{}; }
     // Per-DRM-client engine-time counters for the given pids (Linux fdinfo).
     // Platforms without a readable per-client surface leave this empty and
     // report gpuClients == false so the page stays honest.

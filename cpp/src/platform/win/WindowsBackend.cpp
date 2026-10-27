@@ -4,6 +4,8 @@
 
 #include "TcpStatus.h"
 
+#include "WindowsSensors.h"
+
 #include <QDateTime>
 #include <QHash>
 #include <QMutexLocker>
@@ -548,6 +550,10 @@ GpuReading WindowsBackend::gpuInfo() {
     return reading;
 }
 
+SensorsSnapshot WindowsBackend::sensors() {
+    return winsensors::collect();
+}
+
 void WindowsBackend::closePdhDiskQuery() {
     // PDH counters are owned by the query; one close releases all of them.
     if (m_pdhQuery != nullptr) {
@@ -572,6 +578,7 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     caps.gpu = true;
     caps.gpuProcessData = true;
     caps.processSignals = true;
+    caps.battery = true;
     return caps;
 }
 

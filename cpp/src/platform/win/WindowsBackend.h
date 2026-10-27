@@ -42,6 +42,7 @@ public:
     bool processDiskCounters(int pid, long long &readBytes,
                              long long &writeBytes) override;
     GpuReading gpuInfo() override;
+    SensorsSnapshot sensors() override;
     QList<unsigned long long> socketInodes(int pid) override;
 
     QList<linuxproc::SocketInfo> readNetSockets() override;

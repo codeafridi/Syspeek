@@ -257,6 +257,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osGpu = osCaps.gpu;
     m_osGpuClients = osCaps.gpuClients;
     m_osGpuProcess = osCaps.gpuProcessData;
+    m_osSensors = osCaps.sensors;
+    m_osBattery = osCaps.battery;
     m_osProcessSignals = osCaps.processSignals;
     m_osProcessRenice = osCaps.processRenice;
     m_osProcessIonice = osCaps.processIonice;
@@ -347,6 +349,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Processes"), QStringLiteral("Memory"),
                       QStringLiteral("Disks"),
                       QStringLiteral("GPU"),
+                      QStringLiteral("Sensors"),
                       QStringLiteral("Host"),
                       QStringLiteral("Network"),
                       QStringLiteral("Network Path"),
@@ -374,6 +377,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildMemoryView());
     m_views->addWidget(buildDisksView());
     m_views->addWidget(buildGpuView());
+    m_views->addWidget(buildSensorsView());
     m_views->addWidget(buildHostView());
     m_views->addWidget(buildNetworkView());
     m_views->addWidget(buildNetworkPathView());
@@ -503,6 +507,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
         "#ddGpuTileUtil, #ddGpuTileMem, #ddGpuTileTemp, #ddGpuTileProcs,"
+        " #ddSensorTileHot, #ddSensorTileFans, #ddSensorTilePower,"
+        " #ddSensorTileBattery,"
         " #ddHistTileSamples, #ddHistTileSpan, #ddHistTileDisk,"
         " #ddHistTileInterval,"
         " #ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
@@ -2986,6 +2992,8 @@ QWidget *DashboardPanel::buildSettingsView() {
         {"watchdog_forecast", 0.0, 120.0, 0},
         {"kernel_fd", 0.0, 100.0, 0},
         {"host_steal", 0.0, 100.0, 1},
+        {"host_temp", 0.0, 150.0, 1},
+        {"battery_low", 0.0, 100.0, 0},
     };
     auto boundsFor = [](const QString &id) {
         for (const MonitorBounds &b : monitorBounds) {
@@ -3393,6 +3401,10 @@ void DashboardPanel::setMonitors(const QList<AlertRule> &rules) {
     if (m_chartHostCpu != nullptr) {
         m_chartHostCpu->setBands(chartBandsFrom(monitorBandsFor(
             rules, {QStringLiteral("host_cpu")})));
+    }
+    if (m_chartSensorTemp != nullptr) {
+        m_chartSensorTemp->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("host_temp")})));
     }
 
     if (m_silenceTarget != nullptr) {
@@ -3894,6 +3906,134 @@ QWidget *DashboardPanel::buildGpuView() {
         ui_theme::accent(), view));
     layout->addWidget(
         makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+QWidget *DashboardPanel::buildSensorsView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_sensorTileHot = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileHot->setObjectName(QStringLiteral("ddSensorTileHot"));
+    m_sensorTileFans = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileFans->setObjectName(QStringLiteral("ddSensorTileFans"));
+    m_sensorTilePower = new QLabel(QStringLiteral("--"), view);
+    m_sensorTilePower->setObjectName(QStringLiteral("ddSensorTilePower"));
+    m_sensorTileBattery = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileBattery->setObjectName(QStringLiteral("ddSensorTileBattery"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("HOTTEST"), m_sensorTileHot,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("FANS"), m_sensorTileFans,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("POWER"), m_sensorTilePower,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("BATTERY"), m_sensorTileBattery,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_sensorSummary = new QLabel(QStringLiteral("--"), view);
+    m_sensorSummary->setObjectName(QStringLiteral("ddSensorSummary"));
+    m_sensorSummary->setFont(monoFont(11));
+    m_sensorSummary->setWordWrap(true);
+    m_sensorSummary->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("THERMAL & POWER"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SENSORS"), m_sensorSummary, view), 1);
+
+    m_sensorTree = new QTreeWidget(view);
+    m_sensorTree->setObjectName(QStringLiteral("ddSensorTree"));
+    m_sensorTree->setColumnCount(4);
+    m_sensorTree->setHeaderLabels({QStringLiteral("CHIP"),
+                                  QStringLiteral("SENSOR"),
+                                  QStringLiteral("VALUE"),
+                                  QStringLiteral("LIMIT")});
+    m_sensorTree->setRootIsDecorated(false);
+    m_sensorTree->setSelectionMode(QAbstractItemView::NoSelection);
+    m_sensorTree->setFocusPolicy(Qt::NoFocus);
+    m_sensorTree->header()->setSectionResizeMode(0,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_sensorTree->header()->setSectionResizeMode(2,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->header()->setSectionResizeMode(3,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->setMinimumHeight(150);
+
+    layout->addWidget(makeBanner(QStringLiteral("HWMON READINGS"),
+        ui_theme::banner(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("READINGS"), m_sensorTree, view), 2);
+
+    m_chartSensorTemp = new TimeseriesChart(view);
+    m_chartSensorTemp->setUnit(QStringLiteral("Celsius"));
+    m_chartSensorTemp->setSeriesName(QStringLiteral("syspeek.sensor.temp"));
+    m_chartSensorPower = new TimeseriesChart(view);
+    m_chartSensorPower->setUnit(QStringLiteral("Watts"));
+    m_chartSensorPower->setSeriesName(QStringLiteral("syspeek.sensor.power"));
+
+    auto *charts = new QHBoxLayout();
+    charts->setSpacing(10);
+    charts->addWidget(makeChartCard(QStringLiteral("hottest sensor"),
+                                    m_chartSensorTemp, view), 1);
+    charts->addWidget(makeChartCard(QStringLiteral("sensor power"),
+                                    m_chartSensorPower, view), 1);
+    layout->addLayout(charts, 1);
+
+    m_batterySummary = new QLabel(QStringLiteral("--"), view);
+    m_batterySummary->setObjectName(QStringLiteral("ddBatterySummary"));
+    m_batterySummary->setFont(monoFont(11));
+    m_batterySummary->setWordWrap(true);
+    m_batterySummary->setMinimumWidth(1);
+    m_batteryDetail = new QLabel(QStringLiteral("--"), view);
+    m_batteryDetail->setObjectName(QStringLiteral("ddBatteryDetail"));
+    m_batteryDetail->setFont(monoFont(10));
+    m_batteryDetail->setWordWrap(false);
+    m_batteryDetail->setMinimumWidth(1);
+    m_adapters = new QLabel(QStringLiteral("--"), view);
+    m_adapters->setObjectName(QStringLiteral("ddAdapters"));
+    m_adapters->setFont(monoFont(10));
+    m_adapters->setMinimumWidth(1);
+
+    auto *battTop = new QWidget(view);
+    auto *battTopLayout = new QVBoxLayout(battTop);
+    battTopLayout->setContentsMargins(0, 0, 0, 0);
+    battTopLayout->setSpacing(4);
+    battTopLayout->addWidget(m_batterySummary);
+    battTopLayout->addWidget(m_adapters);
+
+    layout->addWidget(makeBanner(QStringLiteral("BATTERY"),
+        ui_theme::warn(), view));
+    auto *battRow = new QHBoxLayout();
+    battRow->setSpacing(10);
+    battRow->addWidget(
+        makeCard(QStringLiteral("BATTERY"), battTop, view), 1);
+    battRow->addWidget(
+        makeCard(QStringLiteral("DETAIL"), m_batteryDetail, view), 1);
+    layout->addLayout(battRow, 1);
 
     auto *scroll = new QScrollArea(view);
     scroll->setObjectName(QStringLiteral("ddScroll"));
@@ -4457,6 +4597,10 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 m_chartGpu->push(bestUtil);
             }
         }
+    }
+
+    if (m_sensorSummary != nullptr) {
+        updateSensorsPanel(snapshot);
     }
 
     m_statusValue->setText(snapshot.status);
@@ -5912,6 +6056,134 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     .arg(marker, alert.title, alert.detail, quiet);
     }
     m_alerts->setText(text);
+}
+
+void DashboardPanel::updateSensorsPanel(const DisplaySnapshot &snapshot) {
+    const SensorsSnapshot &sensors = snapshot.sensors;
+    m_sensorTree->clear();
+
+    const auto tint = [](QLabel *label, int severity) {
+        const QColor color = severity >= 2 ? QColor(ui_theme::crit())
+                            : severity == 1 ? QColor(ui_theme::warn())
+                                            : QColor(ui_theme::text());
+        label->setStyleSheet(QStringLiteral("color: %1;").arg(color.name()));
+    };
+
+    if (!m_osSensors && !m_osBattery) {
+        const QString gate = QStringLiteral("sensors: %1").arg(unsupportedOsText());
+        m_sensorSummary->setText(gate);
+        m_sensorTileHot->setText(QStringLiteral("--"));
+        m_sensorTileFans->setText(QStringLiteral("--"));
+        m_sensorTilePower->setText(QStringLiteral("--"));
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(gate);
+        m_batteryDetail->setText(QStringLiteral("--"));
+        m_adapters->setText(QStringLiteral("--"));
+        return;
+    }
+
+    if (!sensors.available) {
+        const QString note = sensors.note.isEmpty()
+                                 ? QStringLiteral("sensors: no readings")
+                                 : sensors.note;
+        m_sensorSummary->setText(note);
+        m_sensorTileHot->setText(QStringLiteral("--"));
+        m_sensorTileFans->setText(QStringLiteral("--"));
+        m_sensorTilePower->setText(QStringLiteral("--"));
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(note);
+        m_batteryDetail->setText(QStringLiteral("--"));
+        m_adapters->setText(adaptersText(sensors));
+        return;
+    }
+
+    m_sensorSummary->setText(sensorsSummaryText(sensors));
+
+    if (sensors.hottestCelsius >= 0.0) {
+        m_sensorTileHot->setText(
+            QStringLiteral("%1 \u00b0C").arg(sensors.hottestCelsius, 0, 'f', 1));
+    } else {
+        m_sensorTileHot->setText(QStringLiteral("--"));
+    }
+    tint(m_sensorTileHot, sensors.hottestSeverity);
+
+    m_sensorTileFans->setText(
+        sensors.maxFanRpm < 0.0
+            ? QStringLiteral("--")
+            : QStringLiteral("%1 rpm").arg(sensors.maxFanRpm, 0, 'f', 0));
+    tint(m_sensorTileFans, 0);
+
+    m_sensorTilePower->setText(
+        sensors.totalPowerW < 0.0
+            ? QStringLiteral("--")
+            : QStringLiteral("%1 W").arg(sensors.totalPowerW, 0, 'f', 1));
+    tint(m_sensorTilePower, 0);
+
+    if (sensors.batteries.isEmpty()) {
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(
+            m_osBattery
+                ? QStringLiteral("battery: no battery reported (desktop or VM)")
+                : QStringLiteral("battery: %1").arg(unsupportedOsText()));
+        m_batteryDetail->setText(QStringLiteral("--"));
+    } else {
+        const BatteryReading &first = sensors.batteries.constFirst();
+        m_sensorTileBattery->setText(
+            first.capacityPercent >= 0
+                ? QStringLiteral("%1%").arg(first.capacityPercent)
+                : batteryStateText(first.state));
+        tint(m_sensorTileBattery,
+             first.capacityPercent >= 0 && first.capacityPercent <= 10 ? 2
+             : first.capacityPercent >= 0 && first.capacityPercent <= 20 ? 1
+                                                                        : 0);
+        QStringList summary;
+        for (const BatteryReading &battery : sensors.batteries) {
+            summary.append(batterySummaryText(battery));
+        }
+        m_batterySummary->setText(summary.join(QLatin1String("\n")));
+        m_batteryDetail->setText(
+            batteryDetailText(sensors.batteries.constFirst()));
+    }
+    m_adapters->setText(adaptersText(sensors));
+
+    for (const SensorChip &chip : sensors.chips) {
+        for (const SensorReading &reading : chip.readings) {
+            if (reading.kind != SensorKind::Temperature
+                && reading.kind != SensorKind::Fan
+                && reading.kind != SensorKind::Power) {
+                continue;
+            }
+            auto *item = new QTreeWidgetItem();
+            item->setText(0, chip.name);
+            item->setText(1, reading.label);
+            item->setText(2, sensorValueText(reading));
+            if (reading.hasCrit) {
+                item->setText(3, QStringLiteral("crit %1 %2")
+                                    .arg(reading.crit, 0, 'f', 1)
+                                    .arg(sensorUnit(reading.kind)));
+            } else if (reading.hasWarn) {
+                item->setText(3, QStringLiteral("high %1 %2")
+                                    .arg(reading.warn, 0, 'f', 1)
+                                    .arg(sensorUnit(reading.kind)));
+            }
+            item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            const int severity = sensorSeverity(reading);
+            if (severity >= 2) {
+                item->setForeground(0, QColor(ui_theme::crit()));
+            } else if (severity == 1) {
+                item->setForeground(0, QColor(ui_theme::warn()));
+            }
+            m_sensorTree->addTopLevelItem(item);
+        }
+    }
+
+    if (m_chartSensorTemp != nullptr && sensors.hottestCelsius >= 0.0) {
+        m_chartSensorTemp->push(sensors.hottestCelsius);
+    }
+    if (m_chartSensorPower != nullptr && sensors.totalPowerW >= 0.0) {
+        m_chartSensorPower->push(sensors.totalPowerW);
+    }
 }
 
 void DashboardPanel::updateSloPanel(const SloReport &report) {

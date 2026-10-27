@@ -275,6 +275,112 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    if (s.sensors.available && !s.sensors.chips.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_celsius hwmon temperature reading."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_celsius gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_fan_rpm hwmon fan speed."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_fan_rpm gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_power_watts hwmon power reading."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_power_watts gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_limit_celsius Configured critical "
+            "temperature for the sensor."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_sensor_limit_celsius gauge"));
+        for (const SensorChip &chip : s.sensors.chips) {
+            for (const SensorReading &reading : chip.readings) {
+                const QString labels =
+                    QStringLiteral("chip=\"%1\",sensor=\"%2\",kind=\"%3\"")
+                        .arg(escapeLabel(chip.name),
+                             escapeLabel(reading.label),
+                             sensorKindName(reading.kind));
+                if (reading.kind == SensorKind::Temperature) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_celsius{%1} %2")
+                            .arg(labels, num(reading.value)));
+                    if (reading.hasCrit) {
+                        lines.append(
+                            QStringLiteral(
+                                "syspeek_sensor_limit_celsius{%1} %2")
+                                .arg(labels, num(reading.crit)));
+                    }
+                } else if (reading.kind == SensorKind::Fan) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_fan_rpm{%1} %2")
+                            .arg(labels, num(reading.value)));
+                } else if (reading.kind == SensorKind::Power) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_power_watts{%1} %2")
+                            .arg(labels, num(reading.value)));
+                }
+            }
+        }
+    }
+
+    if (!s.sensors.batteries.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_charge_percent Battery charge."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_charge_percent gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_energy_watt_hours Battery energy "
+            "remaining and full capacity."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_energy_watt_hours gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_power_watts Battery charge/discharge "
+            "power."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_power_watts gauge"));
+        for (const BatteryReading &battery : s.sensors.batteries) {
+            const QString labels = QStringLiteral("battery=\"%1\"")
+                                       .arg(escapeLabel(battery.name));
+            if (battery.capacityPercent >= 0) {
+                lines.append(
+                    QStringLiteral("syspeek_battery_charge_percent{%1} %2")
+                        .arg(labels)
+                        .arg(battery.capacityPercent));
+            }
+            if (battery.energyNowWh >= 0.0) {
+                lines.append(
+                    QStringLiteral(
+                        "syspeek_battery_energy_watt_hours{%1,state=\"now\"} "
+                        "%2")
+                        .arg(labels, num(battery.energyNowWh)));
+            }
+            if (battery.energyFullWh >= 0.0) {
+                lines.append(
+                    QStringLiteral(
+                        "syspeek_battery_energy_watt_hours{%1,state=\"full\"}"
+                        " %2")
+                        .arg(labels, num(battery.energyFullWh)));
+            }
+            if (battery.powerW >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_battery_power_watts{%1} %2")
+                        .arg(labels, num(battery.powerW)));
+            }
+        }
+    }
+
+    if (!s.sensors.adapters.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_ac_online AC adapter online state."));
+        lines.append(QStringLiteral("# TYPE syspeek_ac_online gauge"));
+        for (const AdapterReading &adapter : s.sensors.adapters) {
+            lines.append(
+                QStringLiteral(
+                    "syspeek_ac_online{adapter=\"%1\",online=\"%2\"} %3")
+                    .arg(escapeLabel(adapter.name),
+                         adapter.online ? QStringLiteral("true")
+                                        : QStringLiteral("false"))
+                    .arg(adapter.online ? 1 : 0));
+        }
+    }
+
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
             "# HELP syspeek_net_rx_bytes_total Network receive bytes."));

@@ -50,6 +50,8 @@ PlatformCapabilities LinuxBackend::capabilities() const {
     caps.processIonice = true;
     caps.processOomScore = true;
     caps.processPause = true;
+    caps.sensors = true;
+    caps.battery = true;
     return caps;
 }
 
@@ -190,6 +192,10 @@ bool LinuxBackend::processDiskCounters(int pid, long long &readBytes,
 
 GpuReading LinuxBackend::gpuInfo() {
     return linuxgpu::collect();
+}
+
+SensorsSnapshot LinuxBackend::sensors() {
+    return collectSensorsLinux();
 }
 
 bool LinuxBackend::gpuClients(const QList<int> &pids,

@@ -476,6 +476,107 @@ QString dumpReportJson(int maxProcs) {
     }
 
     {
+        QJsonObject sensors;
+        const PlatformCapabilities caps = backend.capabilities();
+        sensors.insert(QStringLiteral("thermalCapable"), caps.sensors);
+        sensors.insert(QStringLiteral("batteryCapable"), caps.battery);
+        const SensorsSnapshot reading = backend.sensors();
+        sensors.insert(QStringLiteral("available"), reading.available);
+        if (!reading.note.isEmpty()) {
+            sensors.insert(QStringLiteral("note"), reading.note);
+        }
+        QJsonArray chips;
+        int readings = 0;
+        for (const SensorChip &chip : reading.chips) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), chip.name);
+            row.insert(QStringLiteral("readings"), chip.readings.size());
+            chips.append(row);
+            readings += chip.readings.size();
+        }
+        sensors.insert(QStringLiteral("chips"), chips);
+        sensors.insert(QStringLiteral("readings"), readings);
+        if (reading.hottestCelsius >= 0.0) {
+            sensors.insert(QStringLiteral("hottestCelsius"),
+                           reading.hottestCelsius);
+            sensors.insert(QStringLiteral("hottestLabel"), reading.hottestLabel);
+            sensors.insert(QStringLiteral("hottestSeverity"),
+                           reading.hottestSeverity);
+        }
+        if (reading.maxFanRpm >= 0.0) {
+            sensors.insert(QStringLiteral("maxFanRpm"), reading.maxFanRpm);
+        }
+        sensors.insert(QStringLiteral("fans"), reading.fanCount);
+        if (reading.totalPowerW >= 0.0) {
+            sensors.insert(QStringLiteral("totalPowerW"), reading.totalPowerW);
+        }
+        QJsonArray batteries;
+        for (const BatteryReading &battery : reading.batteries) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), battery.name);
+            if (!battery.model.isEmpty()) {
+                row.insert(QStringLiteral("model"), battery.model);
+            }
+            if (!battery.manufacturer.isEmpty()) {
+                row.insert(QStringLiteral("manufacturer"),
+                           battery.manufacturer);
+            }
+            if (!battery.technology.isEmpty()) {
+                row.insert(QStringLiteral("technology"), battery.technology);
+            }
+            row.insert(QStringLiteral("state"), batteryStateText(battery.state));
+            if (battery.capacityPercent >= 0) {
+                row.insert(QStringLiteral("chargePercent"),
+                           battery.capacityPercent);
+            }
+            if (battery.energyNowWh >= 0.0) {
+                row.insert(QStringLiteral("energyNowWh"), battery.energyNowWh);
+            }
+            if (battery.energyFullWh >= 0.0) {
+                row.insert(QStringLiteral("energyFullWh"), battery.energyFullWh);
+            }
+            if (battery.energyDesignWh > 0.0) {
+                row.insert(QStringLiteral("energyDesignWh"),
+                           battery.energyDesignWh);
+            }
+            const int health = batteryHealthPercent(battery);
+            if (health >= 0) {
+                row.insert(QStringLiteral("healthPercent"), health);
+            }
+            if (battery.powerW >= 0.0) {
+                row.insert(QStringLiteral("powerW"), battery.powerW);
+            }
+            if (battery.voltageV > 0.0) {
+                row.insert(QStringLiteral("voltageV"), battery.voltageV);
+            }
+            if (battery.cycleCount >= 0) {
+                row.insert(QStringLiteral("cycleCount"), battery.cycleCount);
+            }
+            if (battery.timeToEmptyMin >= 0) {
+                row.insert(QStringLiteral("timeToEmptyMin"),
+                           battery.timeToEmptyMin);
+            }
+            if (battery.temperatureC >= 0.0) {
+                row.insert(QStringLiteral("temperatureC"), battery.temperatureC);
+            }
+            batteries.append(row);
+        }
+        sensors.insert(QStringLiteral("batteries"), batteries);
+        QJsonArray adapters;
+        for (const AdapterReading &adapter : reading.adapters) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), adapter.name);
+            row.insert(QStringLiteral("online"), adapter.online);
+            if (adapter.wattsW >= 0.0) {
+                row.insert(QStringLiteral("watts"), adapter.wattsW);
+            }
+            adapters.append(row);
+        }
+        sensors.insert(QStringLiteral("adapters"), adapters);
+        root.insert(QStringLiteral("sensors"), sensors);
+    }
+
+    {
         QJsonObject history;
         const QString probePath =
             QDir::tempPath()

@@ -3,6 +3,7 @@
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
 #include "GpuStatus.h"
+#include "SensorStatus.h"
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
@@ -110,6 +111,7 @@ struct DisplaySnapshot {
     QList<ProcessDiskConsumer> processDiskTop;
     GpuReading gpu;
     bool gpuWarming = false;
+    SensorsSnapshot sensors;
     bool gpuClientsAvailable = false;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;

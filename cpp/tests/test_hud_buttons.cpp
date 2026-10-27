@@ -249,6 +249,64 @@ int main(int argc, char *argv[]) {
     withProcs.gpu.devices = {gpuDev};
     withProcs.gpu.processes = {gpuProc};
     withProcs.gpuClientsAvailable = true;
+
+    SensorChip cpuChip;
+    cpuChip.name = QStringLiteral("coretemp");
+    SensorReading pkgTemp;
+    pkgTemp.chip = cpuChip.name;
+    pkgTemp.key = QStringLiteral("temp1");
+    pkgTemp.label = QStringLiteral("Package id 0");
+    pkgTemp.kind = SensorKind::Temperature;
+    pkgTemp.value = 87.0;
+    pkgTemp.hasCrit = true;
+    pkgTemp.crit = 100.0;
+    SensorReading cpuFan;
+    cpuFan.chip = cpuChip.name;
+    cpuFan.key = QStringLiteral("fan1");
+    cpuFan.label = QStringLiteral("cpu fan");
+    cpuFan.kind = SensorKind::Fan;
+    cpuFan.value = 3200.0;
+    cpuChip.readings = {pkgTemp, cpuFan};
+    SensorChip nvmeChip;
+    nvmeChip.name = QStringLiteral("nvme");
+    SensorReading nvmeTemp;
+    nvmeTemp.chip = nvmeChip.name;
+    nvmeTemp.key = QStringLiteral("temp1");
+    nvmeTemp.label = QStringLiteral("Composite");
+    nvmeTemp.kind = SensorKind::Temperature;
+    nvmeTemp.value = 44.0;
+    nvmeChip.readings = {nvmeTemp};
+    SensorChip battChip;
+    battChip.name = QStringLiteral("BAT0");
+    SensorReading battPower;
+    battPower.chip = battChip.name;
+    battPower.key = QStringLiteral("power1");
+    battPower.label = QStringLiteral("battery");
+    battPower.kind = SensorKind::Power;
+    battPower.value = 12.5;
+    battChip.readings = {battPower};
+    withProcs.sensors.chips = {cpuChip, nvmeChip, battChip};
+    BatteryReading battery;
+    battery.name = QStringLiteral("BAT0");
+    battery.model = QStringLiteral("Primary");
+    battery.manufacturer = QStringLiteral("HP");
+    battery.technology = QStringLiteral("Li-ion");
+    battery.state = BatteryState::Discharging;
+    battery.capacityPercent = 15;
+    battery.energyNowWh = 5.7;
+    battery.energyFullWh = 38.1;
+    battery.energyDesignWh = 41.0;
+    battery.powerW = 8.2;
+    battery.voltageV = 12.4;
+    battery.cycleCount = 93;
+    battery.timeToEmptyMin = 41;
+    withProcs.sensors.batteries = {battery};
+    AdapterReading adapter;
+    adapter.name = QStringLiteral("ADP1");
+    adapter.online = false;
+    withProcs.sensors.adapters = {adapter};
+    recomputeSensorTotals(withProcs.sensors);
+    withProcs.sensors.available = true;
     hud.setSnapshot(withProcs);
 
     auto *dashApp = hud.findChild<QLabel *>(QStringLiteral("ddApp"));
@@ -387,14 +445,85 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // ---- M79 sensors ----
+    {
+        auto *hot = hud.findChild<QLabel *>(QStringLiteral("ddSensorTileHot"));
+        auto *fans = hud.findChild<QLabel *>(QStringLiteral("ddSensorTileFans"));
+        auto *power =
+            hud.findChild<QLabel *>(QStringLiteral("ddSensorTilePower"));
+        auto *batteryTile =
+            hud.findChild<QLabel *>(QStringLiteral("ddSensorTileBattery"));
+        auto *summary =
+            hud.findChild<QLabel *>(QStringLiteral("ddSensorSummary"));
+        auto *tree = hud.findChild<QTreeWidget *>(QStringLiteral("ddSensorTree"));
+        auto *battSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddBatterySummary"));
+        auto *battDetail =
+            hud.findChild<QLabel *>(QStringLiteral("ddBatteryDetail"));
+        auto *adapters = hud.findChild<QLabel *>(QStringLiteral("ddAdapters"));
+        check(hot != nullptr && fans != nullptr && power != nullptr
+                  && batteryTile != nullptr && tree != nullptr,
+              "sensors: page builds tiles and the readings tree");
+        check(hot->text() == QStringLiteral("87.0 \u00b0C")
+                  && hot->styleSheet().contains(QStringLiteral("#"))
+                  && fans->text() == QStringLiteral("3200 rpm")
+                  && power->text() == QStringLiteral("12.5 W"),
+              "sensors: tiles show hottest, fan and power");
+        check(batteryTile->text() == QStringLiteral("15%"),
+              "sensors: battery tile shows the charge, state stays in the card");
+        check(summary->text().contains(QStringLiteral("3 chips"))
+                  && summary->text().contains(QStringLiteral("hottest 87.0"))
+                  && summary->text().contains(QStringLiteral("fan max 3200")),
+              "sensors: summary states the hwmon totals");
+        check(tree->columnCount() == 4 && tree->topLevelItemCount() == 4,
+              "sensors: tree lists temperature, fan and power readings");
+        bool sawCritRow = false;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = tree->topLevelItem(i);
+            if (item->text(1) == QStringLiteral("Package id 0")
+                && item->text(3).startsWith(QStringLiteral("crit 100.0"))) {
+                sawCritRow = true;
+            }
+        }
+        check(sawCritRow, "sensors: a crit threshold renders in the limit cell");
+        check(battSummary->text().contains(QStringLiteral("BAT0 15%"))
+                  && battSummary->text().contains(
+                      QStringLiteral("discharging"))
+                  && battSummary->text().contains(QStringLiteral("HP Primary")),
+              "sensors: battery summary states charge, state and identity");
+        check(battDetail->text().contains(QStringLiteral("health 93%"))
+                  && battDetail->text().contains(QStringLiteral("cycles     93"))
+                  && battDetail->text().contains(QStringLiteral("8.20 W"))
+                  && battDetail->text().contains(QStringLiteral("41m left")),
+              "sensors: battery detail states health, cycles and power");
+        check(adapters->text() == QStringLiteral("ac: ADP1 offline"),
+              "sensors: adapter line states the AC state");
+
+        DisplaySnapshot emptySensors = withProcs;
+        emptySensors.sensors = SensorsSnapshot{};
+        emptySensors.sensors.note = QStringLiteral(
+            "battery: no system battery reported (desktop or VM)");
+        hud.setSnapshot(emptySensors);
+        check(summary->text().contains(QStringLiteral("no system battery"))
+                  && hot->text() == QStringLiteral("--")
+                  && tree->topLevelItemCount() == 0,
+              "sensors: an empty snapshot keeps the honest note, no fake rows");
+
+        // The low battery in the fixture would fire the battery_low monitor
+        // and pollute the incident counts the silence test compares, so the
+        // shared fixture goes back to "no sensor surface" afterwards.
+        withProcs.sensors = SensorsSnapshot{};
+        hud.setSnapshot(withProcs);
+    }
+
     {
         auto *railForHistory =
             hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         check(railForHistory != nullptr
-                  && railForHistory->count() > 26
-                  && railForHistory->item(26)->text()
-                         == QStringLiteral("History")
+                  && railForHistory->count() > 27
                   && railForHistory->item(27)->text()
+                         == QStringLiteral("History")
+                  && railForHistory->item(28)->text()
                          == QStringLiteral("Cost"),
               "rail inserts the History page before Cost");
 
@@ -570,6 +699,26 @@ int main(int argc, char *argv[]) {
             }
         }
         check(banded, "monitor threshold reaches the cpu chart as a band");
+
+        bool tempBanded = false;
+        bool batteryRule = false;
+        for (const AlertRule &rule : monitorRules) {
+            if (rule.id == QStringLiteral("battery_low")) {
+                batteryRule = !rule.above && rule.threshold == 20.0;
+            }
+        }
+        for (TimeseriesChart *chart :
+             hud.findChildren<TimeseriesChart *>()) {
+            for (const ChartBand &band : chart->bands()) {
+                if (band.value == 85.0 && band.above
+                    && band.label.contains(QStringLiteral("Warning"))) {
+                    tempBanded = true;
+                }
+            }
+        }
+        check(tempBanded && batteryRule,
+              "host_temp bands the temperature chart and battery_low fires "
+              "below its threshold");
 
         QStringList requested;
         int requestedMinutes = 0;
@@ -1014,7 +1163,7 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 29;
+            constexpr int kRailCount = 30;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
             rail->setCurrentRow(settingsRow);

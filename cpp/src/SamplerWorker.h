@@ -51,6 +51,7 @@ private:
                         const QList<linuxproc::SocketInfo> &sockets);
     void fillProcessDisk(DisplaySnapshot &snapshot);
     void fillGpu(DisplaySnapshot &snapshot);
+    void fillSensors(DisplaySnapshot &snapshot);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -101,6 +102,10 @@ private:
     qint64 m_gpuWindowMs = 0;
     int m_gpuRotate = 0;
     bool m_gpuWarming = true;
+    // Sensors: temperatures/fans/power and battery state change slowly, so
+    // one probe per 2-5 s window is plenty (Stats polls the battery at 5 s).
+    SensorsSnapshot m_sensors;
+    qint64 m_sensorsStampMs = 0;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

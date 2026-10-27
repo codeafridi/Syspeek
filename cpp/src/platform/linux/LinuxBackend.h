@@ -45,6 +45,7 @@ public:
                              long long &writeBytes) override;
     bool applyProcessAction(const ProcessAction &action, QString *error) override;
     GpuReading gpuInfo() override;
+    SensorsSnapshot sensors() override;
     bool gpuClients(const QList<int> &pids,
                     QList<GpuEngineSample> &out) override;
     bool sumRssKb(const QList<int> &pids, unsigned long long &out) override;

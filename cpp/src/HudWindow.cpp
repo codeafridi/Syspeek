@@ -345,6 +345,26 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     } else {
         m_alertInput.stealValid = false;
     }
+    if (snapshot.sensors.available && snapshot.sensors.hottestCelsius >= 0.0) {
+        m_alertInput.tempValid = true;
+        m_alertInput.tempCelsius = snapshot.sensors.hottestCelsius;
+    } else {
+        m_alertInput.tempValid = false;
+    }
+    double lowestCharge = -1.0;
+    for (const BatteryReading &battery : snapshot.sensors.batteries) {
+        if (battery.capacityPercent < 0) {
+            continue;
+        }
+        const double charge = static_cast<double>(battery.capacityPercent);
+        lowestCharge = lowestCharge < 0.0 ? charge : qMin(lowestCharge, charge);
+    }
+    if (lowestCharge >= 0.0) {
+        m_alertInput.batteryValid = true;
+        m_alertInput.batteryPercent = lowestCharge;
+    } else {
+        m_alertInput.batteryValid = false;
+    }
     if (snapshot.kernelLimits.available && snapshot.kernelLimits.fdMax > 0) {
         m_alertInput.kernelFdValid = true;
         m_alertInput.kernelFdPct =

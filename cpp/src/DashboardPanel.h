@@ -134,6 +134,7 @@ signals:
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
     void updateSloPanel(const SloReport &report);
+    void updateSensorsPanel(const DisplaySnapshot &snapshot);
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -155,6 +156,7 @@ private:
     QWidget *buildCostView();
     QWidget *buildDisksView();
     QWidget *buildGpuView();
+    QWidget *buildSensorsView();
     QWidget *buildHostView();
     QWidget *buildSecurityView();
     QWidget *buildTracesView();
@@ -181,6 +183,8 @@ private:
     bool m_osGpu = true;
     bool m_osGpuClients = true;
     bool m_osGpuProcess = true;
+    bool m_osSensors = false;
+    bool m_osBattery = false;
     bool m_osProcessSignals = true;
     bool m_osProcessRenice = true;
     bool m_osProcessIonice = true;
@@ -478,6 +482,19 @@ private:
     QLabel *m_gpuProcessNote = nullptr;
     QTreeWidget *m_gpuTable = nullptr;
     TimeseriesChart *m_chartGpu = nullptr;
+
+    // Sensors page (M79): hwmon thermal/fan/power + battery and AC state.
+    QLabel *m_sensorTileHot = nullptr;
+    QLabel *m_sensorTileFans = nullptr;
+    QLabel *m_sensorTilePower = nullptr;
+    QLabel *m_sensorTileBattery = nullptr;
+    QLabel *m_sensorSummary = nullptr;
+    QLabel *m_batterySummary = nullptr;
+    QLabel *m_batteryDetail = nullptr;
+    QLabel *m_adapters = nullptr;
+    QTreeWidget *m_sensorTree = nullptr;
+    TimeseriesChart *m_chartSensorTemp = nullptr;
+    TimeseriesChart *m_chartSensorPower = nullptr;
 
     // Datadog-style Host page (M61k): live-vitals tiles + inventory cards.
     QLabel *m_hostTileCpu = nullptr;

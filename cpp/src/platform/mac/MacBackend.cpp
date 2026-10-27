@@ -1,6 +1,7 @@
 #include "MacBackend.h"
 
 #include "MacGpu.h"
+#include "MacSensors.h"
 
 #ifdef Q_OS_MACOS
 
@@ -239,6 +240,7 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.processSignals = true;
     caps.processRenice = true;
     caps.processPause = true;
+    caps.battery = true;
     return caps;
 }
 
@@ -862,6 +864,10 @@ bool MacBackend::processDiskCounters(int pid, long long &readBytes,
 
 GpuReading MacBackend::gpuInfo() {
     return macgpu::collect();
+}
+
+SensorsSnapshot MacBackend::sensors() {
+    return macsensors::collect();
 }
 
 int MacBackend::countFds(int pid) {

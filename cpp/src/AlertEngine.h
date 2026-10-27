@@ -46,6 +46,10 @@ struct AlertInput {
     double kernelFdPct = 0.0;          // file-nr allocated % of max
     bool stealValid = false;
     double stealPercent = 0.0;
+    bool tempValid = false;
+    double tempCelsius = 0.0;          // hottest hwmon sensor
+    bool batteryValid = false;
+    double batteryPercent = 100.0;     // lowest battery charge
 };
 
 class AlertEngine {

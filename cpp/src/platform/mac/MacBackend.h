@@ -38,6 +38,7 @@ public:
     bool processDiskCounters(int pid, long long &readBytes,
                              long long &writeBytes) override;
     GpuReading gpuInfo() override;
+    SensorsSnapshot sensors() override;
     int countFds(int pid) override;
     QList<QString> fdTargets(int pid) override;
     QByteArray processEnv(int pid) override;

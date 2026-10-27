@@ -37,6 +37,12 @@ bool metricFor(const AlertRule &rule, const AlertInput &input, double &value,
     } else if (rule.id == QLatin1String("host_steal")) {
         value = input.stealPercent;
         valid = input.stealValid;
+    } else if (rule.id == QLatin1String("host_temp")) {
+        value = input.tempCelsius;
+        valid = input.tempValid;
+    } else if (rule.id == QLatin1String("battery_low")) {
+        value = input.batteryPercent;
+        valid = input.batteryValid;
     } else {
         valid = false;
     }
@@ -88,6 +94,11 @@ QList<AlertRule> defaultAlertRules() {
         {QStringLiteral("host_steal"),
          QStringLiteral("Host CPU steal high"), QStringLiteral("warning"),
          5.0, true, 5, QStringLiteral("%")},
+        {QStringLiteral("host_temp"),
+         QStringLiteral("Host temperature high"), QStringLiteral("warning"),
+         85.0, true, 3, QStringLiteral(" \u00b0C")},
+        {QStringLiteral("battery_low"), QStringLiteral("Battery low"),
+         QStringLiteral("warning"), 20.0, false, 3, QStringLiteral("%")},
     };
 }
 

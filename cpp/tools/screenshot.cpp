@@ -1,6 +1,7 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
 #include "HistoryLog.h"
+#include "SensorStatus.h"
 
 #include <QApplication>
 #include <QListWidget>
@@ -346,6 +347,99 @@ DisplaySnapshot demoSnapshot(int tick) {
     disk.utilPercent = std::clamp(18.0 + 55.0 * std::abs(w1), 0.0, 99.0);
     s.disks = {disk};
     s.disksAvailable = true;
+
+    SensorChip cpuChip;
+    cpuChip.name = QStringLiteral("coretemp");
+    {
+        SensorReading pkg;
+        pkg.chip = cpuChip.name;
+        pkg.key = QStringLiteral("temp1");
+        pkg.label = QStringLiteral("Package id 0");
+        pkg.kind = SensorKind::Temperature;
+        pkg.value = std::clamp(58.0 + 13.0 * w2 + 3.0 * w4, 40.0, 96.0);
+        pkg.hasCrit = true;
+        pkg.crit = 100.0;
+        pkg.hasWarn = true;
+        pkg.warn = 95.0;
+        SensorReading core0;
+        core0.chip = cpuChip.name;
+        core0.key = QStringLiteral("temp2");
+        core0.label = QStringLiteral("Core 0");
+        core0.kind = SensorKind::Temperature;
+        core0.value = pkg.value - 4.0;
+        cpuChip.readings = {pkg, core0};
+    }
+    SensorChip boardChip;
+    boardChip.name = QStringLiteral("acpitz");
+    {
+        SensorReading board;
+        board.chip = boardChip.name;
+        board.key = QStringLiteral("temp1");
+        board.label = QStringLiteral("temp1");
+        board.kind = SensorKind::Temperature;
+        board.value = 44.5;
+        boardChip.readings = {board};
+    }
+    SensorChip nvmeChip;
+    nvmeChip.name = QStringLiteral("nvme");
+    {
+        SensorReading composite;
+        composite.chip = nvmeChip.name;
+        composite.key = QStringLiteral("temp1");
+        composite.label = QStringLiteral("Composite");
+        composite.kind = SensorKind::Temperature;
+        composite.value = 47.0 + 4.0 * w3;
+        composite.hasWarn = true;
+        composite.warn = 80.0;
+        nvmeChip.readings = {composite};
+    }
+    SensorChip fanChip;
+    fanChip.name = QStringLiteral("hp");
+    {
+        SensorReading cpuFan;
+        cpuFan.chip = fanChip.name;
+        cpuFan.key = QStringLiteral("fan1");
+        cpuFan.label = QStringLiteral("cpu_fan");
+        cpuFan.kind = SensorKind::Fan;
+        cpuFan.value = 2900.0 + 420.0 * std::abs(w1);
+        SensorReading caseFan;
+        caseFan.chip = fanChip.name;
+        caseFan.key = QStringLiteral("fan2");
+        caseFan.label = QStringLiteral("fan2");
+        caseFan.kind = SensorKind::Fan;
+        caseFan.value = 0.0;
+        SensorReading rail;
+        rail.chip = fanChip.name;
+        rail.key = QStringLiteral("power1");
+        rail.label = QStringLiteral("cpu_power");
+        rail.kind = SensorKind::Power;
+        rail.value = 11.5 + 4.5 * std::abs(w1);
+        fanChip.readings = {cpuFan, caseFan, rail};
+    }
+    s.sensors.chips = {cpuChip, boardChip, nvmeChip, fanChip};
+
+    BatteryReading battery;
+    battery.name = QStringLiteral("BAT0");
+    battery.model = QStringLiteral("Primary");
+    battery.manufacturer = QStringLiteral("HP");
+    battery.technology = QStringLiteral("Li-ion");
+    battery.state = BatteryState::Discharging;
+    battery.capacityPercent = 18;
+    battery.energyNowWh = 6.9;
+    battery.energyFullWh = 38.1;
+    battery.energyDesignWh = 41.0;
+    battery.powerW = 8.4;
+    battery.voltageV = 12.4;
+    battery.cycleCount = 93;
+    battery.timeToEmptyMin = 49;
+    battery.temperatureC = 31.0;
+    s.sensors.batteries = {battery};
+    AdapterReading adapter;
+    adapter.name = QStringLiteral("ADP1");
+    adapter.online = false;
+    s.sensors.adapters = {adapter};
+    s.sensors.available = true;
+    recomputeSensorTotals(s.sensors);
 
     return s;
 }

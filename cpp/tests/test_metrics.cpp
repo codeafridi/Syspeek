@@ -38,8 +38,10 @@
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "ProcessActions.h"
+#include "SensorStatus.h"
 #include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
+#include <QDir>
 #include <QFile>
 #include <QEventLoop>
 #include <QJsonArray>
@@ -3462,6 +3464,300 @@ int main(int argc, char *argv[]) {
         ok = true;
         services.restartUnit(QStringLiteral("   "));
         check(!ok, "actions: a whitespace-only unit is refused too");
+    }
+
+    {
+        check(sensorKindFromKey(QStringLiteral("temp1"))
+                      == SensorKind::Temperature
+                  && sensorKindFromKey(QStringLiteral("fan2"))
+                         == SensorKind::Fan
+                  && sensorKindFromKey(QStringLiteral("in0"))
+                         == SensorKind::Voltage
+                  && sensorKindFromKey(QStringLiteral("power1"))
+                         == SensorKind::Power
+                  && sensorKindFromKey(QStringLiteral("curr1"))
+                         == SensorKind::Current
+                  && sensorKindFromKey(QStringLiteral("energy1"))
+                         == SensorKind::Energy
+                  && sensorKindFromKey(QStringLiteral("Humidity1"))
+                         == SensorKind::Other,
+              "sensors: sysfs key families map to reading kinds");
+        check(qFuzzyCompare(sensorScale(SensorKind::Temperature), 0.001)
+                  && qFuzzyCompare(sensorScale(SensorKind::Power), 0.000001)
+                  && qFuzzyCompare(sensorScale(SensorKind::Fan), 1.0),
+              "sensors: millidegree/microwatt/fan sysfs scales");
+
+        SensorReading hot;
+        hot.kind = SensorKind::Temperature;
+        hot.value = 53.0;
+        check(sensorValueText(hot) == QStringLiteral("53.0 \u00b0C"),
+              "sensors: temperature text keeps one decimal and the unit");
+        SensorReading fanValue;
+        fanValue.kind = SensorKind::Fan;
+        fanValue.value = 2986.0;
+        check(sensorValueText(fanValue) == QStringLiteral("2986 rpm"),
+              "sensors: fan text is a whole rpm number");
+        SensorReading wattsReading;
+        wattsReading.kind = SensorKind::Power;
+        wattsReading.value = 12.5;
+        check(sensorValueText(wattsReading) == QStringLiteral("12.50 W"),
+              "sensors: power text keeps two decimals");
+
+        hot.hasCrit = true;
+        hot.crit = 50.0;
+        check(sensorSeverity(hot) == 2,
+              "sensors: a reading at or past crit is severity 2");
+        hot.crit = 100.0;
+        hot.hasWarn = true;
+        hot.warn = 45.0;
+        check(sensorSeverity(hot) == 1,
+              "sensors: a reading past high is severity 1");
+        hot.warn = 80.0;
+        check(sensorSeverity(hot) == 0,
+              "sensors: a reading under every limit is severity 0");
+
+        QTemporaryDir tree;
+        check(tree.isValid(), "sensors: temp sysfs tree created");
+        const QString hwmon = tree.path() + QStringLiteral("/hwmon");
+        const QString power = tree.path() + QStringLiteral("/power_supply");
+
+        auto writeFile = [](const QString &path, const QString &content) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                return false;
+            }
+            const bool ok = file.write(content.toUtf8()) >= 0;
+            file.close();
+            return ok;
+        };
+        bool fixtureOk = true;
+        const auto mkdir = [&fixtureOk](const QString &path) {
+            if (!QDir().mkpath(path)) {
+                fixtureOk = false;
+            }
+        };
+
+        mkdir(hwmon + QStringLiteral("/hwmon0"));
+        mkdir(hwmon + QStringLiteral("/hwmon1"));
+        mkdir(hwmon + QStringLiteral("/hwmon2"));
+        mkdir(hwmon + QStringLiteral("/hwmon3"));
+        fixtureOk = fixtureOk
+            && writeFile(hwmon + QStringLiteral("/hwmon0/name"),
+                         QStringLiteral("coretemp\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp1_input"),
+                         QStringLiteral("53000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp1_label"),
+                         QStringLiteral("Package id 0\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp1_crit"),
+                         QStringLiteral("100000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp1_max"),
+                         QStringLiteral("95000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp2_input"),
+                         QStringLiteral("45000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/temp2_label"),
+                         QStringLiteral("Core 0\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/power1_input"),
+                         QStringLiteral("12500000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon0/power1_label"),
+                         QStringLiteral("package\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon1/name"),
+                         QStringLiteral("nvme\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon1/temp1_input"),
+                         QStringLiteral("43850\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon1/temp1_label"),
+                         QStringLiteral("Composite\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon2/name"),
+                         QStringLiteral("BAT0\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon2/in0_input"),
+                         QStringLiteral("12680000\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon2/power1_input"),
+                         QStringLiteral("0\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon3/name"),
+                         QStringLiteral("hp\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon3/fan1_input"),
+                         QStringLiteral("2986\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon3/fan1_label"),
+                         QStringLiteral("cpu_fan\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon3/fan2_input"),
+                         QStringLiteral("0\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon3/fan2_label"),
+                         QStringLiteral("fan2\n"));
+        check(fixtureOk, "sensors: hwmon fixture written");
+
+        mkdir(power + QStringLiteral("/BAT0"));
+        mkdir(power + QStringLiteral("/BAT1"));
+        mkdir(power + QStringLiteral("/ADP1"));
+        fixtureOk = fixtureOk
+            && writeFile(power + QStringLiteral("/BAT0/type"),
+                         QStringLiteral("Battery\n"))
+            && writeFile(power + QStringLiteral("/BAT0/status"),
+                         QStringLiteral("Discharging\n"))
+            && writeFile(power + QStringLiteral("/BAT0/capacity"),
+                         QStringLiteral("15\n"))
+            && writeFile(power + QStringLiteral("/BAT0/cycle_count"),
+                         QStringLiteral("93\n"))
+            && writeFile(power + QStringLiteral("/BAT0/energy_now"),
+                         QStringLiteral("5700000\n"))
+            && writeFile(power + QStringLiteral("/BAT0/energy_full"),
+                         QStringLiteral("38092000\n"))
+            && writeFile(power + QStringLiteral("/BAT0/energy_full_design"),
+                         QStringLiteral("41040000\n"))
+            && writeFile(power + QStringLiteral("/BAT0/power_now"),
+                         QStringLiteral("8200000\n"))
+            && writeFile(power + QStringLiteral("/BAT0/voltage_now"),
+                         QStringLiteral("12400000\n"))
+            && writeFile(power + QStringLiteral("/BAT0/model_name"),
+                         QStringLiteral("Primary\n"))
+            && writeFile(power + QStringLiteral("/BAT0/manufacturer"),
+                         QStringLiteral("HP\n"))
+            && writeFile(power + QStringLiteral("/BAT0/technology"),
+                         QStringLiteral("Li-ion\n"))
+            && writeFile(power + QStringLiteral("/BAT0/time_to_empty_now"),
+                         QStringLiteral("41\n"))
+            && writeFile(power + QStringLiteral("/BAT1/type"),
+                         QStringLiteral("Battery\n"))
+            && writeFile(power + QStringLiteral("/BAT1/status"),
+                         QStringLiteral("Charging\n"))
+            && writeFile(power + QStringLiteral("/BAT1/charge_now"),
+                         QStringLiteral("2000000\n"))
+            && writeFile(power + QStringLiteral("/BAT1/charge_full"),
+                         QStringLiteral("4000000\n"))
+            && writeFile(power + QStringLiteral("/BAT1/charge_full_design"),
+                         QStringLiteral("5000000\n"))
+            && writeFile(power + QStringLiteral("/BAT1/voltage_now"),
+                         QStringLiteral("12000000\n"))
+            && writeFile(power + QStringLiteral("/BAT1/power_now"),
+                         QStringLiteral("6000000\n"))
+            && writeFile(power + QStringLiteral("/ADP1/type"),
+                         QStringLiteral("Mains\n"))
+            && writeFile(power + QStringLiteral("/ADP1/online"),
+                         QStringLiteral("0\n"));
+        check(fixtureOk, "sensors: power_supply fixture written");
+
+        const SensorsSnapshot collected =
+            collectSensorsLinux(hwmon, power);
+        check(collected.available && collected.chips.size() == 4,
+              "sensors: every hwmon chip with readings is collected");
+        check(batteryHealthPercent(collected.batteries.value(0)) == 93,
+              "sensors: energy_full over design gives battery health");
+        check(collected.batteries.size() == 2
+                  && qAbs(collected.batteries.value(1).energyNowWh - 24.0) < 0.01
+                  && qAbs(collected.batteries.value(1).energyFullWh - 48.0) < 0.01
+                  && qAbs(collected.batteries.value(1).energyDesignWh - 60.0)
+                         < 0.01,
+              "sensors: charge-based batteries convert to Wh through voltage");
+        check(qAbs(collected.batteries.value(0).energyNowWh - 5.7) < 0.01
+                  && qAbs(collected.batteries.value(0).powerW - 8.2) < 0.01
+                  && qAbs(collected.batteries.value(0).voltageV - 12.4) < 0.01
+                  && collected.batteries.value(0).cycleCount == 93
+                  && collected.batteries.value(0).timeToEmptyMin == 41
+                  && collected.batteries.value(0).capacityPercent == 15,
+              "sensors: energy_now/power_now/voltage_now decode to real units");
+        check(collected.batteries.value(0).state == BatteryState::Discharging
+                  && collected.batteries.value(1).state
+                         == BatteryState::Charging,
+              "sensors: sysfs status words map to battery states");
+        check(collected.batteries.value(1).timeToFullMin == 240,
+              "sensors: charge time is computed when the kernel omits it");
+        check(collected.adapters.size() == 1 && !collected.adapters.value(0).online,
+              "sensors: the mains adapter is collected with its online state");
+
+        check(qAbs(collected.hottestCelsius - 53.0) < 0.001
+                  && collected.hottestLabel.contains(
+                      QStringLiteral("Package id 0")),
+              "sensors: hottest reading is the highest temperature");
+        check(collected.fanCount == 2
+                  && qAbs(collected.maxFanRpm - 2986.0) < 0.001,
+              "sensors: fan count includes present zero-rpm fans");
+        check(qAbs(collected.totalPowerW - 12.5) < 0.001,
+              "sensors: power readings sum into the snapshot total");
+
+        const SensorReading &pkgReading = collected.chips.value(0).readings.value(0);
+        check(qAbs(pkgReading.crit - 100.0) < 0.001
+                  && pkgReading.hasCrit
+                  && qAbs(pkgReading.warn - 95.0) < 0.001
+                  && pkgReading.hasWarn,
+              "sensors: crit and high thresholds scale with the reading");
+        check(collected.chips.value(3).readings.value(1).label
+                      == QStringLiteral("fan2")
+                  && collected.chips.value(3).readings.value(1).value == 0.0,
+              "sensors: an unlabeled sensor falls back to its key");
+
+        check(sensorsSummaryText(collected)
+                      .contains(QStringLiteral("4 chips"))
+                  && sensorsSummaryText(collected)
+                         .contains(QStringLiteral("hottest 53.0"))
+                  && sensorsSummaryText(collected)
+                         .contains(QStringLiteral("power 12.50 W")),
+              "sensors: summary states chips, hottest and power");
+        check(sensorsThermalText(collected)
+                      .contains(QStringLiteral("Composite")),
+              "sensors: thermal text lists the per-chip hottest sensor");
+        check(batterySummaryText(collected.batteries.value(0))
+                      .contains(QStringLiteral("BAT0 15%"))
+                  && batterySummaryText(collected.batteries.value(0))
+                         .contains(QStringLiteral("HP Primary")),
+              "sensors: battery summary states charge and identity");
+        check(batteryDetailText(collected.batteries.value(0))
+                      .contains(QStringLiteral("health 93%"))
+                  && batteryDetailText(collected.batteries.value(0))
+                         .contains(QStringLiteral("41m left")),
+              "sensors: battery detail states health and runtime");
+        check(adaptersText(collected) == QStringLiteral("ac: ADP1 offline"),
+              "sensors: adapter text renders the online state");
+
+        const SensorsSnapshot none =
+            collectSensorsLinux(tree.path() + QStringLiteral("/absent"),
+                                tree.path() + QStringLiteral("/absent"));
+        check(!none.available
+                  && none.note.contains(QStringLiteral("no hwmon or power_supply")),
+              "sensors: an empty sysfs tree says so instead of staying blank");
+
+        DisplaySnapshot sensorSnap;
+        sensorSnap.sensors = collected;
+        const QString prom = prometheusText(sensorSnap);
+        check(prom.contains(QStringLiteral(
+                  "syspeek_sensor_celsius{chip=\"coretemp\""))
+                  && prom.contains(QStringLiteral("syspeek_sensor_fan_rpm"))
+                  && prom.contains(QStringLiteral("syspeek_sensor_power_watts"))
+                  && prom.contains(QStringLiteral("syspeek_sensor_limit_celsius")),
+              "sensors: prometheus exposes per-sensor gauges with labels");
+        check(prom.contains(QStringLiteral("syspeek_battery_charge_percent"))
+                  && prom.contains(QStringLiteral(
+                      "syspeek_battery_energy_watt_hours"))
+                  && prom.contains(QStringLiteral("syspeek_ac_online{"))
+                  && !prometheusText(DisplaySnapshot{})
+                          .contains(QStringLiteral("syspeek_sensor_")),
+              "sensors: prometheus exposes battery gauges only when present");
+
+        AlertEngine engine;
+        AlertInput input;
+        input.tempValid = true;
+        input.tempCelsius = 90.0;
+        input.batteryValid = true;
+        input.batteryPercent = 15.0;
+        QList<Alert> fired;
+        for (int i = 0; i < 3; ++i) {
+            const QList<Alert> batch = engine.update(input, 1000 + i * 1000);
+            fired.append(batch);
+        }
+        bool sawTemp = false;
+        bool sawBattery = false;
+        for (const Alert &alert : fired) {
+            if (alert.id == QStringLiteral("host_temp")) {
+                sawTemp = true;
+            }
+            if (alert.id == QStringLiteral("battery_low")) {
+                sawBattery = true;
+            }
+        }
+        check(sawTemp && sawBattery,
+              "sensors: hot sensors and a low battery raise monitors");
+        input.tempValid = false;
+        input.batteryValid = false;
+        engine.update(input, 10000);
+        check(engine.active().isEmpty(),
+              "sensors: invalid sensor samples never keep a monitor firing");
     }
 
     std::printf("%d failure(s)\n", failures);
