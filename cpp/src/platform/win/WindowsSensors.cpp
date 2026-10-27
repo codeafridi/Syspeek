@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <setupapi.h>
+#include <winioctl.h>
 
 #include <cmath>
 
@@ -110,12 +111,14 @@ QString batteryString(HANDLE device, ULONG tag,
     return QString::fromWCharArray(buffer).trimmed();
 }
 
-QString deviceRegistryString(HDEVINFO devices,
-                             PSP_DEVICE_INTERFACE_DATA interfaceData,
+QString deviceRegistryString(HDEVINFO devices, PSP_DEVINFO_DATA deviceInfo,
                              DWORD property) {
+    if (deviceInfo == nullptr) {
+        return QString();
+    }
     wchar_t buffer[512] = {};
     DWORD type = 0;
-    if (!SetupDiGetDeviceRegistryPropertyW(devices, interfaceData, property,
+    if (!SetupDiGetDeviceRegistryPropertyW(devices, deviceInfo, property,
                                            &type,
                                            reinterpret_cast<PBYTE>(buffer),
                                            sizeof(buffer), nullptr)) {
@@ -139,6 +142,13 @@ SensorsSnapshot collect() {
         return out;
     }
 
+    // The interface set resolves device paths; a separate device information
+    // set is what carries the registry description/manufacturer properties
+    // (SetupDiGetDeviceRegistryPropertyW takes SP_DEVINFO_DATA, never
+    // SP_DEVICE_INTERFACE_DATA).
+    const HDEVINFO deviceInfoSet = SetupDiGetClassDevsW(
+        &GUID_DEVICE_BATTERY, nullptr, nullptr, DIGCF_PRESENT);
+
     int denied = 0;
     for (DWORD index = 0;; ++index) {
         SP_DEVICE_INTERFACE_DATA interfaceData = {};
@@ -147,6 +157,12 @@ SensorsSnapshot collect() {
                                          index, &interfaceData)) {
             break;
         }
+
+        SP_DEVINFO_DATA deviceInfo = {};
+        deviceInfo.cbSize = sizeof(deviceInfo);
+        const bool haveDeviceInfo =
+            deviceInfoSet != INVALID_HANDLE_VALUE
+            && SetupDiEnumDeviceInfo(deviceInfoSet, index, &deviceInfo);
 
         DWORD needed = 0;
         SetupDiGetDeviceInterfaceDetailW(devices, &interfaceData, nullptr, 0,
@@ -205,8 +221,9 @@ SensorsSnapshot collect() {
         BatteryReading battery;
         battery.name = batteryString(device, tag, BatteryDeviceName);
         if (battery.name.isEmpty()) {
-            battery.name = deviceRegistryString(devices, &interfaceData,
-                                                SPDRP_DEVICEDESC);
+            battery.name = deviceRegistryString(
+                deviceInfoSet, haveDeviceInfo ? &deviceInfo : nullptr,
+                SPDRP_DEVICEDESC);
         }
         if (battery.name.isEmpty()) {
             battery.name = QStringLiteral("battery%1").arg(index);
@@ -214,8 +231,9 @@ SensorsSnapshot collect() {
         battery.manufacturer =
             batteryString(device, tag, BatteryManufactureName);
         if (battery.manufacturer.isEmpty()) {
-            battery.manufacturer =
-                deviceRegistryString(devices, &interfaceData, SPDRP_MFG);
+            battery.manufacturer = deviceRegistryString(
+                deviceInfoSet, haveDeviceInfo ? &deviceInfo : nullptr,
+                SPDRP_MFG);
         }
         battery.technology =
             QString::fromLatin1(reinterpret_cast<const char *>(info.Chemistry),
@@ -312,6 +330,9 @@ SensorsSnapshot collect() {
         CloseHandle(device);
     }
 
+    if (deviceInfoSet != INVALID_HANDLE_VALUE) {
+        SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    }
     SetupDiDestroyDeviceInfoList(devices);
 
     out.available = !out.batteries.isEmpty();
