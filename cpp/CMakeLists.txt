@@ -197,6 +197,8 @@ add_library(syspeek_core STATIC
     src/ProcessActions.h
     src/SensorStatus.cpp
     src/SensorStatus.h
+    src/OverlayStatus.cpp
+    src/OverlayStatus.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
@@ -214,7 +216,9 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/LinuxBackend.cpp
         src/platform/linux/LinuxBackend.h
         src/platform/linux/LinuxGpu.cpp
-        src/platform/linux/LinuxGpu.h)
+        src/platform/linux/LinuxGpu.h
+        src/platform/linux/LinuxOverlay.cpp
+        src/platform/linux/LinuxOverlay.h)
 elseif(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)

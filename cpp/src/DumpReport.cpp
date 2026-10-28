@@ -3,6 +3,7 @@
 #include "HistoryLog.h"
 #include "MetricsEndpoint.h"
 
+#include "OverlayStatus.h"
 #include "ProcessDiskStatus.h"
 
 #include "DiskStatus.h"
@@ -11,6 +12,7 @@
 #include "SbomStatus.h"
 #include "HostInfoStatus.h"
 #include "platform/PlatformFactory.h"
+#include "platform/linux/LinuxOverlay.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -717,6 +719,62 @@ QString dumpReportJson(int maxProcs) {
         actions.insert(QStringLiteral("invalidPidRefused"), !badOk);
         actions.insert(QStringLiteral("invalidPidError"), refusedError);
         root.insert(QStringLiteral("actions"), actions);
+    }
+
+    {
+        // M80: the overlay's window-server contract. Nothing here needs a
+        // QApplication: the session comes from the environment and the X11
+        // facts from libX11 directly, so `--dump` stays headless.
+        QJsonObject overlay;
+        OverlaySession session = OverlaySession::Unknown;
+        QString wmName;
+        QRect workArea;
+        bool shapeAvailable = false;
+        bool stickySupported = false;
+        const QString platform = backend.platformName();
+        if (platform == QStringLiteral("linux")) {
+            const QString wayland =
+                QString::fromLocal8Bit(qgetenv("WAYLAND_DISPLAY"));
+            const QString x11 = QString::fromLocal8Bit(qgetenv("DISPLAY"));
+            // What the GUI will actually use wins over what the session
+            // claims: QT_QPA_PLATFORM=xcb on a Wayland desktop runs the X11
+            // path, and the dump has to describe that, not the session.
+            QString declared = QString::fromLocal8Bit(qgetenv("QT_QPA_PLATFORM"));
+            if (declared.isEmpty()) {
+                declared = QString::fromLocal8Bit(qgetenv("XDG_SESSION_TYPE"));
+            }
+            session = detectOverlaySession(
+                declared.isEmpty() ? (wayland.isEmpty() ? QString() : wayland)
+                                   : declared,
+                wayland, x11);
+            if (session == OverlaySession::X11) {
+                const linuxoverlay::X11Probe probe = linuxoverlay::probe();
+                wmName = probe.wmName;
+                workArea = probe.workArea;
+                shapeAvailable = probe.shapeAvailable;
+                stickySupported = probe.stickySupported;
+            }
+        } else {
+            session = detectOverlaySession(platform, QString(), QString());
+        }
+
+        overlay.insert(QStringLiteral("session"),
+                       overlaySessionName(session));
+        if (!wmName.isEmpty()) {
+            overlay.insert(QStringLiteral("wm"), wmName);
+        }
+        if (workArea.isValid()) {
+            overlay.insert(QStringLiteral("workArea"), overlayGeometryText(workArea));
+        }
+        overlay.insert(QStringLiteral("shapeAvailable"), shapeAvailable);
+        overlay.insert(QStringLiteral("stickySupported"), stickySupported);
+        overlay.insert(QStringLiteral("clickThroughCapable"),
+                       session == OverlaySession::X11 && shapeAvailable);
+        overlay.insert(QStringLiteral("note"),
+                       overlayClickThroughNote(
+                           session,
+                           session == OverlaySession::X11 && shapeAvailable));
+        root.insert(QStringLiteral("overlay"), overlay);
     }
 
     {

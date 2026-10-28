@@ -4,6 +4,8 @@
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
+#include "platform/linux/LinuxOverlay.h"
+
 #ifdef Q_OS_MACOS
 #include "platform/mac/MacOverlay.h"
 #endif
@@ -23,6 +25,7 @@
 #include <QScreen>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -176,12 +179,23 @@ HudWindow::HudWindow(QWidget *parent)
     m_showHideButton->setCursor(Qt::PointingHandCursor);
     connect(m_showHideButton, &QPushButton::clicked, this, &HudWindow::toggleCompact);
 
+    m_clickButton = new QPushButton(QStringLiteral("CLICK"), this);
+    m_clickButton->setObjectName(QStringLiteral("clickButton"));
+    m_clickButton->setFocusPolicy(Qt::NoFocus);
+    m_clickButton->setCursor(Qt::PointingHandCursor);
+    m_clickButton->setToolTip(QStringLiteral(
+        "click-through: let every click except this button reach the window "
+        "below"));
+    connect(m_clickButton, &QPushButton::clicked, this,
+            &HudWindow::toggleClickThrough);
+
     footer->addWidget(m_moreButton);
+    footer->addWidget(m_clickButton);
     footer->addWidget(m_showHideButton);
     root->addLayout(footer);
 
     for (QPushButton *button : {m_dockerButton, m_kubeButton, m_moreButton,
-                                m_showHideButton}) {
+                                m_clickButton, m_showHideButton}) {
         button->installEventFilter(this);
     }
 
@@ -220,14 +234,14 @@ HudWindow::HudWindow(QWidget *parent)
         "  background-color: %SURFACE%;"
         "  border-left: 1px solid %BORDER%;"
         "}"
-        "#moreButton, #showHideButton {"
+        "#moreButton, #clickButton, #showHideButton {"
         "  color: %MUTED%;"
         "  background-color: transparent;"
         "  border: 1px solid %BORDER%;"
         "  font-size: 9px;"
         "  padding: 3px 10px;"
         "}"
-        "#moreButton:hover, #showHideButton:hover {"
+        "#moreButton:hover, #clickButton:hover, #showHideButton:hover {"
         "  color: %TEXT%; border-color: %MUTED%;"
         "}"
         "QLabel   { color: %DIM%; }")
@@ -912,12 +926,22 @@ void HudWindow::toggleDetails() {
         }
         if (screen != nullptr) {
             const QRect avail = screen->availableGeometry();
-            const int w = avail.width() * 7 / 10;
-            const int h = avail.height() * 7 / 10;
+            QSize want(avail.width() * 7 / 10, avail.height() * 7 / 10);
+            if (m_overlayConfig.width >= 430 && m_overlayConfig.height >= 120) {
+                // The console remembers the size the user last gave it.
+                want = QSize(m_overlayConfig.width, m_overlayConfig.height);
+            }
             setMinimumSize(0, 0);
             setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-            resize(w, h);
-            move(avail.center().x() - w / 2, avail.center().y() - h / 2);
+            const QRect target = clampOverlayGeometry(
+                QRect(QPoint(avail.center().x() - want.width() / 2,
+                             avail.center().y() - want.height() / 2),
+                      want),
+                avail, QSize(430, 120));
+            if (target.isValid()) {
+                resize(target.size());
+                move(target.topLeft());
+            }
         }
 
         m_detailsExpanded = true;
@@ -934,6 +958,13 @@ void HudWindow::toggleDetails() {
 
     m_moreButton->setText(m_detailsExpanded ? QStringLiteral("LESS")
                                             : QStringLiteral("MORE"));
+
+    if (m_overlay.clickThrough) {
+        // The kept input rectangle follows the CLICK button when the layout
+        // changes, so re-shape rather than leaving a stale clickable island.
+        applyClickThrough(true);
+    }
+    persistOverlay();
 }
 
 void HudWindow::toggleCompact() {
@@ -956,6 +987,218 @@ void HudWindow::toggleCompact() {
     }
 
     adjustSize();
+
+    if (m_overlay.clickThrough) {
+        applyClickThrough(true);
+    }
+}
+
+void HudWindow::setOverlayConfig(const OverlayConfig &config,
+                                const QString &path) {
+    m_overlayConfig = config;
+    m_overlayPath = path;
+}
+
+void HudWindow::refreshOverlayState() {
+    m_overlaySession = detectOverlaySession(
+        QGuiApplication::platformName(),
+        QString::fromLocal8Bit(qgetenv("WAYLAND_DISPLAY")),
+        QString::fromLocal8Bit(qgetenv("DISPLAY")));
+
+    m_overlay.workArea = QRect();
+    m_overlay.wmName.clear();
+    m_overlay.pinnedAbove = (m_overlaySession != OverlaySession::X11);
+    m_overlay.dockWindow = false;
+    m_overlay.hidden = false;
+
+    if (m_overlaySession == OverlaySession::X11) {
+        const linuxoverlay::X11Probe probe = linuxoverlay::probe();
+        m_overlay.wmName = probe.wmName;
+        m_overlay.workArea = probe.workArea;
+        m_overlay.clickThroughCapable = probe.display && probe.shapeAvailable;
+        m_overlayStickySupported = probe.stickySupported;
+        const QStringList states = linuxoverlay::windowStates(winId());
+        m_overlay.pinnedAbove = overlayAboveConfirmed(states);
+        m_overlay.sticky = overlaySticky(states);
+        m_overlay.hidden = overlayHidden(states);
+        m_overlay.dockWindow =
+            overlayDockWindow(linuxoverlay::windowTypes(winId()));
+    } else {
+        // Every other window server keeps the frame above by construction
+        // (NSFloatingWindowLevel / SetWindowPos' top-most band / the
+        // compositor's layer), so nothing needs to be requested.
+        m_overlay.clickThroughCapable = false;
+    }
+
+    if (!m_overlay.clickThrough) {
+        m_overlay.note = overlayClickThroughNote(m_overlaySession,
+                                                 m_overlay.clickThroughCapable);
+    }
+    publishOverlayState();
+}
+
+void HudWindow::publishOverlayState() {
+    m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    if (m_panel != nullptr) {
+        m_panel->setOverlayLine(
+            overlaySummaryText(m_overlaySession, m_overlay));
+    }
+}
+
+void HudWindow::restoreOverlay() {
+    // The saved rectangle is only a hint: monitors go away, resolutions
+    // change and a HUD restored onto a vanished screen is unreachable.
+    if (m_overlayConfig.x < 0 || m_overlayConfig.y < 0) {
+        return;
+    }
+
+    QList<QRect> screens;
+    for (const QScreen *screen : QGuiApplication::screens()) {
+        screens.append(screen->availableGeometry());
+    }
+    if (screens.isEmpty()) {
+        return;
+    }
+
+    // In compact mode the frame is a fixed-width strip, so the saved size
+    // belongs to the expanded console: clamp the launch position against the
+    // size the window actually has, or an 820px-wide hint on a narrow screen
+    // would pull the HUD to the left edge.
+    const QSize savedSize =
+        m_detailsExpanded
+            ? QSize(m_overlayConfig.width > 0 ? m_overlayConfig.width : width(),
+                    m_overlayConfig.height > 0 ? m_overlayConfig.height
+                                               : height())
+            : size();
+    const QRect saved(QPoint(m_overlayConfig.x, m_overlayConfig.y), savedSize);
+    const QRect target =
+        restoreOverlayGeometry(saved, screens, QSize(430, 120));
+    if (!target.isValid()) {
+        return;
+    }
+
+    move(target.topLeft());
+    if (m_detailsExpanded && m_overlayConfig.width > 0
+        && m_overlayConfig.height > 0) {
+        resize(target.size());
+    }
+}
+
+void HudWindow::verifyOverlayStates(int attempt) {
+    if (m_overlaySession != OverlaySession::X11) {
+        return;
+    }
+    const QStringList states = linuxoverlay::windowStates(winId());
+    m_overlay.pinnedAbove = overlayAboveConfirmed(states);
+    m_overlay.sticky = overlaySticky(states);
+    m_overlay.hidden = overlayHidden(states);
+    m_overlay.dockWindow = overlayDockWindow(linuxoverlay::windowTypes(winId()));
+
+    // A request sent from showEvent can land before the window manager has
+    // finished managing the frame, in which case it is dropped. Retry twice,
+    // then report whatever the wm actually did instead of assuming success.
+    if (!m_overlay.sticky && m_overlayConfig.sticky && m_overlayStickySupported
+        && attempt < 2) {
+        linuxoverlay::requestSticky(winId(), nullptr);
+        QTimer::singleShot(1000, this, [this, attempt] {
+            verifyOverlayStates(attempt + 1);
+        });
+        return;
+    }
+    publishOverlayState();
+}
+
+void HudWindow::ensureOnScreen() {
+    // A monitor can go away, or the frame can be dragged past the last edge,
+    // and then the HUD is unreachable with no way back from the UI. Pull it
+    // onto the screen it overlaps most (or the primary one when it overlaps
+    // nothing at all).
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        return;
+    }
+    QList<QRect> areas;
+    for (const QScreen *screen : screens) {
+        areas.append(screen->availableGeometry());
+    }
+    const QRect current(QPoint(x(), y()), size());
+    for (const QRect &area : areas) {
+        if (area.intersects(current)) {
+            return;
+        }
+    }
+    const QRect target =
+        restoreOverlayGeometry(current, areas, QSize(430, 120));
+    if (!target.isValid()) {
+        return;
+    }
+    move(target.topLeft());
+    persistOverlay();
+}
+
+void HudWindow::persistOverlay() {
+    if (m_overlayPath.isEmpty()) {
+        return;
+    }
+    const QRect current = geometry();
+    if (current == m_overlayPersisted) {
+        return;
+    }
+    m_overlayPersisted = current;
+
+    OverlayConfig next = m_overlayConfig;
+    next.clickThrough = m_overlay.clickThrough;
+    next.x = current.x();
+    next.y = current.y();
+    if (m_detailsExpanded) {
+        next.width = current.width();
+        next.height = current.height();
+    }
+    saveOverlayConfig(m_overlayPath, next);
+    m_overlayConfig = next;
+}
+
+void HudWindow::applyClickThrough(bool on) {
+    QString note;
+    bool applied = false;
+
+    if (m_overlaySession == OverlaySession::X11) {
+        // The CLICK button itself stays inside the input region, otherwise
+        // the mode would be a one-way trip with no way back from the HUD.
+        QRect keep(QPoint(0, 0), m_clickButton->size());
+        keep.moveTo(m_clickButton->mapTo(this, QPoint(0, 0)));
+        keep.adjust(-4, -4, 4, 4);
+        applied = linuxoverlay::setClickThrough(winId(), on, keep, &note);
+        if (!applied && note.isEmpty()) {
+            note = QStringLiteral("x11: the shape request was refused");
+        }
+    } else {
+        note = overlayClickThroughNote(m_overlaySession,
+                                      m_overlay.clickThroughCapable);
+    }
+
+    m_overlay.clickThrough = on && applied;
+    m_overlay.note = note;
+    m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    m_clickButton->setText(m_overlay.clickThrough ? QStringLiteral("CLICK+")
+                                                 : QStringLiteral("CLICK"));
+    m_clickButton->setToolTip(overlayClickThroughNote(
+        m_overlaySession, m_overlay.clickThroughCapable));
+
+    if (m_overlaySession == OverlaySession::X11 && !applied) {
+        m_clickButton->setText(QStringLiteral("CLICK"));
+        m_overlay.clickThrough = false;
+    }
+
+    publishOverlayState();
+    persistOverlay();
+}
+
+void HudWindow::toggleClickThrough() {
+    if (m_overlaySession == OverlaySession::Unknown) {
+        refreshOverlayState();
+    }
+    applyClickThrough(!m_overlay.clickThrough);
 }
 
 void HudWindow::showEvent(QShowEvent *event) {
@@ -963,6 +1206,46 @@ void HudWindow::showEvent(QShowEvent *event) {
 #ifdef Q_OS_MACOS
     applyMacOverlay(this);
 #endif
+
+    if (m_overlayRestored) {
+        return;
+    }
+    m_overlayRestored = true;
+    m_overlayPersisted = geometry();
+
+    restoreOverlay();
+    refreshOverlayState();
+
+    if (m_overlaySession == OverlaySession::X11) {
+        // Qt marks the window top-most through the WM as well, but not every
+        // window manager honours the initial hint; verify and ask once.
+        if (!m_overlay.pinnedAbove && !m_overlayAboveRequested) {
+            m_overlayAboveRequested = true;
+            linuxoverlay::requestAbove(winId(), nullptr);
+        }
+        // A HUD that vanishes when the user switches desktop is useless, so
+        // ask for sticky once and report what the wm actually did.
+        if (m_overlayConfig.sticky && m_overlayStickySupported
+            && !m_overlay.sticky) {
+            linuxoverlay::requestSticky(winId(), nullptr);
+        }
+        QTimer::singleShot(250, this, [this] { verifyOverlayStates(0); });
+    }
+
+    QTimer *overlayTimer = new QTimer(this);
+    overlayTimer->setInterval(1000);
+    connect(overlayTimer, &QTimer::timeout, this, [this] {
+        ensureOnScreen();
+        persistOverlay();
+        m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    });
+    overlayTimer->start();
+
+    // The saved mode is applied only after the window exists, and only when
+    // the session can actually honour it.
+    if (m_overlayConfig.clickThrough) {
+        applyClickThrough(true);
+    }
 }
 
 void HudWindow::keyPressEvent(QKeyEvent *event) {

@@ -68,6 +68,7 @@ struct SettingsInfo {
     QString webhookLine;
     QString exportLine;
     QString historyLine;
+    QString overlayLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -104,6 +105,8 @@ public:
     void setWebhookLine(const QString &line);
 
     void setExportLine(const QString &line);
+
+    void setOverlayLine(const QString &line);
 
     // M66: editable monitors — populates the threshold/cycles editors and
     // refreshes them without re-emitting editor signals (block during fill).

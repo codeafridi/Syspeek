@@ -3245,6 +3245,10 @@ void DashboardPanel::applySettingsInfo() {
         .arg(m_settings.historyLine.isEmpty()
                  ? QStringLiteral("--")
                  : m_settings.historyLine);
+    general += QStringLiteral("overlay&nbsp;&nbsp;&nbsp;%1<br/>")
+        .arg(m_settings.overlayLine.isEmpty()
+                 ? QStringLiteral("--")
+                 : m_settings.overlayLine);
     general += QStringLiteral("collector&nbsp;local only - reads this "
                               "machine's own %1 interfaces; no telemetry")
         .arg(verbatimPlatform);
@@ -3376,6 +3380,11 @@ void DashboardPanel::setWebhookLine(const QString &line) {
 
 void DashboardPanel::setExportLine(const QString &line) {
     m_settings.exportLine = line;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setOverlayLine(const QString &line) {
+    m_settings.overlayLine = line;
     applySettingsInfo();
 }
 

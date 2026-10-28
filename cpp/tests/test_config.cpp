@@ -384,6 +384,82 @@ int main(int argc, char *argv[]) {
         check(c.webhook.timeoutMs == 60000, "webhook timeout clamped");
     }
 
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "click_through = true\n"
+            "x = 120\n"
+            "y = -40\n"
+            "width = 900\n"
+            "height = 640\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(error.isEmpty(), "overlay config -> no error");
+        check(c.overlay.clickThrough, "overlay click_through loaded");
+        check(c.overlay.x == 120 && c.overlay.y == -40,
+              "overlay position loaded, negative y kept");
+        check(c.overlay.width == 900 && c.overlay.height == 640,
+              "overlay size loaded");
+        check(c.overlay.sticky, "overlay sticky defaults on");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "focus_cache_ttl_ms = 900\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.overlay.clickThrough && c.overlay.x == -1
+                  && c.overlay.width == -1,
+              "overlay defaults: click-through off, no saved geometry");
+        check(c.focusCacheTtlMs == 900,
+              "overlay: the pre-existing ttl key still loads from the same "
+              "group");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "sticky = false\n"
+            "x = not-a-number\n"
+            "width = 12x\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.overlay.x == -1 && c.overlay.width == -1,
+              "overlay: garbage geometry is ignored, not guessed");
+        check(!c.overlay.sticky, "overlay: sticky can be turned off");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[history]\n"
+            "samples = 600\n"
+            "[overlay]\n"
+            "click_through = true\n"));
+        OverlayConfig saved;
+        saved.clickThrough = false;
+        saved.x = 64;
+        saved.y = 32;
+        saved.width = 820;
+        saved.height = 560;
+        saved.sticky = false;
+        saveOverlayConfig(path, saved);
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.overlay.clickThrough && c.overlay.x == 64
+                  && c.overlay.y == 32 && c.overlay.width == 820
+                  && c.overlay.height == 560,
+              "overlay: a saved rectangle round-trips through the file");
+        check(!c.overlay.sticky,
+              "overlay: the sticky preference round-trips too");
+        check(c.history.samples == 600,
+              "overlay: saving the overlay keeps every other group");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

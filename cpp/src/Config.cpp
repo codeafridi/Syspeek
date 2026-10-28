@@ -266,6 +266,36 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (sample > 0) {
             config.sampleIntervalMs = sample;
         }
+        if (settings.contains(QStringLiteral("click_through"))) {
+            config.overlay.clickThrough =
+                settings.value(QStringLiteral("click_through")).toBool();
+        }
+        if (settings.contains(QStringLiteral("sticky"))) {
+            config.overlay.sticky =
+                settings.value(QStringLiteral("sticky")).toBool();
+        }
+        bool ok = false;
+        const int x = settings.value(QStringLiteral("x")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.x = x;
+        }
+        ok = false;
+        const int y = settings.value(QStringLiteral("y")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.y = y;
+        }
+        ok = false;
+        const int width =
+            settings.value(QStringLiteral("width")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.width = width;
+        }
+        ok = false;
+        const int height =
+            settings.value(QStringLiteral("height")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.height = height;
+        }
     }
     settings.endGroup();
 
@@ -594,6 +624,20 @@ void saveSilences(const QString &path, const QList<SilenceRule> &rules) {
                               rule.author);
         }
     }
+    settings.endGroup();
+    settings.sync();
+}
+
+void saveOverlayConfig(const QString &path, const OverlayConfig &overlay) {
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("overlay"));
+    settings.setValue(QStringLiteral("click_through"), overlay.clickThrough);
+    settings.setValue(QStringLiteral("sticky"), overlay.sticky);
+    settings.setValue(QStringLiteral("x"), QString::number(overlay.x));
+    settings.setValue(QStringLiteral("y"), QString::number(overlay.y));
+    settings.setValue(QStringLiteral("width"), QString::number(overlay.width));
+    settings.setValue(QStringLiteral("height"),
+                      QString::number(overlay.height));
     settings.endGroup();
     settings.sync();
 }

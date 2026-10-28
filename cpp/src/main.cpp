@@ -538,6 +538,7 @@ int main(int argc, char *argv[]) {
         hud.setExportIntervalMs(config.sampleIntervalMs);
         hud.setHistoryStore(historyDefaultPath(),
                             config.history.enabled ? config.history.samples : 0);
+        hud.setOverlayConfig(config.overlay, defaultConfigPath());
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);

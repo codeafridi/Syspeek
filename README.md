@@ -396,6 +396,33 @@ Actions never run as root and never elevate: a verb your user cannot perform
 comes back with the OS reason (`Operation not permitted`, `systemctl` stderr)
 on the page. Nothing is sent anywhere — the verbs act on this machine only.
 
+**Overlay behaviour** — the HUD remembers where you put it and can get out of
+your way without getting lost:
+
+```ini
+[overlay]
+click_through = false   ; every click but the CLICK button goes to the window below
+sticky        = true    ; follow you across X11 desktops
+x = 200                 ; last position (restored on launch when a screen still holds it)
+y = 120
+width = 820             ; last expanded size
+height = 560
+```
+
+The footer **CLICK** button toggles click-through on X11 (X Shape `ShapeInput`),
+and keeps its own rectangle live inside the input region — so the mode is never
+a one-way trip: press it again to make the whole HUD clickable. While the mode
+is on, the HUD cannot be dragged (clicks pass through); drag it with
+click-through off, or edit `x`/`y` in the ini. A saved rectangle that lands on a
+monitor that no longer exists, or is dragged past the last screen edge, is
+pulled back onto the screen it overlaps most; that rescue runs on a 1 s watch,
+so a hot-unplugged display can never leave an unreachable HUD. `sticky` asks
+the window manager to keep the HUD on every desktop (`_NET_WM_STATE_STICKY`
+plus the `_NET_WM_DESKTOP` all-desktops request) and the Settings page states
+what the wm actually did. Wayland, macOS and Windows state their gate instead
+of pretending: the compositor owns input routing, so click-through is X11-only
+in this build and the Settings row says so.
+
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:
 Settings → DIAGNOSTICS → **EXPORT CSV** / **EXPORT JSON** (files land in

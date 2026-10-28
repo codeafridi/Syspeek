@@ -38,6 +38,7 @@
 #include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "ProcessActions.h"
+#include "OverlayStatus.h"
 #include "SensorStatus.h"
 #include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
@@ -3758,6 +3759,177 @@ int main(int argc, char *argv[]) {
         engine.update(input, 10000);
         check(engine.active().isEmpty(),
               "sensors: invalid sensor samples never keep a monitor firing");
+    }
+
+    {
+        check(overlaySessionName(OverlaySession::X11) == QStringLiteral("x11")
+                  && overlaySessionName(OverlaySession::Wayland)
+                         == QStringLiteral("wayland")
+                  && overlaySessionName(OverlaySession::MacOS)
+                         == QStringLiteral("macos")
+                  && overlaySessionName(OverlaySession::Windows)
+                         == QStringLiteral("windows")
+                  && overlaySessionName(OverlaySession::Unknown)
+                         == QStringLiteral("unknown"),
+              "overlay: every window server has a stable name");
+
+        check(detectOverlaySession(QStringLiteral("wayland"), QString(),
+                                  QStringLiteral(":0"))
+                      == OverlaySession::Wayland
+                  && detectOverlaySession(QStringLiteral("xcb"), QString(),
+                                          QStringLiteral(":0"))
+                         == OverlaySession::X11
+                  && detectOverlaySession(QStringLiteral("cocoa"), QString(),
+                                          QString())
+                         == OverlaySession::MacOS
+                  && detectOverlaySession(QStringLiteral("windows"), QString(),
+                                          QString())
+                         == OverlaySession::Windows
+                  && detectOverlaySession(QString(), QString(),
+                                          QString())
+                         == OverlaySession::Unknown,
+              "overlay: the platform plugin decides the session, xwayland or "
+              "not");
+
+        check(detectOverlaySession(QString(), QStringLiteral("wayland-0"),
+                                   QString())
+                      == OverlaySession::Wayland
+                  && detectOverlaySession(QString(), QString(),
+                                          QStringLiteral(":0"))
+                         == OverlaySession::X11
+                  && detectOverlaySession(QString(), QStringLiteral("wayland-0"),
+                                          QStringLiteral(":0"))
+                         == OverlaySession::Wayland,
+              "overlay: the environment decides when no plugin name is given");
+
+        const QStringList states = parseNetWmStateAtoms(
+            QByteArray("_NET_WM_STATE_ABOVE\0_NET_WM_STATE_STICKY\0"
+                       "_NET_WM_STATE_ABOVE\0\0", 63));
+        check(states.size() == 2
+                  && overlayAboveConfirmed(states)
+                  && overlayStateHas(states, QStringLiteral("_NET_WM_STATE_STICKY"))
+                  && !overlayHidden(states)
+                  && !overlayDockWindow(states),
+              "overlay: _NET_WM_STATE atoms are read, deduped and classified");
+
+        const QStringList hiddenStates = parseNetWmStateAtoms(
+            QByteArray("_NET_WM_STATE_HIDDEN\0", 22));
+        check(overlayHidden(hiddenStates) && !overlayAboveConfirmed(hiddenStates),
+              "overlay: a window the wm hid is reported as hidden");
+        check(overlayDockWindow(parseNetWmStateAtoms(
+                  QByteArray("_NET_WM_WINDOW_TYPE_DOCK\0", 28)))
+                  && !overlayDockWindow(parseNetWmStateAtoms(
+                         QByteArray("_NET_WM_WINDOW_TYPE_NORMAL\0", 30))),
+              "overlay: dock window types are distinguished from normal ones");
+
+        check(overlaySticky(states) && !overlaySticky(hiddenStates),
+              "overlay: sticky is read from the same _NET_WM_STATE list");
+
+        const QRect screenA(0, 0, 1920, 1080);
+        const QRect screenB(1920, 0, 1280, 1024);
+        const QList<QRect> screens{screenA, screenB};
+        const QSize minimum(430, 120);
+
+        check(restoreOverlayGeometry(QRect(100, 100, 430, 200), screens, minimum)
+                      == QRect(100, 100, 430, 200),
+              "overlay: a saved rect on a live screen is restored verbatim");
+        check(restoreOverlayGeometry(QRect(2000, 50, 430, 200), screens, minimum)
+                      == QRect(2000, 50, 430, 200),
+              "overlay: a saved rect on the second screen keeps that screen");
+        const QRect rescued =
+            restoreOverlayGeometry(QRect(9000, 9000, 430, 200), screens, minimum);
+        check(screenA.intersects(rescued) || screenB.intersects(rescued),
+              "overlay: a saved rect on a vanished screen comes back on-screen");
+        const QRect clampedRight =
+            restoreOverlayGeometry(QRect(1800, 100, 430, 200), screens, minimum);
+        check(screenA.contains(clampedRight) || screenB.contains(clampedRight),
+              "overlay: a rect hanging off an edge is pulled onto the screen it "
+              "mostly covers");
+        check(clampOverlayGeometry(QRect(-500, -500, 430, 200), screenA, minimum)
+                      == QRect(0, 0, 430, 200),
+              "overlay: negative coordinates clamp to the work-area origin");
+        check(clampOverlayGeometry(QRect(0, 0, 10, 10), screenA, minimum)
+                      == QRect(0, 0, 430, 120),
+              "overlay: the minimum size is enforced");
+        check(clampOverlayGeometry(QRect(0, 0, 5000, 5000), screenA, minimum)
+                      == screenA,
+              "overlay: an oversized rect is capped at the screen");
+        check(!restoreOverlayGeometry(QRect(0, 0, 430, 200), QList<QRect>(),
+                                      minimum)
+                       .isValid()
+                  && !restoreOverlayGeometry(QRect(), screens, minimum).isValid(),
+              "overlay: no screens or no saved rect yields no placement");
+
+        check(overlayClickThroughNote(OverlaySession::X11, true)
+                      .contains(QStringLiteral("passes every click"))
+                  && overlayClickThroughNote(OverlaySession::Wayland, false)
+                         .contains(QStringLiteral("Wayland"))
+                  && overlayClickThroughNote(OverlaySession::MacOS, false)
+                         .contains(QStringLiteral("not exposed"))
+                  && overlayClickThroughNote(OverlaySession::Windows, false)
+                         .contains(QStringLiteral("not exposed"))
+                  && overlayClickThroughNote(OverlaySession::X11, false)
+                         .contains(QStringLiteral("X Shape"))
+                  && overlayClickThroughNote(OverlaySession::Unknown, false)
+                         .contains(QStringLiteral("no window server")),
+              "overlay: every gate states what the OS actually offers");
+
+        OverlayState state;
+        state.clickThrough = true;
+        state.pinnedAbove = true;
+        state.geometry = QRect(10, 20, 430, 120);
+        const QString summary = overlaySummaryText(OverlaySession::X11, state);
+        check(summary.contains(QStringLiteral("session x11"))
+                  && summary.contains(QStringLiteral("pinned above"))
+                  && summary.contains(QStringLiteral("click-through on"))
+                  && summary.contains(QStringLiteral("430x120 at 10,20")),
+              "overlay: the summary names session, pin, mode and geometry");
+        state.pinnedAbove = false;
+        state.wmName = QStringLiteral("sway");
+        state.dockWindow = true;
+        state.hidden = true;
+        state.clickThrough = false;
+        const QString docked = overlaySummaryText(OverlaySession::X11, state);
+        check(docked.contains(QStringLiteral("wm sway"))
+                  && docked.contains(QStringLiteral("pin not confirmed"))
+                  && docked.contains(QStringLiteral("dock window"))
+                  && docked.contains(QStringLiteral("hidden by the wm"))
+                  && docked.contains(QStringLiteral("click-through off")),
+              "overlay: the summary reports an unconfirmed pin and wm actions");
+
+        state.dockWindow = false;
+        state.sticky = true;
+        check(overlaySummaryText(OverlaySession::X11, state)
+                  .contains(QStringLiteral("follows every desktop")),
+              "overlay: a sticky hud is reported as following every desktop");
+        state.sticky = false;
+        check(overlaySummaryText(OverlaySession::X11, state)
+                      .contains(QStringLiteral("desktop-local"))
+                  && !overlaySummaryText(OverlaySession::Wayland, state)
+                          .contains(QStringLiteral("desktop-local"))
+                  && !overlaySummaryText(OverlaySession::MacOS, state)
+                          .contains(QStringLiteral("follows every desktop")),
+              "overlay: only x11 has desktops to follow or not");
+
+        state.wmName.clear();
+        state.dockWindow = false;
+        state.hidden = false;
+        check(overlaySummaryText(OverlaySession::X11, state)
+                      .startsWith(QStringLiteral("overlay: session x11"))
+                  && !overlaySummaryText(OverlaySession::Wayland, state)
+                          .contains(QStringLiteral("pin not confirmed")),
+              "overlay: no wm name falls back to the session, non-x11 is "
+              "pinned by construction");
+        check(overlaySummaryText(OverlaySession::Unknown, OverlayState{})
+                  == QStringLiteral("overlay: no window server detected"),
+              "overlay: an unknown session states the gate");
+
+        check(overlayGeometryText(QRect(10, 20, 430, 120))
+                      == QStringLiteral("430x120 at 10,20")
+                  && overlayGeometryText(QRect()) == QStringLiteral("--")
+                  && overlayGeometryUsable(QRect(0, 0, 1, 1))
+                  && !overlayGeometryUsable(QRect(5, 5, 0, 40)),
+              "overlay: geometry text and usability agree");
     }
 
     std::printf("%d failure(s)\n", failures);

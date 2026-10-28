@@ -1007,7 +1007,7 @@ int main(int argc, char *argv[]) {
     panel.setIncidents(incidents);
 
     SettingsInfo settingsInfo;
-    settingsInfo.version = QStringLiteral("0.8.3");
+    settingsInfo.version = QStringLiteral(SYSPEEK_APP_VERSION);
     settingsInfo.configPath = QStringLiteral("~/.config/Syspeek/syspeek.conf");
     settingsInfo.logPath = QStringLiteral("~/.cache/dev.syspeek/syspeek/hud.log");
     settingsInfo.autostartLine =
@@ -1026,6 +1026,9 @@ int main(int argc, char *argv[]) {
     settingsInfo.historyLine =
         QStringLiteral("3600 samples max - ~/.cache/dev.syspeek/syspeek/"
                        "history.ring");
+    settingsInfo.overlayLine = QStringLiteral(
+        "wm GNOME Shell - pinned above - follows every desktop - "
+        "click-through on - 430x191 at 200,120");
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;

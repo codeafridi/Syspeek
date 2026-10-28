@@ -22,6 +22,7 @@
 #include "DbmStatus.h"
 #include "TlsStatus.h"
 #include "FimStatus.h"
+#include "OverlayStatus.h"
 
 #include <QPoint>
 #include <QRect>
@@ -98,6 +99,11 @@ public:
     void setSettingsInfo(const SettingsInfo &info);
     void setHistoryStore(const QString &path, int capacity);
 
+    // M80: the overlay's own state (session, click-through, pinned, geometry).
+    // An empty path disables persistence, which is what tests use.
+    void setOverlayConfig(const OverlayConfig &config, const QString &path);
+    OverlayState overlayState() const { return m_overlay; }
+
     bool isExpanded() const { return m_detailsExpanded; }
 
 protected:
@@ -162,6 +168,23 @@ private:
     void evaluateAlerts();
     QPushButton *m_moreButton = nullptr;
     QPushButton *m_showHideButton = nullptr;
+    QPushButton *m_clickButton = nullptr;
+    OverlaySession m_overlaySession = OverlaySession::Unknown;
+    OverlayState m_overlay;
+    OverlayConfig m_overlayConfig;
+    QString m_overlayPath;
+    QRect m_overlayPersisted;
+    bool m_overlayRestored = false;
+    bool m_overlayAboveRequested = false;
+    bool m_overlayStickySupported = false;
+    void toggleClickThrough();
+    void applyClickThrough(bool on);
+    void persistOverlay();
+    void restoreOverlay();
+    void ensureOnScreen();
+    void verifyOverlayStates(int attempt);
+    void publishOverlayState();
+    void refreshOverlayState();
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
     bool m_actionsEnabled = true;

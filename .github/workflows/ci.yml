@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -174,6 +174,17 @@ jobs:
               print("history ok: %d/%d samples, total %d, %d bytes, span %d ms"
                     % (hist["count"], hist["capacity"], hist["total"],
                        hist["bytes"], hist["spanMs"]))
+              ov = d.get("overlay", {})
+              assert ov.get("session") in ("x11", "wayland", "unknown"), ov
+              assert isinstance(ov.get("shapeAvailable"), bool), ov
+              assert isinstance(ov.get("stickySupported"), bool), ov
+              assert ov.get("clickThroughCapable") == (
+                  ov["session"] == "x11" and ov["shapeAvailable"]), ov
+              assert ov.get("note"), ov
+              print("overlay ok: session %s, x11 shape %s, click-through %s "
+                    "- %s"
+                    % (ov["session"], ov["shapeAvailable"],
+                       ov["clickThroughCapable"], ov["note"]))
           if d["platform"] == "macos":
               sen = d.get("sensors", {})
               assert sen.get("thermalCapable") is False, sen
@@ -185,6 +196,11 @@ jobs:
                   assert row["energyNowWh"] <= row["energyFullWh"] + 0.5, row
               print("sensors ok (macos): thermals gated, %d battery(ies) - %s"
                     % (len(sen.get("batteries", [])), sen.get("note", "-")))
+              ov = d.get("overlay", {})
+              assert ov.get("session") == "macos", ov
+              assert ov.get("clickThroughCapable") is False, ov
+              assert ov.get("note"), ov
+              print("overlay ok (macos): click-through gated -", ov["note"])
           act = d.get("actions", {})
           assert act.get("signals") is True, act
           assert act.get("spawned") is True, act
@@ -409,6 +425,11 @@ jobs:
           assert met.get("headerRejected") is True, met
           print("metrics endpoint ok: bind %s port %d auth %s"
                 % (met["bind"], met["port"], met["authRequired"]))
+          ov = d.get("overlay", {})
+          assert ov.get("session") == "windows", ov
+          assert ov.get("clickThroughCapable") is False, ov
+          assert ov.get("note"), ov
+          print("overlay ok (windows): click-through gated -", ov["note"])
           act = d.get("actions", {})
           assert act.get("signals") is True, act
           assert act.get("spawned") is True, act

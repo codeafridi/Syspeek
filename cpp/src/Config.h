@@ -155,6 +155,22 @@ struct ActionsConfig {
     bool enabled = true;
 };
 
+struct OverlayConfig {
+    // [overlay] click_through: the HUD passes every click to the window
+    // below and keeps only its CLICK control live, so the mode can be
+    // turned back off without a terminal.
+    bool clickThrough = false;
+    // [overlay] sticky: ask the X11 window manager to keep the HUD on every
+    // desktop, so switching workspaces never loses it.
+    bool sticky = true;
+    // [overlay] x/y/width/height: the last position and size the user gave
+    // the HUD, restored on the next launch when a screen still holds it.
+    int x = -1;
+    int y = -1;
+    int width = -1;
+    int height = -1;
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
@@ -169,6 +185,7 @@ struct Config {
     HistoryConfig history;
     SilencesConfig silences;
     ActionsConfig actions;
+    OverlayConfig overlay;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;
@@ -186,5 +203,7 @@ void saveAlertOverrides(const QString &path,
                         const QList<AlertRule> &rules);
 
 void saveSilences(const QString &path, const QList<SilenceRule> &rules);
+
+void saveOverlayConfig(const QString &path, const OverlayConfig &overlay);
 
 QString defaultConfigPath();

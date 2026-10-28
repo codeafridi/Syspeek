@@ -18,9 +18,15 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QSlider>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QGuiApplication>
 #include <QPushButton>
+#include <QScreen>
+#include <QSettings>
 #include <QStackedWidget>
 #include <QTreeWidget>
+#include <QThread>
 #include <QTreeWidgetItem>
 
 #include <cstdio>
@@ -1400,6 +1406,124 @@ int main(int argc, char *argv[]) {
                                true);
         check(status->text().contains(QStringLiteral("worker")),
               "actions: the status line renders a result");
+    }
+
+    {
+        // M80: the click-through control must exist and must never claim a
+        // mode the session cannot honour.
+        auto *clickButton =
+            hud.findChild<QPushButton *>(QStringLiteral("clickButton"));
+        check(clickButton != nullptr
+                  && clickButton->text() == QStringLiteral("CLICK"),
+              "overlay: the CLICK control sits in the footer");
+
+        if (clickButton != nullptr) {
+            hud.show();
+            clickButton->click();
+            const OverlayState state = hud.overlayState();
+            check(!state.clickThrough,
+                  "overlay: click-through is refused when no window server "
+                  "can honour it");
+            check(clickButton->text() == QStringLiteral("CLICK"),
+                  "overlay: a refused click-through leaves the control off");
+            check(!state.note.isEmpty(),
+                  "overlay: the refusal states the reason");
+            hud.hide();
+        }
+    }
+
+    {
+        // The saved rectangle is restored on show, clamped to a live screen
+        // and written back with the mode when the layout changes.
+        QTemporaryDir overlayDir;
+        const QString overlayPath = overlayDir.filePath(QStringLiteral("config.ini"));
+
+        HudWindow window;
+        OverlayConfig saved;
+        saved.x = 120;
+        saved.y = 90;
+        saved.width = 820;
+        saved.height = 560;
+        window.setOverlayConfig(saved, overlayPath);
+        window.show();
+        QCoreApplication::processEvents();
+
+        bool onScreen = false;
+        for (const QScreen *screen : QGuiApplication::screens()) {
+            if (screen->availableGeometry().contains(window.frameGeometry())) {
+                onScreen = true;
+            }
+        }
+        check(window.x() == 120 && window.y() == 90,
+              "overlay: a saved position is restored on show");
+        check(onScreen || QGuiApplication::screens().isEmpty(),
+              "overlay: the restored window lands on a live screen");
+
+        auto *expand =
+            window.findChild<QPushButton *>(QStringLiteral("moreButton"));
+        if (expand != nullptr) {
+            expand->click();
+            QCoreApplication::processEvents();
+        }
+
+        QSettings written(overlayPath, QSettings::IniFormat);
+        check(written.value(QStringLiteral("overlay/x")).toString().toInt()
+                      == window.x()
+                  && written.value(QStringLiteral("overlay/y")).toString().toInt()
+                         == window.y(),
+              "overlay: the position is persisted to the config file");
+        check(written.value(QStringLiteral("overlay/width")).toString().toInt()
+                      == window.width()
+                  && written.value(QStringLiteral("overlay/height"))
+                             .toString()
+                             .toInt()
+                         == window.height(),
+              "overlay: the expanded size is persisted too");
+        check(!written.value(QStringLiteral("overlay/click_through")).toBool(),
+              "overlay: the persisted mode matches the refused state");
+
+        QString overlayLine;
+        auto *settingsGeneral =
+            window.findChild<QLabel *>(QStringLiteral("ddSettingsInfo"));
+        if (settingsGeneral != nullptr) {
+            for (QLabel *label : window.findChildren<QLabel *>(
+                     QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("overlay&nbsp;"))) {
+                    overlayLine = label->text();
+                }
+            }
+        }
+        check(overlayLine.contains(QStringLiteral("overlay&nbsp;"))
+                  && overlayLine.contains(QStringLiteral("overlay:")),
+              "overlay: the settings card states the live overlay state");
+        window.hide();
+    }
+
+    {
+        // A monitor can vanish (or the frame be dragged past the last edge):
+        // the 1 s watch pulls the HUD back instead of leaving it unreachable.
+        HudWindow window;
+        window.setOverlayConfig(OverlayConfig{}, QString());
+        window.show();
+        QCoreApplication::processEvents();
+        window.move(9000, 9000);
+
+        QElapsedTimer clock;
+        clock.start();
+        while (window.x() == 9000 && clock.elapsed() < 3000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(20);
+        }
+
+        bool reachable = false;
+        for (const QScreen *screen : QGuiApplication::screens()) {
+            if (screen->availableGeometry().intersects(window.frameGeometry())) {
+                reachable = true;
+            }
+        }
+        check(window.x() != 9000 && reachable,
+              "overlay: a frame dragged off every screen is pulled back");
+        window.hide();
     }
 
     std::printf("%d failure(s)\n", failures);
