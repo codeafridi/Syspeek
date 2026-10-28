@@ -53,6 +53,9 @@ int main(int argc, char *argv[]) {
     int failures = 0;
     auto check = [&failures](bool condition, const char *message) {
         std::printf("%s %s\n", condition ? "PASS" : "FAIL", message);
+        // A crash must still show the last check that ran (CTest captures
+        // stdout through a pipe, which is block-buffered by default).
+        std::fflush(stdout);
         if (!condition) {
             ++failures;
         }
@@ -1409,6 +1412,7 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        std::fprintf(stderr, "[test] overlay block 1 (click control)\n");
         // M80: the click-through control must exist and must never claim a
         // mode the session cannot honour.
         auto *clickButton =
@@ -1433,6 +1437,7 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        std::fprintf(stderr, "[test] overlay block 2 (restore + persist)\n");
         // The saved rectangle is restored on show, clamped to a live screen
         // and written back with the mode when the layout changes.
         QTemporaryDir overlayDir;
@@ -1500,6 +1505,7 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        std::fprintf(stderr, "[test] overlay block 3 (off-screen rescue)\n");
         // A monitor can vanish (or the frame be dragged past the last edge):
         // the 1 s watch pulls the HUD back instead of leaving it unreachable.
         HudWindow window;
