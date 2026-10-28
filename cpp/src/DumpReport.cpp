@@ -1,7 +1,10 @@
 #include "DumpReport.h"
 
+#include "CloudProbe.h"
+#include "CloudStatus.h"
 #include "HistoryLog.h"
 #include "MetricsEndpoint.h"
+#include "CloudPricing.h"
 
 #include "OverlayStatus.h"
 #include "ProcessDiskStatus.h"
@@ -576,6 +579,106 @@ QString dumpReportJson(int maxProcs) {
         }
         sensors.insert(QStringLiteral("adapters"), adapters);
         root.insert(QStringLiteral("sensors"), sensors);
+    }
+
+    {
+        // M82: instance identity + accrued cost. CI runners are not cloud
+        // instances, so the block carries deterministic self-tests beside the
+        // probe result and both are asserted (a gated run must still prove the
+        // math, not just fail to find a metadata service).
+        QJsonObject cloud;
+        CloudProbeOptions options;
+        options.timeoutMs = 600;
+        const CloudProbeResult probe = probeCloudIdentity(options);
+        const bool available = probe.identity.provider != CloudProvider::None;
+        cloud.insert(QStringLiteral("available"), available);
+        cloud.insert(QStringLiteral("attempted"), probe.attempted);
+        cloud.insert(QStringLiteral("provider"),
+                     cloudProviderName(probe.identity.provider));
+        if (!available) {
+            cloud.insert(QStringLiteral("note"),
+                         probe.error.isEmpty() ? cloudUnreachableText()
+                                               : probe.error);
+        } else {
+            const CloudIdentity &id = probe.identity;
+            cloud.insert(QStringLiteral("instanceId"), id.instanceId);
+            cloud.insert(QStringLiteral("instanceType"), id.instanceType);
+            cloud.insert(QStringLiteral("region"), id.region);
+            cloud.insert(QStringLiteral("zone"), id.zone);
+            cloud.insert(QStringLiteral("spot"), id.spot);
+        }
+
+        const int vcpus = QThread::idealThreadCount();
+        const qint64 uptime = cloudHostUptimeSeconds();
+        cloud.insert(QStringLiteral("vcpus"), vcpus);
+        cloud.insert(QStringLiteral("uptimeSec"), double(uptime));
+
+        const QString ratesPath = defaultCloudRatePath();
+        CloudRateTable table;
+        QFile ratesFile(ratesPath);
+        if (ratesFile.open(QIODevice::ReadOnly)) {
+            table = parseCloudRateFile(QString::fromUtf8(ratesFile.readAll()),
+                                       ratesPath);
+            ratesFile.close();
+        }
+        cloud.insert(QStringLiteral("ratePath"), ratesPath);
+        cloud.insert(QStringLiteral("rates"), table.rates.size());
+        cloud.insert(QStringLiteral("importDate"), table.importDate);
+        cloud.insert(QStringLiteral("staleDays"),
+                     cloudRateStaleDays(table.importDate,
+                                        QDateTime::currentMSecsSinceEpoch()));
+
+        if (available) {
+            const double rate = cloudRateFor(table, probe.identity.provider,
+                                             probe.identity.instanceType);
+            cloud.insert(QStringLiteral("rateKey"),
+                         cloudRateKey(probe.identity.provider,
+                                      probe.identity.instanceType));
+            cloud.insert(QStringLiteral("ratePerHour"), rate);
+            const CloudCostMath math = computeCloudCost(rate, uptime);
+            cloud.insert(QStringLiteral("accruedUsd"), math.accruedUsd);
+            cloud.insert(QStringLiteral("projectedMonthlyUsd"),
+                         math.projectedMonthlyUsd);
+            cloud.insert(QStringLiteral("appCostPerHour"),
+                         cloudProcessCostPerHour(rate, 25.0, vcpus));
+        }
+
+        const CloudRateTable fixture = parseCloudRateFile(
+            QStringLiteral("# imported 2020-01-01\n"
+                           "aws/c7g.2xlarge = 0.2920\n"
+                           "azure/Standard_D2s_v3 = 0.0960\n"));
+        cloud.insert(QStringLiteral("rateLookupOk"),
+                     qAbs(cloudRateFor(fixture, CloudProvider::Aws,
+                                       QStringLiteral("C7G.2XLarge"))
+                          - 0.2920) < 1e-9
+                         && qAbs(cloudRateFor(fixture,
+                                              CloudProvider::Azure,
+                                              QStringLiteral("nope"))
+                                 + 1.0) < 1e-9);
+        const CloudCostMath hourMath = computeCloudCost(1.0, 3600);
+        cloud.insert(QStringLiteral("costMathOk"),
+                     qAbs(hourMath.accruedUsd - 1.0) < 1e-9
+                         && qAbs(hourMath.projectedMonthlyUsd - 730.0) < 1e-9);
+        cloud.insert(QStringLiteral("shareOk"),
+                     qAbs(cloudProcessCostPerHour(8.0, 800.0, 8) - 8.0) < 1e-9
+                         && cloudProcessCostPerHour(8.0, 100.0, 0) < 0.0);
+        const QList<CloudProcessSample> rows = {
+            {QStringLiteral("small"), 11, 10.0},
+            {QStringLiteral("big"), 22, 300.0},
+            {QStringLiteral("idle"), 33, 0.0},
+        };
+        const QList<CloudConsumer> top =
+            cloudTopConsumers(rows, 1.0, 4, 2);
+        cloud.insert(QStringLiteral("topOk"),
+                     top.size() == 2
+                         && top.constFirst().pid == 22
+                         && qAbs(cloudConsumerTotal(top)
+                                 - (0.75 + 0.025)) < 1e-9);
+        cloud.insert(QStringLiteral("staleOk"),
+                     cloudRateStaleDays(QStringLiteral("2020-01-01"),
+                                        QDateTime::currentMSecsSinceEpoch())
+                         > 100);
+        root.insert(QStringLiteral("cloud"), cloud);
     }
 
     {

@@ -21,6 +21,7 @@
 #include "AppLog.h"
 #include "ProbeRun.h"
 #include "ExportRun.h"
+#include "CloudPricing.h"
 #include "DashboardPanel.h"
 #include "TlsSource.h"
 #include "FimSource.h"
@@ -373,6 +374,10 @@ int main(int argc, char *argv[]) {
             || arg.startsWith(QByteArrayLiteral("--record="))) {
             return exportRun(argc, argv);
         }
+        if (arg == QByteArrayLiteral("--cloud-prices")
+            || arg.startsWith(QByteArrayLiteral("--cloud-prices="))) {
+            return cloudPriceRun(argc, argv);
+        }
         if (arg == QByteArrayLiteral("logs")) {
             const int status = printAppLogTail(40) ? 0 : 2;
             if (status != 0) {
@@ -523,6 +528,21 @@ int main(int argc, char *argv[]) {
                       .arg(config.history.samples)
                       .arg(historyDefaultPath())
                 : QStringLiteral("disabled ([history] enabled=false)");
+        {
+            const QString ratesPath = config.cloud.ratesPath.isEmpty()
+                ? defaultCloudRatePath()
+                : config.cloud.ratesPath;
+            CloudRateTable rates;
+            QFile ratesFile(ratesPath);
+            if (ratesFile.open(QIODevice::ReadOnly)) {
+                rates = parseCloudRateFile(
+                    QString::fromUtf8(ratesFile.readAll()), ratesPath);
+                ratesFile.close();
+            }
+            settingsInfo.cloudLine = cloudSettingsLine(
+                config.cloud.enabled, ratesPath, rates,
+                QDateTime::currentMSecsSinceEpoch());
+        }
         settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
         settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
         settingsInfo.cpuHighPercent = config.health.cpuHighPercent;

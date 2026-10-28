@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A local-first HUD that follows the app you're focused on — and a 30-view Datadog-style console for everything your kernel, containers and apps are doing.
+### A local-first HUD that follows the app you're focused on — and a 31-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -316,6 +316,70 @@ Prometheus exports the same numbers as `syspeek_sensor_celsius{chip,sensor,kind}
 `syspeek_sensor_power_watts`, `syspeek_battery_charge_percent{battery}`,
 `syspeek_battery_energy_watt_hours{battery,state="now|full"}`,
 `syspeek_battery_power_watts` and `syspeek_ac_online{adapter,online}`.
+
+## Cloud instance & cost
+
+The **Cloud** page answers "which instance am I on, and what is this app costing
+me?" without touching a control plane:
+
+- **Identity** comes from the link-local instance metadata service, the same
+  document the Datadog agent's cloud-provider client reads. AWS (IMDSv2 token
+  then `/latest/dynamic/instance-identity/document`), Azure
+  (`/metadata/instance/compute?api-version=2021-12-13`), GCP
+  (`/computeMetadata/v1/instance/{id,name,machine-type,zone}`) and OCI
+  (`opc/v2/instance/...` behind `Bearer Oracle` at `169.254.0.23`) are probed
+  in that order — each answers only to its own header, so there are no false
+  positives. Instance id, type, region/zone, account/project, private IP, image
+  and architecture are shown as reported.
+- **Accrued cost** is the hourly rate times uptime **since this boot** — the
+  page says "this boot", never "instance age", because a reboot resets host
+  uptime. The monthly projection is the standard 730-hour month.
+- **App share** splits the instance rate by the CPU the focused app actually
+  used: `rate × cpu% / vCPU`. A per-core number is intentional (a fully busy
+  8 vCPU box spends the whole rate), and the page states the formula.
+  `TOP PROCESSES IN THE FOCUSED APP` ranks the focused app's own process tree,
+  not the whole machine.
+- **Prices are never invented or bundled.** Syspeek reads a rate file
+  (`~/.config/syspeek/cloud-rates.txt`, override with `[cloud] rates=`):
+
+  ```ini
+  # imported 2026-10-28
+  aws/c7g.2xlarge       = 0.2920
+  azure/Standard_D2s_v3 = 0.0960
+  ```
+
+  A bare `c7g.2xlarge` works when only one provider lists it. The `# imported`
+  stamp is not decoration: past 30 days the page and the Settings row say
+  `(56 days old)`, so a stale number is never silently presented as current.
+  Import the current on-demand list price for the instance you are on with:
+
+  ```sh
+  syspeek --cloud-prices                    # reads the instance type from IMDS
+  syspeek --cloud-prices=c7g.2xlarge --region=eu-west-1
+  ```
+
+  That shells out to the `aws` CLI you already use
+  (`aws pricing get-products --service-code AmazonEC2`, filtered to the shared /
+  used-capacity / Linux / no-software SKU) and writes the rate file with a fresh
+  import stamp. It is opt-in, never runs on a tick, and Syspeek never reads or
+  stores credentials — the CLI uses whatever profile you already configured.
+
+```ini
+[cloud]
+enabled    = true   ; the only network read Syspeek does on its own
+rates      =        ; empty = ~/.config/syspeek/cloud-rates.txt
+timeout_ms = 450    ; one metadata request; single-digit ms when IMDS is there
+```
+
+The metadata request goes to a link-local address (`169.254.169.254` /
+`169.254.0.23`), which is never routed off the host, and is the single network
+read Syspeek performs without you asking. `enabled = false` turns even that off
+and the page says so instead of showing empty cards. Off a cloud instance —
+or on a host where IMDS is firewalled or IMDSv2 tokens are refused — every card
+prints the gate text rather than a blank.
+
+Read-only in the cloud by design: Syspeek identifies the instance and prices it,
+it never starts, stops or terminates anything.
 
 ## Advanced (optional)
 

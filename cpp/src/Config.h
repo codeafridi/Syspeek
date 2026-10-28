@@ -171,6 +171,20 @@ struct OverlayConfig {
     int height = -1;
 };
 
+struct CloudConfig {
+    // [cloud] enabled: the only network read Syspeek makes on its own is the
+    // link-local instance metadata service (169.254.169.254 / 169.254.0.23),
+    // which is never routed off the host. Turn it off on a box where even that
+    // is unwanted.
+    bool enabled = true;
+    // [cloud] rates: the price table to read. Empty means
+    // defaultCloudRatePath().
+    QString ratesPath;
+    // [cloud] timeout_ms: one metadata request budget. IMDS answers in single
+    // digits of milliseconds; a slow answer means it is not there.
+    int timeoutMs = 450;
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
@@ -186,6 +200,7 @@ struct Config {
     SilencesConfig silences;
     ActionsConfig actions;
     OverlayConfig overlay;
+    CloudConfig cloud;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;
@@ -207,3 +222,5 @@ void saveSilences(const QString &path, const QList<SilenceRule> &rules);
 void saveOverlayConfig(const QString &path, const OverlayConfig &overlay);
 
 QString defaultConfigPath();
+
+QString defaultCloudRatePath();

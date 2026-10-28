@@ -69,6 +69,7 @@ struct SettingsInfo {
     QString exportLine;
     QString historyLine;
     QString overlayLine;
+    QString cloudLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -138,6 +139,7 @@ private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
     void updateSloPanel(const SloReport &report);
     void updateSensorsPanel(const DisplaySnapshot &snapshot);
+    void updateCloudPanel(const DisplaySnapshot &snapshot);
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -157,6 +159,7 @@ private:
     QWidget *buildDatabasesView();
     QWidget *buildHistoryView();
     QWidget *buildCostView();
+    QWidget *buildCloudView();
     QWidget *buildDisksView();
     QWidget *buildGpuView();
     QWidget *buildSensorsView();
@@ -251,6 +254,17 @@ private:
     QLabel *m_costTileCpuEff = nullptr;
     QLabel *m_costTileMemEff = nullptr;
     TimeseriesChart *m_chartCost = nullptr;
+    QLabel *m_cloudTileProvider = nullptr;
+    QLabel *m_cloudTileAccrued = nullptr;
+    QLabel *m_cloudTileMonthly = nullptr;
+    QLabel *m_cloudTileRate = nullptr;
+    QLabel *m_cloudSummary = nullptr;
+    QLabel *m_cloudDetail = nullptr;
+    QLabel *m_cloudCost = nullptr;
+    QLabel *m_cloudApp = nullptr;
+    QLabel *m_cloudShare = nullptr;
+    QTreeWidget *m_cloudConsumers = nullptr;
+    TimeseriesChart *m_chartCloudApp = nullptr;
     QLabel *m_diskSummary = nullptr;
     QLabel *m_diskTopNote = nullptr;
     QLabel *m_diskTop = nullptr;

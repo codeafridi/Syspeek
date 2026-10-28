@@ -460,6 +460,48 @@ int main(int argc, char *argv[]) {
               "overlay: saving the overlay keeps every other group");
     }
 
+    {
+        // M82: [cloud] is on by default (link-local IMDS read only).
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(""));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.enabled, "cloud: the metadata probe defaults to on");
+        check(c.cloud.timeoutMs == 450, "cloud: the default timeout is 450 ms");
+        check(c.cloud.ratesPath.isEmpty(),
+              "cloud: no authored path means the default rate file");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "enabled = false\n"
+            "rates = /tmp/owned-rates.txt\n"
+            "timeout_ms = 900\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.cloud.enabled, "cloud: enabled=false is honoured");
+        check(c.cloud.ratesPath == QStringLiteral("/tmp/owned-rates.txt")
+                  && c.cloud.timeoutMs == 900,
+              "cloud: the rate path and timeout load");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "timeout_ms = 90000\n"
+            "rates =   \n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.timeoutMs == 5000,
+              "cloud: an absurd timeout clamps to the ceiling");
+        check(c.cloud.ratesPath.isEmpty(),
+              "cloud: a whitespace path falls back to the default");
+        check(c.cloud.enabled, "cloud: untouched keys keep the default on");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

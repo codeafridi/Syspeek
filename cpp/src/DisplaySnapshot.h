@@ -14,6 +14,7 @@
 #include "HostInfoStatus.h"
 #include "TcpStatus.h"
 #include "FimStatus.h"
+#include "CloudStatus.h"
 
 #include <QList>
 #include <QPair>
@@ -112,6 +113,7 @@ struct DisplaySnapshot {
     GpuReading gpu;
     bool gpuWarming = false;
     SensorsSnapshot sensors;
+    CloudSnapshot cloud;
     bool gpuClientsAvailable = false;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;

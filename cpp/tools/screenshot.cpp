@@ -2,6 +2,7 @@
 #include "DashboardPanel.h"
 #include "HistoryLog.h"
 #include "SensorStatus.h"
+#include "CloudStatus.h"
 
 #include <QApplication>
 #include <QListWidget>
@@ -107,6 +108,9 @@ DisplaySnapshot demoSnapshot(int tick) {
         row.memory = QString::fromUtf8(mem);
         s.processes.append(row);
     }
+    // The focused group root carries the aggregate the top bar shows, so the
+    // Cloud page's app share and its consumer table describe the same pid.
+    s.processes.first().cpuPercent = cpuPct;
     s.processes[1].netRxPerSec = 262'144.0;
     s.processes[1].netTxPerSec = 65'536.0;
     s.processes[1].diskReadPerSec = 65'536.0;
@@ -440,6 +444,47 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.sensors.adapters = {adapter};
     s.sensors.available = true;
     recomputeSensorTotals(s.sensors);
+
+    // M82: a priced AWS instance so the Cloud page renders real numbers --
+    // identity from IMDS, accrual since boot, and the focused app's share of
+    // the hourly rate split by the CPU it actually used.
+    const int cloudVcpus = 8;
+    s.cloud.available = true;
+    s.cloud.identity.provider = CloudProvider::Aws;
+    s.cloud.identity.instanceId = QStringLiteral("i-0123456789abcdef0");
+    s.cloud.identity.instanceType = QStringLiteral("c7g.2xlarge");
+    s.cloud.identity.region = QStringLiteral("eu-west-1");
+    s.cloud.identity.zone = QStringLiteral("eu-west-1b");
+    s.cloud.identity.accountId = QStringLiteral("123456789012");
+    s.cloud.identity.privateIp = QStringLiteral("10.0.3.17");
+    s.cloud.identity.imageId = QStringLiteral("ami-0d3f6a4b2c1e9f8a7");
+    s.cloud.identity.architecture = QStringLiteral("arm64");
+    s.cloud.vcpus = cloudVcpus;
+    s.cloud.uptimeSec = 41 * 86400 + qint64(tick) * 2;
+    s.cloud.ratePerHour = 0.2920;
+    s.cloud.rateKey = QStringLiteral("aws/c7g.2xlarge");
+    s.cloud.rateSource =
+        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt");
+    s.cloud.rateImportDate = QStringLiteral("2026-09-01");
+    s.cloud.rateStaleDays = 56;
+    const CloudCostMath cloudMath =
+        computeCloudCost(s.cloud.ratePerHour, s.cloud.uptimeSec);
+    s.cloud.accruedUsd = cloudMath.accruedUsd;
+    s.cloud.projectedMonthlyUsd = cloudMath.projectedMonthlyUsd;
+    s.cloud.appName = s.appName;
+    s.cloud.appPid = s.pid.toInt();
+    s.cloud.appCpuPercent = cpuPct;
+    s.cloud.appCostPerHour =
+        cloudProcessCostPerHour(s.cloud.ratePerHour, cpuPct, cloudVcpus);
+    QList<CloudProcessSample> cloudRows;
+    for (const ProcessRow &row : s.processes) {
+        if (row.depth != 0) {
+            continue;
+        }
+        cloudRows.append(CloudProcessSample{row.name, row.pid, row.cpuPercent});
+    }
+    s.cloud.consumers =
+        cloudTopConsumers(cloudRows, s.cloud.ratePerHour, cloudVcpus, 4);
 
     return s;
 }
@@ -1073,6 +1118,12 @@ int main(int argc, char *argv[]) {
     settingsInfo.overlayLine = QStringLiteral(
         "wm GNOME Shell - pinned above - follows every desktop - "
         "click-through on - 430x191 at 200,120");
+    settingsInfo.cloudLine = cloudSettingsLine(
+        true,
+        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt"),
+        parseCloudRateFile(QStringLiteral("# imported 2026-09-01\n"
+                                          "aws/c7g.2xlarge = 0.2920\n")),
+        QDateTime(QDate(2026, 10, 28), QTime(12, 0)).toMSecsSinceEpoch());
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;

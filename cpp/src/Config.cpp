@@ -110,6 +110,8 @@ void validate(Config &config) {
     if (config.fim.paths.size() > 64) {
         config.fim.paths = config.fim.paths.mid(0, 64);
     }
+
+    config.cloud.timeoutMs = clampInt(config.cloud.timeoutMs, 120, 5000);
 }
 
 } // namespace
@@ -295,6 +297,24 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             settings.value(QStringLiteral("height")).toString().toInt(&ok);
         if (ok) {
             config.overlay.height = height;
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("cloud"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.cloud.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        const QString rates =
+            settings.value(QStringLiteral("rates")).toString().trimmed();
+        if (!rates.isEmpty()) {
+            config.cloud.ratesPath = rates;
+        }
+        const int timeout = settings.value(QStringLiteral("timeout_ms")).toInt();
+        if (timeout > 0) {
+            config.cloud.timeoutMs = timeout;
         }
     }
     settings.endGroup();
@@ -661,5 +681,27 @@ QString defaultConfigPath() {
     const QString base =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     return base + QStringLiteral("/config.ini");
+#endif
+}
+
+QString defaultCloudRatePath() {
+    const QString override =
+        QProcessEnvironment::systemEnvironment().value(
+            QStringLiteral("SYSPEEK_CLOUD_RATES"));
+    if (!override.isEmpty()) {
+        return override;
+    }
+
+#if defined(Q_OS_LINUX)
+    const QString configHome =
+        QProcessEnvironment::systemEnvironment().value(
+            QStringLiteral("XDG_CONFIG_HOME"),
+            QProcessEnvironment::systemEnvironment().value(
+                QStringLiteral("HOME")) + QStringLiteral("/.config"));
+    return configHome + QStringLiteral("/syspeek/cloud-rates.txt");
+#else
+    const QString base =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return base + QStringLiteral("/cloud-rates.txt");
 #endif
 }

@@ -4,6 +4,7 @@
 #include "TimeseriesChart.h"
 #include "platform/PlatformFactory.h"
 #include "ProcessActions.h"
+#include "CloudStatus.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -1267,6 +1268,118 @@ int main(int argc, char *argv[]) {
               && dashSynthetic->text().contains(QStringLiteral("example.com")),
           "panel shows synthetic check");
 
+    DisplaySnapshot cloudSnap =
+        makeSnapshot("cursor", "508637", "214.5%", "4.19 GB", "OK");
+    cloudSnap.cloud.available = true;
+    cloudSnap.cloud.identity.provider = CloudProvider::Aws;
+    cloudSnap.cloud.identity.instanceId =
+        QStringLiteral("i-0123456789abcdef0");
+    cloudSnap.cloud.identity.instanceType = QStringLiteral("c7g.2xlarge");
+    cloudSnap.cloud.identity.region = QStringLiteral("eu-west-1");
+    cloudSnap.cloud.identity.zone = QStringLiteral("eu-west-1b");
+    cloudSnap.cloud.identity.privateIp = QStringLiteral("10.0.3.17");
+    cloudSnap.cloud.vcpus = 8;
+    cloudSnap.cloud.uptimeSec = 41 * 86400;
+    cloudSnap.cloud.ratePerHour = 0.2920;
+    cloudSnap.cloud.rateKey = QStringLiteral("aws/c7g.2xlarge");
+    cloudSnap.cloud.rateSource = QStringLiteral("/tmp/rates.txt");
+    cloudSnap.cloud.rateImportDate = QStringLiteral("2026-01-01");
+    cloudSnap.cloud.rateStaleDays = 60;
+    cloudSnap.cloud.accruedUsd = 0.2920 * 41 * 24.0;
+    cloudSnap.cloud.projectedMonthlyUsd = 0.2920 * 730.0;
+    cloudSnap.cloud.appName = QStringLiteral("cursor");
+    cloudSnap.cloud.appPid = 508637;
+    cloudSnap.cloud.appCpuPercent = 214.5;
+    cloudSnap.cloud.appCostPerHour =
+        cloudProcessCostPerHour(0.2920, 214.5, 8);
+    cloudSnap.cloud.consumers = {
+        CloudConsumer{QStringLiteral("cursor"), 508637, 214.5, 0.0783},
+        CloudConsumer{QStringLiteral("gopls"), 509001, 41.0, 0.0150},
+    };
+    hud.setSnapshot(cloudSnap);
+    hud.setSnapshot(cloudSnap);
+
+    auto *cloudProvider =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileProvider"));
+    auto *cloudAccrued =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileAccrued"));
+    auto *cloudMonthly =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileMonthly"));
+    auto *cloudRate =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileRate"));
+    auto *cloudSummary =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudSummary"));
+    auto *cloudDetail =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudDetail"));
+    auto *cloudCost = hud.findChild<QLabel *>(QStringLiteral("ddCloudCost"));
+    auto *cloudApp = hud.findChild<QLabel *>(QStringLiteral("ddCloudApp"));
+    auto *cloudShare = hud.findChild<QLabel *>(QStringLiteral("ddCloudShare"));
+    auto *cloudConsumers =
+        hud.findChild<QTreeWidget *>(QStringLiteral("ddCloudConsumers"));
+    auto *cloudChart =
+        hud.findChild<TimeseriesChart *>(QStringLiteral("ddCloudChart"));
+
+    check(cloudProvider != nullptr
+              && cloudProvider->text() == QStringLiteral("AWS")
+              && cloudAccrued != nullptr
+              && cloudAccrued->text() == QStringLiteral("$287.33")
+              && cloudMonthly != nullptr
+              && cloudMonthly->text() == QStringLiteral("$213.16")
+              && cloudRate != nullptr
+              && cloudRate->text() == QStringLiteral("$0.2920/hr"),
+          "cloud page tiles show provider, accrual, projection and rate");
+    check(cloudSummary != nullptr
+              && cloudSummary->text().contains(QStringLiteral("c7g.2xlarge"))
+              && cloudSummary->text().contains(QStringLiteral("8 vCPU")),
+          "cloud page names the instance type and vCPU count");
+    check(cloudDetail != nullptr
+              && cloudDetail->text().contains(QStringLiteral("eu-west-1b"))
+              && cloudDetail->text().contains(QStringLiteral("10.0.3.17")),
+          "cloud page renders the identity detail card");
+    check(cloudCost != nullptr
+              && cloudCost->text().contains(QStringLiteral("this boot"))
+              && cloudCost->text().contains(QStringLiteral("60 days old")),
+          "cloud cost card labels accrual as this boot and flags a stale price");
+    check(cloudApp != nullptr
+              && cloudApp->text().contains(QStringLiteral("cursor"))
+              && cloudApp->text().contains(QStringLiteral("214.5%")),
+          "cloud app card shows the focused process share");
+    check(cloudConsumers != nullptr
+              && cloudConsumers->topLevelItemCount() == 2
+              && cloudConsumers->topLevelItem(0)->text(0)
+                     == QStringLiteral("cursor")
+              && cloudConsumers->topLevelItem(0)->text(1)
+                     == QStringLiteral("508637")
+              && cloudConsumers->topLevelItem(0)->text(3)
+                     == QStringLiteral("$0.0783"),
+          "cloud consumer table lists the focused app processes");
+    check(cloudShare != nullptr
+              && cloudShare->text().contains(QStringLiteral("vCPU")),
+          "cloud share note states the formula");
+    check(cloudChart != nullptr && cloudChart->sampleCount() == 2,
+          "cloud chart charts one app-cost sample per tick");
+
+    DisplaySnapshot cloudGated = makeSnapshot("idle", "7", "0%", "10 MB", "OK");
+    hud.setSnapshot(cloudGated);
+    check(cloudProvider != nullptr
+              && cloudProvider->text() == QStringLiteral("--")
+              && cloudAccrued != nullptr
+              && cloudAccrued->text() == QStringLiteral("--")
+              && cloudMonthly != nullptr
+              && cloudMonthly->text() == QStringLiteral("--")
+              && cloudRate != nullptr
+              && cloudRate->text() == QStringLiteral("--"),
+          "cloud page falls back to dashes off a cloud instance");
+    check(cloudSummary != nullptr
+              && cloudSummary->text().contains(
+                  QStringLiteral("no instance metadata service")),
+          "cloud page states the gate instead of showing a blank card");
+    check(cloudConsumers != nullptr
+              && cloudConsumers->topLevelItemCount() == 1
+              && cloudConsumers->topLevelItem(0)->text(0)
+                     == QStringLiteral("cloud: unavailable"),
+          "cloud consumer table states the gate, never an empty list");
+
     if (moreButton2 && panel) {
         moreButton2->click();
         check(hud.isExpanded() && !panel->isHidden(),
@@ -1275,9 +1388,13 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 30;
+            constexpr int kRailCount = 31;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
+            allPagesReachable = allPagesReachable
+                && rail->item(kRailCount - 3)->text() == QStringLiteral("Cost")
+                && rail->item(kRailCount - 2)->text() == QStringLiteral("Cloud")
+                && rail->item(settingsRow)->text() == QStringLiteral("Settings");
             rail->setCurrentRow(settingsRow);
             const auto *stack =
                 hud.findChild<QStackedWidget *>(QStringLiteral("ddViews"));
@@ -1287,6 +1404,12 @@ int main(int argc, char *argv[]) {
                 hud.findChild<QLabel *>(QStringLiteral("ddSettingsInfo"));
             allPagesReachable = allPagesReachable && software != nullptr
                 && software->text().contains(QStringLiteral("version"));
+            rail->setCurrentRow(kRailCount - 2);
+            allPagesReachable = allPagesReachable && stack != nullptr
+                && stack->currentIndex() == kRailCount - 2
+                && hud.findChild<QLabel *>(
+                       QStringLiteral("ddCloudTileProvider"))
+                       != nullptr;
             rail->setCurrentRow(0);
             check(allPagesReachable,
                   "rail switches pages and Settings view carries info");
@@ -1354,6 +1477,25 @@ int main(int argc, char *argv[]) {
                       && metricsText.contains(
                           QStringLiteral("bearer token required")),
                   "settings GENERAL card states the metrics auth state");
+            hud.setSettingsInfo(info);
+        }
+        {
+            // M82: the GENERAL card states the metadata probe + price age.
+            SettingsInfo cloudInfo = info;
+            cloudInfo.cloudLine =
+                QStringLiteral("imds 169.254.169.254 - read only, "
+                               "3 price(s) at /tmp/rates.txt (60 days old)");
+            hud.setSettingsInfo(cloudInfo);
+            QString cloudText;
+            for (QLabel *label :
+                 hud.findChildren<QLabel *>(QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("cloud&nbsp;"))) {
+                    cloudText = label->text();
+                }
+            }
+            check(cloudText.contains(QStringLiteral("169.254.169.254"))
+                      && cloudText.contains(QStringLiteral("60 days old")),
+                  "settings GENERAL card states the cloud probe and price age");
             hud.setSettingsInfo(info);
         }
         check(exportButtons.size() == 2,

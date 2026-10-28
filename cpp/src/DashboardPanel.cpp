@@ -366,6 +366,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Traces"), QStringLiteral("Profiles"),
                       QStringLiteral("Databases"), QStringLiteral("Security"),
                       QStringLiteral("History"), QStringLiteral("Cost"),
+                      QStringLiteral("Cloud"),
                       QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
 
@@ -400,6 +401,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildSecurityView());
     m_views->addWidget(buildHistoryView());
     m_views->addWidget(buildCostView());
+    m_views->addWidget(buildCloudView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
@@ -537,6 +539,11 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCostTileMonthly, #ddCostTileHourly, #ddCostTileCpuEff,"
         " #ddCostTileMemEff, #ddSettingsTileVersion, #ddSettingsTileRefresh,"
         " #ddSettingsTileMonitors, #ddSettingsTileSilenced { color: %TEXT%; }"
+        "#ddCloudTileProvider, #ddCloudTileAccrued, #ddCloudTileMonthly,"
+        " #ddCloudTileRate { color: %TEXT%; }"
+        "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp"
+        " { color: %MUTED%; }"
+        "#ddCloudShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -3301,6 +3308,12 @@ void DashboardPanel::applySettingsInfo() {
         int column = 0;
         for (int i = 0; i < text.size(); ++i) {
             const QChar ch = text.at(i);
+            if (ch == QLatin1Char('\n')) {
+                out += QStringLiteral("<br/>");
+                out += QStringLiteral("&nbsp;").repeated(11);
+                column = 0;
+                continue;
+            }
             if (column >= width && ch == QLatin1Char(' ')) {
                 out += QStringLiteral("<br/>");
                 out += QStringLiteral("&nbsp;").repeated(11);
@@ -3395,6 +3408,11 @@ void DashboardPanel::applySettingsInfo() {
         m_settings.overlayLine.isEmpty()
             ? muted(QStringLiteral("--"))
             : muted(wrapValue(m_settings.overlayLine, 88)));
+    general += row(
+        QStringLiteral("cloud"),
+        m_settings.cloudLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.cloudLine, 88)));
     m_settingsGeneral->setText(general);
 
     // Collection scope: every surface the backend can reach on this OS.
@@ -3424,6 +3442,7 @@ void DashboardPanel::applySettingsInfo() {
         {QStringLiteral("journal / event log"), caps.journal},
         {QStringLiteral("file integrity (fim)"), caps.fim},
         {QStringLiteral("software inventory (sbom)"), caps.sbom},
+        {QStringLiteral("instance metadata (cloud)"), true},
         {QStringLiteral("process signals"), caps.processSignals},
         {QStringLiteral("renice"), caps.processRenice},
         {QStringLiteral("i/o priority"), caps.processIonice},
@@ -3566,6 +3585,10 @@ void DashboardPanel::copyDiagnosticsReport() {
                  .arg(m_settings.overlayLine.isEmpty()
                           ? QStringLiteral("--")
                           : m_settings.overlayLine);
+    lines << QStringLiteral("cloud      %1")
+                 .arg(m_settings.cloudLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.cloudLine);
     lines << QStringLiteral("verbs      %1")
                  .arg(m_settings.verbsLine.isEmpty()
                           ? QStringLiteral("start stop restart status uninstall")
@@ -3952,6 +3975,138 @@ QWidget *DashboardPanel::buildHistoryView() {
                                  ui_theme::warn(), view));
     layout->addLayout(charts);
     layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+QWidget *DashboardPanel::buildCloudView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Instance tiles. ACCRUED is explicitly "this boot": a reboot resets
+    // host uptime, so the figure is the cost of the current boot, never the
+    // age of the instance (that is provider-side metadata, not local).
+    m_cloudTileProvider = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileProvider->setObjectName(QStringLiteral("ddCloudTileProvider"));
+    m_cloudTileAccrued = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileAccrued->setObjectName(QStringLiteral("ddCloudTileAccrued"));
+    m_cloudTileMonthly = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileMonthly->setObjectName(QStringLiteral("ddCloudTileMonthly"));
+    m_cloudTileRate = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileRate->setObjectName(QStringLiteral("ddCloudTileRate"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PROVIDER"), m_cloudTileProvider,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ACCRUED (BOOT)"),
+                              m_cloudTileAccrued, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("$/MONTH"), m_cloudTileMonthly,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("RATE"), m_cloudTileRate,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Identity from the instance metadata service (the same document the
+    // Datadog agent's cloud-provider client reads).
+    m_cloudSummary = new QLabel(QStringLiteral("--"), view);
+    m_cloudSummary->setObjectName(QStringLiteral("ddCloudSummary"));
+    m_cloudSummary->setFont(monoFont(11));
+    m_cloudSummary->setWordWrap(true);
+    m_cloudSummary->setMinimumWidth(1);
+
+    m_cloudDetail = new QLabel(QStringLiteral("--"), view);
+    m_cloudDetail->setObjectName(QStringLiteral("ddCloudDetail"));
+    m_cloudDetail->setFont(monoFont(10));
+    m_cloudDetail->setWordWrap(false);
+    m_cloudDetail->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("INSTANCE IDENTITY"),
+                                 ui_theme::accent(), view));
+    auto *identity = new QHBoxLayout;
+    identity->setSpacing(10);
+    identity->addWidget(
+        makeCard(QStringLiteral("metadata"), m_cloudSummary, view), 1);
+    identity->addWidget(
+        makeCard(QStringLiteral("detail"), m_cloudDetail, view), 1);
+    layout->addLayout(identity, 2);
+
+    // --- Rate / accrual / projection, with the import date that decides how
+    // much the number is worth.
+    m_cloudCost = new QLabel(QStringLiteral("--"), view);
+    m_cloudCost->setObjectName(QStringLiteral("ddCloudCost"));
+    m_cloudCost->setFont(monoFont(10));
+    m_cloudCost->setWordWrap(false);
+    m_cloudCost->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("INSTANCE COST"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("rate · accrual · projection"),
+                               m_cloudCost, view));
+
+    // --- Focused-app share: the instance rate split by the CPU the app
+    // actually used, charged against this box's vCPU count.
+    m_chartCloudApp = new TimeseriesChart(view);
+    m_chartCloudApp->setObjectName(QStringLiteral("ddCloudChart"));
+    m_chartCloudApp->setUnit(QStringLiteral("$/hr"));
+    m_chartCloudApp->setSeriesName(QStringLiteral("syspeek.cloud.app_cost"));
+
+    m_cloudApp = new QLabel(QStringLiteral("--"), view);
+    m_cloudApp->setObjectName(QStringLiteral("ddCloudApp"));
+    m_cloudApp->setFont(monoFont(10));
+    m_cloudApp->setWordWrap(false);
+    m_cloudApp->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("APP COST SHARE"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(
+        makeChartCard(QStringLiteral("focused app $/hour"), m_chartCloudApp,
+                      view));
+    layout->addWidget(makeCard(QStringLiteral("focused app"), m_cloudApp, view));
+
+    m_cloudConsumers = new QTreeWidget(view);
+    m_cloudConsumers->setObjectName(QStringLiteral("ddCloudConsumers"));
+    m_cloudConsumers->setColumnCount(4);
+    m_cloudConsumers->setHeaderLabels({QStringLiteral("Process"),
+                                       QStringLiteral("PID"),
+                                       QStringLiteral("CPU %"),
+                                       QStringLiteral("$/hr")});
+    m_cloudConsumers->setRootIsDecorated(false);
+    m_cloudConsumers->setSelectionMode(QAbstractItemView::NoSelection);
+    m_cloudConsumers->setFocusPolicy(Qt::NoFocus);
+    m_cloudConsumers->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < 4; ++column) {
+        m_cloudConsumers->header()->setSectionResizeMode(
+            column, QHeaderView::ResizeToContents);
+    }
+    layout->addWidget(makeCard(
+        QStringLiteral("TOP PROCESSES IN THE FOCUSED APP"), m_cloudConsumers,
+        view));
+
+    m_cloudShare = new QLabel(cloudShareNote(), view);
+    m_cloudShare->setObjectName(QStringLiteral("ddCloudShare"));
+    m_cloudShare->setFont(monoFont(9));
+    m_cloudShare->setWordWrap(true);
+    m_cloudShare->setMinimumWidth(1);
+    layout->addWidget(m_cloudShare);
 
     auto *scroll = new QScrollArea(view);
     scroll->setObjectName(QStringLiteral("ddScroll"));
@@ -5005,6 +5160,10 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 
     if (m_sensorSummary != nullptr) {
         updateSensorsPanel(snapshot);
+    }
+
+    if (m_cloudTileProvider != nullptr) {
+        updateCloudPanel(snapshot);
     }
 
     m_statusValue->setText(snapshot.status);
@@ -6590,6 +6749,56 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     .arg(marker, alert.title, alert.detail, quiet);
     }
     m_alerts->setText(text);
+}
+
+void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
+    const CloudSnapshot &cloud = snapshot.cloud;
+    const bool priced = cloud.available && cloud.ratePerHour >= 0.0;
+
+    m_cloudTileProvider->setText(
+        cloud.available ? cloudProviderLabel(cloud.identity.provider)
+                        : QStringLiteral("--"));
+    m_cloudTileAccrued->setText(
+        priced && cloud.accruedUsd >= 0.0 ? formatCostMoney(cloud.accruedUsd)
+                                          : QStringLiteral("--"));
+    m_cloudTileMonthly->setText(
+        priced && cloud.projectedMonthlyUsd >= 0.0
+            ? formatCostMoney(cloud.projectedMonthlyUsd)
+            : QStringLiteral("--"));
+    m_cloudTileRate->setText(
+        priced ? QStringLiteral("%1/hr").arg(formatCostMoney(cloud.ratePerHour))
+               : QStringLiteral("--"));
+
+    m_cloudSummary->setText(cloudSummaryText(cloud));
+    m_cloudDetail->setText(cloudDetailText(cloud));
+    m_cloudCost->setText(cloudCostText(cloud));
+    m_cloudApp->setText(cloudAppText(cloud));
+
+    if (m_cloudConsumers != nullptr) {
+        m_cloudConsumers->clear();
+        for (const CloudConsumer &consumer : cloud.consumers) {
+            auto *item = new QTreeWidgetItem(m_cloudConsumers);
+            item->setText(0, consumer.name);
+            item->setText(1, QString::number(consumer.pid));
+            item->setText(2, QStringLiteral("%1%").arg(consumer.cpuPercent, 0, 'f', 1));
+            item->setText(3, formatCostMoney(consumer.usdPerHour));
+            for (int column = 1; column < 4; ++column) {
+                item->setTextAlignment(column, Qt::AlignRight | Qt::AlignVCenter);
+            }
+        }
+        if (cloud.consumers.isEmpty()) {
+            auto *item = new QTreeWidgetItem(m_cloudConsumers);
+            item->setText(0, cloud.available
+                                 ? QStringLiteral("no priced processes in the "
+                                                  "focused app")
+                                 : QStringLiteral("cloud: unavailable"));
+            item->setForeground(0, QColor(ui_theme::dim()));
+        }
+    }
+
+    if (m_chartCloudApp != nullptr && cloud.appCostPerHour >= 0.0) {
+        m_chartCloudApp->push(cloud.appCostPerHour);
+    }
 }
 
 void DashboardPanel::updateSensorsPanel(const DisplaySnapshot &snapshot) {

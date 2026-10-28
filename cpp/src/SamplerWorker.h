@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CloudProbe.h"
+#include "CloudStatus.h"
 #include "CpuSampler.h"
 #include "Config.h"
 #include "DiskSampler.h"
@@ -52,6 +54,7 @@ private:
     void fillProcessDisk(DisplaySnapshot &snapshot);
     void fillGpu(DisplaySnapshot &snapshot);
     void fillSensors(DisplaySnapshot &snapshot);
+    void fillCloud(DisplaySnapshot &snapshot);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -106,6 +109,16 @@ private:
     // one probe per 2-5 s window is plenty (Stats polls the battery at 5 s).
     SensorsSnapshot m_sensors;
     qint64 m_sensorsStampMs = 0;
+    // Cloud (M82): the IMDS probe is an outbound-interface read, so it runs on
+    // a 5 min cadence when an instance answered and 15 min when none does;
+    // costs are recomputed every tick from the cached identity + rate.
+    CloudConfig m_cloud;
+    CloudSnapshot m_cloudBase;
+    CloudRateTable m_cloudRates;
+    QString m_cloudRatesPath;
+    qint64 m_cloudProbeStampMs = 0;
+    qint64 m_cloudRatesStampMs = 0;
+    bool m_cloudProbed = false;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

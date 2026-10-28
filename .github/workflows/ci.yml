@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -251,6 +251,26 @@ jobs:
           assert all(e["freeG"] <= e["totalG"] + 0.01
                      for e in fs if "freeG" in e), fs[:3]
           print("filesystems ok:", len(fs), "entries")
+          cloud = d.get("cloud", {})
+          assert cloud.get("rateLookupOk") is True, cloud
+          assert cloud.get("costMathOk") is True, cloud
+          assert cloud.get("shareOk") is True, cloud
+          assert cloud.get("topOk") is True, cloud
+          assert cloud.get("staleOk") is True, cloud
+          assert cloud.get("vcpus", 0) >= 1, cloud
+          assert cloud.get("attempted", 0) >= 5, cloud
+          assert cloud.get("uptimeSec", 0) > 0, cloud
+          assert cloud.get("ratePath"), cloud
+          if cloud.get("available"):
+              assert cloud.get("instanceType"), cloud
+              print("cloud ok: %s %s %s, $%.4f this boot"
+                    % (cloud["provider"], cloud["instanceType"],
+                       cloud.get("region", "-"),
+                       cloud.get("accruedUsd", -1.0)))
+          else:
+              assert cloud.get("note"), cloud
+              print("cloud gated (no IMDS here): %d probes, rate/cost/share "
+                    "self-tests ok" % cloud["attempted"])
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -378,6 +398,26 @@ jobs:
           assert all(e["freeG"] <= e["totalG"] + 0.01
                      for e in fs if "freeG" in e), fs[:3]
           print("filesystems ok:", len(fs), "entries")
+          cloud = d.get("cloud", {})
+          assert cloud.get("rateLookupOk") is True, cloud
+          assert cloud.get("costMathOk") is True, cloud
+          assert cloud.get("shareOk") is True, cloud
+          assert cloud.get("topOk") is True, cloud
+          assert cloud.get("staleOk") is True, cloud
+          assert cloud.get("vcpus", 0) >= 1, cloud
+          assert cloud.get("attempted", 0) >= 5, cloud
+          assert cloud.get("uptimeSec", 0) > 0, cloud
+          assert cloud.get("ratePath"), cloud
+          if cloud.get("available"):
+              assert cloud.get("instanceType"), cloud
+              print("cloud ok: %s %s %s, $%.4f this boot"
+                    % (cloud["provider"], cloud["instanceType"],
+                       cloud.get("region", "-"),
+                       cloud.get("accruedUsd", -1.0)))
+          else:
+              assert cloud.get("note"), cloud
+              print("cloud gated (no IMDS here): %d probes, rate/cost/share "
+                    "self-tests ok" % cloud["attempted"])
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
@@ -571,14 +611,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 29); do
+          for i in $(seq 0 30); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 30, files
+          assert len(files) == 31, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",

@@ -40,8 +40,13 @@
 #include "ProcessActions.h"
 #include "OverlayStatus.h"
 #include "SensorStatus.h"
+#include "CloudStatus.h"
+#include "CloudPricing.h"
 #include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
+#include <QDate>
+#include <QDateTime>
+#include <QTime>
 #include <QDir>
 #include <QFile>
 #include <QEventLoop>
@@ -3931,6 +3936,380 @@ int main(int argc, char *argv[]) {
                   && !overlayGeometryUsable(QRect(5, 5, 0, 40)),
               "overlay: geometry text and usability agree");
     }
+
+        // ---- M82 cloud identity + accrued cost ------------------------
+        {
+            const QByteArray awsDoc = R"({
+              "accountId": "123456789012",
+              "architecture": "arm64",
+              "availabilityZone": "eu-west-1b",
+              "billingProducts": ["bp-6ba54002"],
+              "imageId": "ami-0abc",
+              "instanceId": "i-0123456789abcdef0",
+              "instanceType": "c7g.2xlarge",
+              "marketplaceProductCodes": ["abc"],
+              "privateIp": "10.0.3.17",
+              "region": "eu-west-1"
+            })";
+            const CloudIdentity aws = parseAwsIdentityDocument(awsDoc);
+            check(aws.provider == CloudProvider::Aws
+                      && aws.instanceId == QStringLiteral("i-0123456789abcdef0")
+                      && aws.instanceType == QStringLiteral("c7g.2xlarge")
+                      && aws.region == QStringLiteral("eu-west-1")
+                      && aws.zone == QStringLiteral("eu-west-1b")
+                      && aws.accountId == QStringLiteral("123456789012")
+                      && aws.privateIp == QStringLiteral("10.0.3.17")
+                      && aws.architecture == QStringLiteral("arm64")
+                      && aws.marketplace && !aws.spot,
+                  "cloud: the aws identity document maps every field");
+            check(parseAwsIdentityDocument(R"({"instanceId":"i-spot",
+                      "billingProducts":["bp-spot-9d2f"]})")
+                      .spot,
+                  "cloud: a spot billing product marks the instance");
+
+            const CloudIdentity awsBroken =
+                parseAwsIdentityDocument("not json");
+            check(awsBroken.provider == CloudProvider::None
+                      && awsBroken.note.contains(QStringLiteral("not valid JSON")),
+                  "cloud: a non-JSON aws document states the reason");
+            const CloudIdentity awsNoId =
+                parseAwsIdentityDocument(R"({"instanceType":"t3.micro"})");
+            check(awsNoId.provider == CloudProvider::None
+                      && awsNoId.note.contains(QStringLiteral("no instanceId")),
+                  "cloud: an aws document without instanceId is refused");
+
+            const CloudIdentity azure = parseAzureCompute(R"({"compute":{
+                "vmId":"3f9c1e2a","name":"web-1","vmSize":"Standard_D2s_v3",
+                "location":"westeurope","zone":"2",
+                "subscriptionId":"sub-1","osType":"Linux",
+                "imageReference":"Canonical:ubuntu"}})");
+            check(azure.provider == CloudProvider::Azure
+                      && azure.instanceId == QStringLiteral("3f9c1e2a")
+                      && azure.instanceName == QStringLiteral("web-1")
+                      && azure.instanceType == QStringLiteral("Standard_D2s_v3")
+                      && azure.zone == QStringLiteral("westeurope-2")
+                      && azure.operatingSystem == QStringLiteral("linux"),
+                  "cloud: the azure compute document maps zone as region-N");
+            const CloudIdentity azureFlat = parseAzureCompute(R"({"vmId":"v2",
+                "location":"eastus","osType":"Windows"})");
+            check(azureFlat.provider == CloudProvider::Azure
+                      && azureFlat.zone.isEmpty()
+                      && azureFlat.operatingSystem == QStringLiteral("windows"),
+                  "cloud: a flat azure document without a zone keeps region");
+            check(!parseAzureCompute(R"({"name":"no-id"})").note.isEmpty(),
+                  "cloud: an azure document without vmId states the reason");
+
+            check(cloudMachineTypeTail(QStringLiteral(
+                      "projects/123/zones/europe-west1-b/machineTypes/"
+                      "n2-standard-4"))
+                      == QStringLiteral("n2-standard-4")
+                      && cloudMachineTypeTail(QString()).isEmpty(),
+                  "cloud: the gcp machine-type path yields the type");
+            check(cloudRegionFromZone(QStringLiteral(
+                      "projects/1/zones/us-central1-a"))
+                          == QStringLiteral("us-central1")
+                      && cloudRegionFromZone(QStringLiteral("us-east1-b"))
+                             == QStringLiteral("us-east1")
+                      && cloudRegionFromZone(QString()).isEmpty(),
+                  "cloud: the gcp region is the zone minus its letter");
+
+            GcpMetadataFields gcpFields;
+            gcpFields.machineType =
+                "projects/123/zones/europe-west1-b/machineTypes/e2-medium";
+            gcpFields.zone = "projects/123/zones/europe-west1-b\n";
+            gcpFields.id = "87654321\n";
+            gcpFields.name = "api-1\n";
+            gcpFields.project = "shopist-prod\n";
+            const CloudIdentity gcp = parseGcpInstance(gcpFields);
+            check(gcp.provider == CloudProvider::Gcp
+                      && gcp.instanceId == QStringLiteral("87654321")
+                      && gcp.instanceName == QStringLiteral("api-1")
+                      && gcp.instanceType == QStringLiteral("e2-medium")
+                      && gcp.zone == QStringLiteral("europe-west1-b")
+                      && gcp.region == QStringLiteral("europe-west1")
+                      && gcp.accountId == QStringLiteral("shopist-prod")
+                      && gcp.note.isEmpty(),
+                  "cloud: the gcp metadata fields parse, note stays empty");
+            GcpMetadataFields badGcp;
+            badGcp.machineType = "e2-medium";
+            badGcp.id = "5";
+            const CloudIdentity badGcpIdentity = parseGcpInstance(badGcp);
+            check(badGcpIdentity.provider == CloudProvider::Gcp
+                      && badGcpIdentity.note.contains(
+                             QStringLiteral("/machineTypes/")),
+                  "cloud: a non-canonical gcp machine-type is flagged");
+
+            const CloudIdentity oci = parseOciInstance(R"({
+                "id":"ocid1.instance.oc1..abc","displayName":"db-1",
+                "shape":"VM.Standard.E4.Flex","region":"eu-frankfurt-1",
+                "availabilityDomain":"AD-1","compartmentId":"ocid1.comp"})");
+            check(oci.provider == CloudProvider::Oci
+                      && oci.instanceId == QStringLiteral("ocid1.instance.oc1..abc")
+                      && oci.instanceType == QStringLiteral("VM.Standard.E4.Flex")
+                      && oci.region == QStringLiteral("eu-frankfurt-1")
+                      && oci.zone == QStringLiteral("AD-1"),
+                  "cloud: the oci instance document maps shape + AD");
+            check(parseOciInstance(R"({"shape":"x"})")
+                          .note.contains(QStringLiteral("empty id")),
+                  "cloud: an oci document without id states the reason");
+
+            const CloudRateTable rates = parseCloudRateFile(
+                QStringLiteral("# imported 2026-01-02\n"
+                               "aws/c7g.2xlarge = 0.2920\n"
+                               "aws/c7g.2xlarge = 0.3100\n"
+                               "azure/Standard_D2s_v3 = 0.0960  # promo\n"
+                               "n2-standard-4 = 0.1901\n"
+                               "aws/broken = nope\n"
+                               "aws/negative = -1\n"
+                               "\n"),
+                QStringLiteral("/tmp/rates.txt"));
+            check(rates.loaded && rates.importDate == QStringLiteral("2026-01-02")
+                      && rates.sourcePath == QStringLiteral("/tmp/rates.txt"),
+                  "cloud: the rate file records its import stamp");
+            check(rates.rates.size() == 3,
+                  "cloud: bad values are dropped and duplicates replaced");
+            check(qAbs(cloudRateFor(rates, CloudProvider::Aws,
+                                    QStringLiteral("C7G.2XLarge"))
+                       - 0.3100) < 1e-9,
+                  "cloud: the rate lookup is case-insensitive, last wins");
+            check(qAbs(cloudRateFor(rates, CloudProvider::Gcp,
+                                    QStringLiteral("n2-standard-4"))
+                       - 0.1901) < 1e-9,
+                  "cloud: a bare instance type is usable without a prefix");
+            check(cloudRateFor(rates, CloudProvider::Aws,
+                               QStringLiteral("m7g.large"))
+                          < 0.0
+                      && cloudRateFor(rates, CloudProvider::None,
+                                      QStringLiteral("anything"))
+                             < 0.0,
+                  "cloud: an unknown instance or provider has no rate");
+            check(cloudRateKey(CloudProvider::Aws, QStringLiteral("t3.micro"))
+                          == QStringLiteral("aws/t3.micro")
+                      && cloudRateKey(CloudProvider::None,
+                                      QStringLiteral("t3.micro"))
+                             .isEmpty(),
+                  "cloud: the rate key is provider/type");
+
+            check(cloudRatesTemplateText().contains(
+                      QStringLiteral("aws/c7g.2xlarge = 0.2920")),
+                  "cloud: the template shows a concrete example");
+            const qint64 now = QDateTime(QDate(2026, 3, 2), QTime(12, 0))
+                                   .toMSecsSinceEpoch();
+            check(cloudRateStaleDays(QStringLiteral("2026-01-01"), now) == 60
+                      && cloudRateStaleDays(QStringLiteral("2026-03-09"), now)
+                             == 0
+                      && cloudRateStaleDays(QString(), now) == -1
+                      && cloudRateStaleDays(QStringLiteral("nope"), now) == -1,
+                  "cloud: staleness is whole days, future clamps, junk is -1");
+            const QString written = cloudRateFileText(rates, now);
+            check(written.startsWith(QStringLiteral("# imported 2026-01-02\n"))
+                      && written.contains(QStringLiteral("aws/c7g.2xlarge = 0.3100"))
+                      && written.contains(QStringLiteral("59 days old")),
+                  "cloud: the written rate file keeps the stamp and warns");
+
+            const CloudCostMath zero = computeCloudCost(0.2920, 0);
+            check(qAbs(zero.accruedUsd) < 1e-9
+                      && qAbs(zero.projectedMonthlyUsd - 0.2920 * 730.0) < 1e-9,
+                  "cloud: zero uptime accrues nothing, the projection is 730 h");
+            const CloudCostMath day41 = computeCloudCost(0.2920, 41 * 86400);
+            check(qAbs(day41.accruedUsd - 0.2920 * 41 * 24.0) < 1e-9,
+                  "cloud: accrual scales linearly with uptime");
+            check(computeCloudCost(-1.0, 100).accruedUsd < 0.0
+                      && computeCloudCost(1.0, -1).accruedUsd < 0.0,
+                  "cloud: an unknown rate or uptime yields no number");
+
+            check(qAbs(cloudProcessCostPerHour(8.0, 800.0, 8) - 8.0) < 1e-9
+                      && qAbs(cloudProcessCostPerHour(8.0, 100.0, 8) - 1.0)
+                             < 1e-9
+                      && qAbs(cloudProcessCostPerHour(8.0, 50.0, 12)
+                              - 8.0 * 0.5 / 12.0) < 1e-9,
+                  "cloud: the app share is rate x cpu% / vCPU");
+            check(cloudProcessCostPerHour(8.0, 100.0, 0) < 0.0
+                      && cloudProcessCostPerHour(8.0, 0.0, 8) < 0.0
+                      && cloudProcessCostPerHour(-1.0, 100.0, 8) < 0.0,
+                  "cloud: no vCPU, no cpu or no rate gives no share");
+
+            const QList<CloudProcessSample> rows = {
+                {QStringLiteral("small"), 1, 40.0},
+                {QStringLiteral("big"), 2, 400.0},
+                {QStringLiteral("mid"), 3, 100.0},
+                {QStringLiteral("idle"), 4, 0.0},
+                {QString(), 5, 10.0},
+            };
+            const QList<CloudConsumer> top =
+                cloudTopConsumers(rows, 1.0, 4, 3);
+            check(top.size() == 3 && top.at(0).pid == 2 && top.at(1).pid == 3
+                      && top.at(2).pid == 1,
+                  "cloud: consumers sort by dollars and cap at the limit");
+            check(qAbs(cloudConsumerTotal(top) - (1.0 + 0.25 + 0.1)) < 1e-9,
+                  "cloud: the capped list sums only the top rows");
+            const QList<CloudConsumer> named =
+                cloudTopConsumers(rows, 1.0, 4, 8);
+            check(named.size() == 4
+                      && named.constLast().name == QStringLiteral("5"),
+                  "cloud: a pid-only row is named by its pid");
+            check(qAbs(cloudConsumerTotal(named)
+                       - (1.0 + 0.25 + 0.1 + 0.025)) < 1e-9,
+                  "cloud: the consumer total sums the shares");
+            check(cloudTopConsumers(rows, 1.0, 0, 3).isEmpty()
+                      && cloudTopConsumers(rows, -1.0, 4, 3).isEmpty(),
+                  "cloud: no vCPU or no rate yields no consumer list");
+
+            CloudSnapshot gated;
+            gated.available = false;
+            check(cloudSummaryText(gated) == cloudUnreachableText()
+                      && cloudDetailText(gated) == cloudUnreachableText()
+                      && cloudCostText(gated) == cloudUnreachableText(),
+                  "cloud: every gated card prints the same gate text");
+            CloudSnapshot disabled;
+            disabled.note = QStringLiteral("cloud: disabled ([cloud] "
+                                           "enabled=false) - the instance "
+                                           "metadata service is never contacted");
+            check(cloudSummaryText(disabled).contains(
+                      QStringLiteral("enabled=false")),
+                  "cloud: a disabled probe states the switch");
+
+            CloudSnapshot live;
+            live.available = true;
+            live.identity = aws;
+            live.vcpus = 8;
+            live.uptimeSec = 41 * 86400;
+            live.rateKey = QStringLiteral("aws/c7g.2xlarge");
+            live.ratePerHour = 0.2920;
+            live.rateSource = QStringLiteral("/tmp/rates.txt");
+            live.rateImportDate = QStringLiteral("2026-01-01");
+            live.rateStaleDays = 60;
+            const CloudCostMath liveMath =
+                computeCloudCost(live.ratePerHour, live.uptimeSec);
+            live.accruedUsd = liveMath.accruedUsd;
+            live.projectedMonthlyUsd = liveMath.projectedMonthlyUsd;
+            live.appName = QStringLiteral("cursor");
+            live.appPid = 508637;
+            live.appCpuPercent = 214.5;
+            live.appCostPerHour =
+                cloudProcessCostPerHour(live.ratePerHour, live.appCpuPercent,
+                                        live.vcpus);
+            check(cloudSummaryText(live).contains(QStringLiteral("AWS"))
+                      && cloudSummaryText(live).contains(
+                             QStringLiteral("c7g.2xlarge"))
+                      && cloudSummaryText(live).contains(
+                             QStringLiteral("8 vCPU"))
+                      && !cloudSummaryText(live).contains(
+                             QStringLiteral("spot")),
+                  "cloud: the summary names provider, type and vCPU");
+            CloudSnapshot spotSnap = live;
+            spotSnap.identity.spot = true;
+            check(cloudSummaryText(spotSnap).endsWith(QStringLiteral("- spot")),
+                  "cloud: a spot instance is called out in the summary");
+            check(cloudDetailText(live).contains(QStringLiteral("private ip "))
+                      && cloudDetailText(live).contains(
+                             QStringLiteral("eu-west-1b"))
+                      && cloudDetailText(live).contains(
+                             QStringLiteral("arm64")),
+                  "cloud: the detail card carries the identity fields");
+            const QString costLine = cloudCostText(live);
+            check(costLine.contains(QStringLiteral("$0.2920/hr"))
+                      && costLine.contains(QStringLiteral("this boot"))
+                      && costLine.contains(QStringLiteral("41d 0h"))
+                      && costLine.contains(QStringLiteral("60 days old"))
+                      && costLine.contains(QStringLiteral("/month")),
+                  "cloud: the cost card labels accrual as this boot");
+            const QString appLine = cloudAppText(live);
+            check(appLine.contains(QStringLiteral("cursor"))
+                      && appLine.contains(QStringLiteral("214.5%"))
+                      && appLine.contains(QStringLiteral("/hr")),
+                  "cloud: the app card carries the share");
+            CloudSnapshot noRate = live;
+            noRate.ratePerHour = -1.0;
+            check(cloudCostText(noRate).contains(QStringLiteral("aws/c7g.2xlarge"))
+                      && cloudCostText(noRate).contains(
+                             QStringLiteral("usd per hour"))
+                      && cloudAppText(noRate).contains(
+                             QStringLiteral("needs a price")),
+                  "cloud: a missing price states the exact key to add");
+            CloudSnapshot noApp = live;
+            noApp.appCpuPercent = -1.0;
+            check(cloudAppText(noApp).contains(
+                      QStringLiteral("no focused-process cpu sample")),
+                  "cloud: a warmup tick says the sample is missing");
+
+            check(cloudUptimeText(41 * 86400) == QStringLiteral("41d 0h")
+                      && cloudUptimeText(3 * 3600 + 5 * 60)
+                             == QStringLiteral("3h 5m")
+                      && cloudUptimeText(-1) == QStringLiteral("--"),
+                  "cloud: uptime text scales from hours to days");
+            check(cloudShareNote().contains(QStringLiteral("cpu%"))
+                      && cloudShareNote().contains(QStringLiteral("vCPU")),
+                  "cloud: the share note states the formula");
+
+            check(cloudSettingsLine(false, QStringLiteral("/tmp/r"), rates, now)
+                          .contains(QStringLiteral("disabled")),
+                  "cloud: settings states a disabled probe");
+            const QString settingsEmpty =
+                cloudSettingsLine(true, QStringLiteral("/tmp/r"),
+                                  CloudRateTable{}, now);
+            check(settingsEmpty.contains(QStringLiteral("169.254.169.254"))
+                      && settingsEmpty.contains(
+                             QStringLiteral("--cloud-prices"))
+                      && settingsEmpty.contains(QStringLiteral("/tmp/r")),
+                  "cloud: settings names both IMDS addresses and the import");
+            const QString settingsFull =
+                cloudSettingsLine(true, QStringLiteral("/tmp/r"), rates, now);
+            check(settingsFull.contains(QStringLiteral("prices 3"))
+                      && settingsFull.contains(QStringLiteral("2026-01-02"))
+                      && settingsFull.contains(QStringLiteral("59 days old")),
+                  "cloud: settings states the price count and staleness");
+
+            const QStringList pricingArgs =
+                awsPricingArguments(AwsPriceQuery{QStringLiteral("c7g.2xlarge"),
+                                                  QStringLiteral("eu-west-1")});
+            check(pricingArgs.contains(QStringLiteral("get-products"))
+                      && pricingArgs.contains(QStringLiteral("AmazonEC2"))
+                      && pricingArgs.contains(QStringLiteral("aws_v1"))
+                      && pricingArgs.contains(
+                          QStringLiteral("Type=TERM_MATCH,Field=instanceType,"
+                                         "Value=c7g.2xlarge"))
+                      && pricingArgs.contains(
+                          QStringLiteral("Type=TERM_MATCH,Field=location,"
+                                         "Value=EU (Ireland)"))
+                      && pricingArgs.contains(
+                          QStringLiteral("Type=TERM_MATCH,Field=capacitystatus,"
+                                         "Value=Used")),
+                  "cloud: the pricing query pins service, type, location");
+            check(awsPriceLocation(QStringLiteral("us-west-2"))
+                          == QStringLiteral("US West (Oregon)")
+                      && awsPriceLocation(QStringLiteral("xx-new-1"))
+                             == QStringLiteral("xx-new-1"),
+                  "cloud: pricing locations map known regions, else the code");
+
+            const QByteArray priceList = R"({"FormatVersion":"aws_v1","PriceList":[
+              "{\"product\":{\"attributes\":{\"instanceType\":\"c7g.2xlarge\",
+                 \"capacitystatus\":\"Used\",\"preInstalledSw\":\"NA\",
+                 \"tenancy\":\"Shared\",\"operatingSystem\":\"Linux\"}},
+                \"terms\":{\"OnDemand\":{\"ABC.JRTCKXETXF\":{
+                  \"priceDimensions\":{\"ABC.JRTCKXETXF.6YS6EN2CT7\":{
+                    \"unit\":\"Hrs\",\"pricePerUnit\":{\"USD\":\"0.2920000000\"}}}}}}}",
+              "{\"product\":{\"attributes\":{\"instanceType\":\"c7g.2xlarge\",
+                 \"capacitystatus\":\"Used\",\"preInstalledSw\":\"NA\",
+                 \"tenancy\":\"Dedicated\"}},
+                \"terms\":{\"OnDemand\":{\"D\":{\"priceDimensions\":{
+                  \"D.1\":{\"unit\":\"Hrs\",
+                           \"pricePerUnit\":{\"USD\":\"9.0000000000\"}}}}}}}",
+              "{\"product\":{\"attributes\":{\"capacitystatus\":\"Reserved\"}},
+                \"terms\":{\"OnDemand\":{\"R\":{\"priceDimensions\":{
+                  \"R.1\":{\"unit\":\"Hrs\",
+                           \"pricePerUnit\":{\"USD\":\"0.0100000000\"}}}}}}}"
+            ]})";
+            QString priceError;
+            const double priced = parseAwsPricingProducts(priceList,
+                                                          &priceError);
+            check(qAbs(priced - 0.2920) < 1e-9 && priceError.isEmpty(),
+                  "cloud: the pricing payload yields the shared on-demand rate");
+            QString junkError;
+            check(parseAwsPricingProducts("{}", &junkError) < 0.0
+                      && junkError.contains(QStringLiteral("no products")),
+                  "cloud: an empty pricing payload states the reason");
+        }
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

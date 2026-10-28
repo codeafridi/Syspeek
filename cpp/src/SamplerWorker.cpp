@@ -8,6 +8,8 @@
 #include <QDateTime>
 #include <QFile>
 #include <QSet>
+#include <QFile>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
@@ -45,6 +47,7 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
     , m_groupCache(5000, *m_backend)
     , m_health(config.health) {
     m_intervalMs = config.sampleIntervalMs;
+    m_cloud = config.cloud;
     m_sloSpec.name = config.slo.name;
     m_sloSpec.objective = config.slo.objective;
     m_sloSpec.windowHours = config.slo.windowHours;
@@ -479,6 +482,7 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
     fillProcessDisk(snapshot);
     fillGpu(snapshot);
     fillSensors(snapshot);
+    fillCloud(snapshot);
 
     const TcpHealth tcp = m_tcpSampler.sample();
     snapshot.tcpHealth = tcp;
@@ -789,4 +793,86 @@ void SamplerWorker::fillProcessDisk(DisplaySnapshot &snapshot) {
         snapshot.processDiskUnreadable = m_scanDiskUnreadable;
         snapshot.processDiskWarming = m_scanDiskTracked == 0;
     }
+}
+
+void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
+    if (!m_cloud.enabled) {
+        snapshot.cloud.available = false;
+        snapshot.cloud.note = QStringLiteral(
+            "cloud: disabled ([cloud] enabled=false) - the instance metadata "
+            "service is never contacted");
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence =
+        m_cloudBase.available ? qint64(300000) : qint64(900000);
+    if (!m_cloudProbed || now - m_cloudProbeStampMs >= cadence) {
+        CloudProbeOptions options;
+        options.timeoutMs = m_cloud.timeoutMs;
+        const CloudProbeResult probe = probeCloudIdentity(options);
+        m_cloudProbed = true;
+        m_cloudProbeStampMs = now;
+
+        m_cloudBase = CloudSnapshot{};
+        m_cloudBase.identity = probe.identity;
+        m_cloudBase.available =
+            probe.identity.provider != CloudProvider::None;
+        m_cloudBase.note = probe.error;
+        m_cloudBase.sampledAtMs = now;
+
+        m_cloudRatesPath = m_cloud.ratesPath.isEmpty()
+            ? defaultCloudRatePath()
+            : m_cloud.ratesPath;
+        m_cloudRates = CloudRateTable{};
+        QFile ratesFile(m_cloudRatesPath);
+        if (ratesFile.open(QIODevice::ReadOnly)) {
+            m_cloudRates = parseCloudRateFile(
+                QString::fromUtf8(ratesFile.readAll()), m_cloudRatesPath);
+            ratesFile.close();
+        }
+        m_cloudRatesStampMs = now;
+
+        if (m_cloudBase.available) {
+            m_cloudBase.rateKey = cloudRateKey(
+                probe.identity.provider, probe.identity.instanceType);
+            m_cloudBase.ratePerHour = cloudRateFor(
+                m_cloudRates, probe.identity.provider,
+                probe.identity.instanceType);
+            m_cloudBase.rateSource = m_cloudRatesPath;
+            m_cloudBase.rateImportDate = m_cloudRates.importDate;
+            m_cloudBase.rateStaleDays =
+                cloudRateStaleDays(m_cloudRates.importDate, now);
+        }
+    }
+
+    CloudSnapshot cloud = m_cloudBase;
+    cloud.vcpus = QThread::idealThreadCount();
+    cloud.uptimeSec = cloudHostUptimeSeconds();
+    if (cloud.available) {
+        const CloudCostMath math =
+            computeCloudCost(cloud.ratePerHour, cloud.uptimeSec);
+        cloud.accruedUsd = math.accruedUsd;
+        cloud.projectedMonthlyUsd = math.projectedMonthlyUsd;
+
+        cloud.appName = snapshot.appName;
+        cloud.appPid = snapshot.pid.toInt();
+        if (snapshot.cpuValid) {
+            cloud.appCpuPercent = snapshot.cpuPercent;
+            cloud.appCostPerHour = cloudProcessCostPerHour(
+                cloud.ratePerHour, snapshot.cpuPercent, cloud.vcpus);
+        }
+
+        QList<CloudProcessSample> rows;
+        rows.reserve(snapshot.processes.size());
+        for (const ProcessRow &row : snapshot.processes) {
+            if (row.depth != 0) {
+                continue;
+            }
+            rows.append(CloudProcessSample{row.name, row.pid, row.cpuPercent});
+        }
+        cloud.consumers =
+            cloudTopConsumers(rows, cloud.ratePerHour, cloud.vcpus, 8);
+    }
+    snapshot.cloud = cloud;
 }
