@@ -34,7 +34,10 @@ class QLabel;
 class QKeyEvent;
 class QLayout;
 class QMouseEvent;
+class QMoveEvent;
 class QPushButton;
+class QResizeEvent;
+class QTimer;
 class DashboardPanel;
 struct SettingsInfo;
 
@@ -108,6 +111,8 @@ public:
 
 protected:
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void moveEvent(QMoveEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -169,6 +174,7 @@ private:
     QPushButton *m_moreButton = nullptr;
     QPushButton *m_showHideButton = nullptr;
     QPushButton *m_clickButton = nullptr;
+    QTimer *m_overlaySaveTimer = nullptr;
     OverlaySession m_overlaySession = OverlaySession::Unknown;
     OverlayState m_overlay;
     OverlayConfig m_overlayConfig;

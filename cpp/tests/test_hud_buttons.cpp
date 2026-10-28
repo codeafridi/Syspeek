@@ -1470,21 +1470,50 @@ int main(int argc, char *argv[]) {
             expand->click();
             QCoreApplication::processEvents();
         }
+        check(expand != nullptr && window.isExpanded(),
+              "overlay: MORE expands the console before the size is saved");
 
-        QSettings written(overlayPath, QSettings::IniFormat);
-        check(written.value(QStringLiteral("overlay/x")).toString().toInt()
-                      == window.x()
-                  && written.value(QStringLiteral("overlay/y")).toString().toInt()
-                         == window.y(),
+        // The size is persisted from the window's own resize signal after a
+        // short debounce, and the layout may grow the frame after the resize
+        // we asked for, so read the file once it agrees with the window.
+        int persistedX = -1;
+        int persistedY = -1;
+        int persistedW = -1;
+        int persistedH = -1;
+        bool persistedMode = false;
+        QElapsedTimer persistClock;
+        persistClock.start();
+        while (persistClock.elapsed() < 2000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(20);
+            QSettings probe(overlayPath, QSettings::IniFormat);
+            persistedX =
+                probe.value(QStringLiteral("overlay/x")).toString().toInt();
+            persistedY =
+                probe.value(QStringLiteral("overlay/y")).toString().toInt();
+            persistedW =
+                probe.value(QStringLiteral("overlay/width")).toString().toInt();
+            persistedH =
+                probe.value(QStringLiteral("overlay/height")).toString().toInt();
+            persistedMode =
+                probe.value(QStringLiteral("overlay/click_through")).toBool();
+            if (persistedX == window.x() && persistedY == window.y()
+                && persistedW == window.width()
+                && persistedH == window.height()) {
+                break;
+            }
+        }
+        if (persistedW != window.width() || persistedH != window.height()) {
+            std::printf("  (persisted %dx%d at %d,%d, window %dx%d at %d,%d)\n",
+                        persistedW, persistedH, persistedX, persistedY,
+                        window.width(), window.height(), window.x(), window.y());
+        }
+
+        check(persistedX == window.x() && persistedY == window.y(),
               "overlay: the position is persisted to the config file");
-        check(written.value(QStringLiteral("overlay/width")).toString().toInt()
-                      == window.width()
-                  && written.value(QStringLiteral("overlay/height"))
-                             .toString()
-                             .toInt()
-                         == window.height(),
+        check(persistedW == window.width() && persistedH == window.height(),
               "overlay: the expanded size is persisted too");
-        check(!written.value(QStringLiteral("overlay/click_through")).toBool(),
+        check(!persistedMode,
               "overlay: the persisted mode matches the refused state");
 
         QString overlayLine;

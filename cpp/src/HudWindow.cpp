@@ -21,7 +21,9 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QMoveEvent>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QStandardPaths>
 #include <QStringList>
@@ -188,6 +190,17 @@ HudWindow::HudWindow(QWidget *parent)
         "below"));
     connect(m_clickButton, &QPushButton::clicked, this,
             &HudWindow::toggleClickThrough);
+
+    // Geometry is remembered from the signals the window actually emits rather
+    // than from the values we asked for: a layout can grow a frame the moment
+    // it is laid out (wider fonts, a longer monitor name) and a resize we
+    // requested would then be persisted as a size the window does not have.
+    // Debounced so a drag does not write the file on every mouse move.
+    m_overlaySaveTimer = new QTimer(this);
+    m_overlaySaveTimer->setSingleShot(true);
+    m_overlaySaveTimer->setInterval(400);
+    connect(m_overlaySaveTimer, &QTimer::timeout, this,
+            &HudWindow::persistOverlay);
 
     footer->addWidget(m_moreButton);
     footer->addWidget(m_clickButton);
@@ -1245,6 +1258,20 @@ void HudWindow::showEvent(QShowEvent *event) {
     // the session can actually honour it.
     if (m_overlayConfig.clickThrough) {
         applyClickThrough(true);
+    }
+}
+
+void HudWindow::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    if (m_overlaySaveTimer != nullptr && m_overlayRestored) {
+        m_overlaySaveTimer->start();
+    }
+}
+
+void HudWindow::moveEvent(QMoveEvent *event) {
+    QWidget::moveEvent(event);
+    if (m_overlaySaveTimer != nullptr && m_overlayRestored) {
+        m_overlaySaveTimer->start();
     }
 }
 
