@@ -258,15 +258,25 @@ jobs:
           assert cloud.get("topOk") is True, cloud
           assert cloud.get("staleOk") is True, cloud
           assert cloud.get("vcpus", 0) >= 1, cloud
-          assert cloud.get("attempted", 0) >= 5, cloud
+          # A full gated sweep costs 5 requests (gcp 1, oci 1, azure 1,
+          # aws 2); a host where an earlier provider answers short-circuits
+          # the rest, and ci runners are themselves cloud VMs.
+          assert cloud.get("attempted", 0) >= 4, cloud
           assert cloud.get("uptimeSec", 0) > 0, cloud
           assert cloud.get("ratePath"), cloud
           if cloud.get("available"):
+              assert cloud.get("provider") != "-", cloud
+              assert cloud.get("instanceId"), cloud
               assert cloud.get("instanceType"), cloud
-              print("cloud ok: %s %s %s, $%.4f this boot"
-                    % (cloud["provider"], cloud["instanceType"],
-                       cloud.get("region", "-"),
-                       cloud.get("accruedUsd", -1.0)))
+              if cloud.get("ratePerHour", -1.0) >= 0:
+                  print("cloud ok: %s %s %s, $%.4f this boot"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-",
+                           cloud.get("accruedUsd", -1.0)))
+              else:
+                  print("cloud ok: %s %s %s, no rate file on this runner"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-"))
           else:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
@@ -405,15 +415,25 @@ jobs:
           assert cloud.get("topOk") is True, cloud
           assert cloud.get("staleOk") is True, cloud
           assert cloud.get("vcpus", 0) >= 1, cloud
-          assert cloud.get("attempted", 0) >= 5, cloud
+          # A full gated sweep costs 5 requests (gcp 1, oci 1, azure 1,
+          # aws 2); a host where an earlier provider answers short-circuits
+          # the rest, and ci runners are themselves cloud VMs.
+          assert cloud.get("attempted", 0) >= 4, cloud
           assert cloud.get("uptimeSec", 0) > 0, cloud
           assert cloud.get("ratePath"), cloud
           if cloud.get("available"):
+              assert cloud.get("provider") != "-", cloud
+              assert cloud.get("instanceId"), cloud
               assert cloud.get("instanceType"), cloud
-              print("cloud ok: %s %s %s, $%.4f this boot"
-                    % (cloud["provider"], cloud["instanceType"],
-                       cloud.get("region", "-"),
-                       cloud.get("accruedUsd", -1.0)))
+              if cloud.get("ratePerHour", -1.0) >= 0:
+                  print("cloud ok: %s %s %s, $%.4f this boot"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-",
+                           cloud.get("accruedUsd", -1.0)))
+              else:
+                  print("cloud ok: %s %s %s, no rate file on this runner"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-"))
           else:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
