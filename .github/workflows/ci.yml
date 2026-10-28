@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82, feat_m83]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -264,6 +264,18 @@ jobs:
           assert cloud.get("attempted", 0) >= 4, cloud
           assert cloud.get("uptimeSec", 0) > 0, cloud
           assert cloud.get("ratePath"), cloud
+          # M83: the listing runs only where a provider was identified, so the
+          # parsers, age maths, self-match and pricing carry deterministic
+          # self-tests that every runner asserts (a gated run proves the maths
+          # instead of merely failing to find a metadata service).
+          fleet = cloud.get("fleet", {})
+          assert fleet.get("fleetParseOk") is True, fleet
+          assert fleet.get("fleetAzureOk") is True, fleet
+          assert fleet.get("fleetAgeOk") is True, fleet
+          assert fleet.get("fleetSelfOk") is True, fleet
+          assert fleet.get("fleetCostOk") is True, fleet
+          assert fleet.get("note"), fleet
+          print("cloud fleet: %s" % fleet["note"].splitlines()[0])
           if cloud.get("available"):
               assert cloud.get("provider") != "-", cloud
               assert cloud.get("instanceId"), cloud
@@ -421,6 +433,18 @@ jobs:
           assert cloud.get("attempted", 0) >= 4, cloud
           assert cloud.get("uptimeSec", 0) > 0, cloud
           assert cloud.get("ratePath"), cloud
+          # M83: the listing runs only where a provider was identified, so the
+          # parsers, age maths, self-match and pricing carry deterministic
+          # self-tests that every runner asserts (a gated run proves the maths
+          # instead of merely failing to find a metadata service).
+          fleet = cloud.get("fleet", {})
+          assert fleet.get("fleetParseOk") is True, fleet
+          assert fleet.get("fleetAzureOk") is True, fleet
+          assert fleet.get("fleetAgeOk") is True, fleet
+          assert fleet.get("fleetSelfOk") is True, fleet
+          assert fleet.get("fleetCostOk") is True, fleet
+          assert fleet.get("note"), fleet
+          print("cloud fleet: %s" % fleet["note"].splitlines()[0])
           if cloud.get("available"):
               assert cloud.get("provider") != "-", cloud
               assert cloud.get("instanceId"), cloud

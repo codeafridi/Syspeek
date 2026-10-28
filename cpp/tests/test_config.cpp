@@ -470,6 +470,10 @@ int main(int argc, char *argv[]) {
         check(c.cloud.timeoutMs == 450, "cloud: the default timeout is 450 ms");
         check(c.cloud.ratesPath.isEmpty(),
               "cloud: no authored path means the default rate file");
+        check(c.cloud.inventory,
+              "cloud: the account inventory defaults to on");
+        check(c.cloud.inventoryTimeoutMs == 25000,
+              "cloud: the listing budget defaults to 25 s");
     }
 
     {
@@ -500,6 +504,46 @@ int main(int argc, char *argv[]) {
         check(c.cloud.ratesPath.isEmpty(),
               "cloud: a whitespace path falls back to the default");
         check(c.cloud.enabled, "cloud: untouched keys keep the default on");
+    }
+
+    {
+        // M83: the listing is a network call to the provider API, so it is
+        // switchable and separately budgeted from the link-local read.
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory = false\n"
+            "inventory_timeout_ms = 4000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.cloud.inventory,
+              "cloud: inventory=false stops every cloud CLI spawn");
+        check(c.cloud.inventoryTimeoutMs == 4000,
+              "cloud: the listing budget loads");
+        check(c.cloud.enabled && c.cloud.timeoutMs == 450,
+              "cloud: the metadata read keeps its own budget and switch");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory_timeout_ms = 500\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.inventoryTimeoutMs == 2000,
+              "cloud: a sub-second listing budget clamps to the floor");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory_timeout_ms = 600000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.inventoryTimeoutMs == 120000,
+              "cloud: an absurd listing budget clamps to the ceiling");
     }
 
     std::printf("%d failure(s)\n", failures);

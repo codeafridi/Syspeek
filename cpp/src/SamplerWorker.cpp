@@ -1,5 +1,7 @@
 #include "SamplerWorker.h"
 
+#include "CloudFleetSource.h"
+#include "CostModel.h"
 #include "FocusedWindowProvider.h"
 #include "MemoryFormat.h"
 #include "ProcessGrouper.h"
@@ -55,6 +57,9 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
 }
 
 void SamplerWorker::start() {
+    if (m_cloudFleet == nullptr) {
+        m_cloudFleet = new CloudFleetRunner(this);
+    }
     if (!m_hostInfoReady) {
         m_hostInfo = collectHostInfo();
         m_hostInfoReady = true;
@@ -71,6 +76,9 @@ void SamplerWorker::start() {
 void SamplerWorker::stop() {
     if (m_timer != nullptr) {
         m_timer->stop();
+    }
+    if (m_cloudFleet != nullptr) {
+        m_cloudFleet->stop();
     }
 }
 
@@ -873,6 +881,32 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
         }
         cloud.consumers =
             cloudTopConsumers(rows, cloud.ratePerHour, cloud.vcpus, 8);
+    }
+
+    // M83: instance age and the account inventory. The CLI is polled, never
+    // waited on; ages and the since-launch cost are recomputed from the cached
+    // launch time on every tick.
+    if (m_cloudFleet != nullptr) {
+        CloudFleetOptions fleetOptions;
+        fleetOptions.enabled = m_cloud.inventory;
+        fleetOptions.timeoutMs = m_cloud.inventoryTimeoutMs;
+        m_cloudFleet->setOptions(fleetOptions);
+        m_cloudFleet->update(cloud.identity, now);
+        CloudFleetStatus fleet = m_cloudFleet->status();
+        fleetResolveAges(fleet, now);
+        fleetApplyRates(fleet, m_cloudRates, kCostHoursPerMonth);
+        fleetMarkSelf(fleet, cloud.identity);
+        cloud.fleet = fleet;
+        if (fleet.selfIndex >= 0 && fleet.selfIndex < fleet.rows.size()) {
+            const CloudFleetInstance &self = fleet.rows.at(fleet.selfIndex);
+            cloud.launchedAtMs = self.launchedAtMs;
+            cloud.instanceAgeSec = self.ageSec;
+            if (cloud.instanceAgeSec >= 0 && cloud.ratePerHour >= 0.0) {
+                cloud.accruedLaunchUsd =
+                    computeCloudCost(cloud.ratePerHour, cloud.instanceAgeSec)
+                        .accruedUsd;
+            }
+        }
     }
     snapshot.cloud = cloud;
 }

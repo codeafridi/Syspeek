@@ -363,13 +363,46 @@ me?" without touching a control plane:
   used-capacity / Linux / no-software SKU) and writes the rate file with a fresh
   import stamp. It is opt-in, never runs on a tick, and Syspeek never reads or
   stores credentials — the CLI uses whatever profile you already configured.
+- **Instance age and the account inventory** come from the provider's own CLI,
+  because only the account knows when this instance launched. The IMDS
+  document names the provider, then Syspeek asks that provider's CLI, reusing
+  your existing login:
 
-```ini
-[cloud]
-enabled    = true   ; the only network read Syspeek does on its own
-rates      =        ; empty = ~/.config/syspeek/cloud-rates.txt
-timeout_ms = 450    ; one metadata request; single-digit ms when IMDS is there
-```
+  ```sh
+  aws   ec2 describe-instances --region <imds region> --output json \
+        --query "Reservations[].Instances[]"
+  az    vm list -d --subscription <imds account>
+  gcloud compute instances list --project <imds project> --format=json
+  oci   compute instance list --compartment-id <imds compartment> \
+        --region <imds region> --all --output json
+  ```
+
+  The result is the **FLEET INVENTORY** card: this instance first (`*`), then
+  the rest of the account with type, state, age and `$/MO`. `AGE` on the tile
+  row is the launch time's age; `COST` shows accrual **since launch (upper
+  bound)** above **this boot**. `$/MO` sums running rows only — a stopped (or
+  deallocated) VM never claims a monthly bill — and rows the rate file cannot
+  price are counted as `unpriced` instead of reading `$0`. Long accounts are
+  capped at 200 rows with `showing first N of M` in the summary. Azure's
+  listing carries no creation time, so its rows honestly show `--` age.
+
+  The listing is polled every 10 minutes in the background (a CLI that hangs is
+  killed at the budget), so no tick ever waits on it. It is a real API call, so
+  it is separately switchable from the link-local read:
+
+  ```ini
+  [cloud]
+  enabled              = true   ; the link-local IMDS read
+  inventory            = true   ; the account listing through the provider CLI
+  inventory_timeout_ms = 25000  ; per listing; clamped 2000..120000
+  rates                =        ; empty = ~/.config/syspeek/cloud-rates.txt
+  timeout_ms           = 450    ; one metadata request; single-digit ms when IMDS is there
+  ```
+
+  No CLI on `PATH`, no login, or an expired session prints the exact refusal
+  and the fix (`aws configure`, `az login`, `gcloud auth login`,
+  `oci setup config`) — Syspeek never reads, caches or stores credentials
+  itself.
 
 The metadata request goes to a link-local address (`169.254.169.254` /
 `169.254.0.23`), which is never routed off the host, and is the single network
@@ -378,8 +411,8 @@ and the page says so instead of showing empty cards. Off a cloud instance —
 or on a host where IMDS is firewalled or IMDSv2 tokens are refused — every card
 prints the gate text rather than a blank.
 
-Read-only in the cloud by design: Syspeek identifies the instance and prices it,
-it never starts, stops or terminates anything.
+Read-only in the cloud by design: Syspeek identifies the instance, prices it and
+lists the account, it never starts, stops or terminates anything.
 
 ## Advanced (optional)
 

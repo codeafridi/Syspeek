@@ -4,6 +4,7 @@
 #include "CloudStatus.h"
 #include "HistoryLog.h"
 #include "MetricsEndpoint.h"
+#include "CloudFleetSource.h"
 #include "CloudPricing.h"
 
 #include "OverlayStatus.h"
@@ -678,6 +679,78 @@ QString dumpReportJson(int maxProcs) {
                      cloudRateStaleDays(QStringLiteral("2020-01-01"),
                                         QDateTime::currentMSecsSinceEpoch())
                          > 100);
+
+        // M83: the account listing runs only when an instance was identified
+        // (with no metadata service there is no provider to ask), so the
+        // parsers, the age maths and the self-match carry deterministic
+        // self-tests that every runner can assert.
+        CloudFleetOptions fleetOptions;
+        fleetOptions.timeoutMs = 8000;
+        const CloudFleetStatus listing =
+            probeCloudFleet(probe.identity, fleetOptions);
+        QJsonObject fleet;
+        fleet.insert(QStringLiteral("attempted"), listing.attempted);
+        fleet.insert(QStringLiteral("available"), listing.available);
+        fleet.insert(QStringLiteral("cli"), listing.cliName);
+        fleet.insert(QStringLiteral("scope"), listing.scope);
+        fleet.insert(QStringLiteral("note"), fleetSummaryText(listing));
+        fleet.insert(QStringLiteral("rows"), listing.rows.size());
+        fleet.insert(QStringLiteral("running"), listing.running);
+        fleet.insert(QStringLiteral("selfIndex"), listing.selfIndex);
+
+        const qint64 fleetNow = 1'700'000'000'000LL;
+        const CloudFleetStatus awsFixture = parseAwsDescribeInstances(
+            QByteArrayLiteral(
+                "[{\"InstanceId\":\"i-0aaa\",\"InstanceType\":\"c7g.2xlarge\","
+                "\"State\":{\"Name\":\"running\"},"
+                "\"Placement\":{\"AvailabilityZone\":\"eu-west-1a\"},"
+                "\"LaunchTime\":\"2023-06-01T10:00:00Z\","
+                "\"Tags\":[{\"Key\":\"Name\",\"Value\":\"web-1\"}]},"
+                "{\"InstanceId\":\"i-0bbb\",\"InstanceType\":\"t4g.small\","
+                "\"State\":{\"Name\":\"stopped\"},"
+                "\"Placement\":{\"AvailabilityZone\":\"eu-west-1b\"}}]"));
+        const CloudFleetStatus azureFixture = parseAzureVmList(
+            QByteArrayLiteral(
+                "[{\"name\":\"vm-a\",\"location\":\"westus\","
+                "\"powerState\":\"VM deallocated\","
+                "\"hardwareProfile\":{\"vmSize\":\"Standard_D2s_v3\"}}]"));
+        fleet.insert(QStringLiteral("fleetParseOk"),
+                     awsFixture.rows.size() == 2
+                         && awsFixture.rows.at(0).name == QStringLiteral("web-1")
+                         && awsFixture.rows.at(0).state == QStringLiteral("running")
+                         && awsFixture.rows.at(1).state == QStringLiteral("stopped")
+                         && awsFixture.rows.at(0).zone == QStringLiteral("eu-west-1a")
+                         && awsFixture.rows.at(0).region == QStringLiteral("eu-west-1"));
+        fleet.insert(QStringLiteral("fleetAzureOk"),
+                     azureFixture.rows.size() == 1
+                         && azureFixture.rows.at(0).state == QStringLiteral("stopped")
+                         && azureFixture.rows.at(0).instanceType
+                                == QStringLiteral("Standard_D2s_v3")
+                         && azureFixture.rows.at(0).launchedAtMs < 0);
+        fleet.insert(QStringLiteral("fleetAgeOk"),
+                     fleetAgeSeconds(fleetNow - 3 * 86400LL * 1000LL,
+                                     fleetNow) == 3 * 86400LL
+                         && fleetAgeSeconds(fleetNow, fleetNow) == 0
+                         && fleetAgeSeconds(fleetNow + 1000, fleetNow) < 0);
+        CloudFleetStatus own = awsFixture;
+        CloudIdentity ownIdentity;
+        ownIdentity.provider = CloudProvider::Aws;
+        ownIdentity.instanceId = QStringLiteral("i-0bbb");
+        const int selfAfter = fleetMarkSelf(own, ownIdentity);
+        fleet.insert(QStringLiteral("fleetSelfOk"),
+                     selfAfter == 0 && own.rows.at(0).isSelf
+                         && own.rows.at(0).instanceId == QStringLiteral("i-0bbb")
+                         && !own.rows.at(1).isSelf);
+        CloudFleetStatus pricedFleet = awsFixture;
+        fleetApplyRates(pricedFleet, fixture, 730.0);
+        fleet.insert(QStringLiteral("fleetCostOk"),
+                     qAbs(pricedFleet.rows.at(0).monthlyUsd
+                          - 0.2920 * 730.0) < 1e-9
+                         && pricedFleet.rows.at(1).monthlyUsd < 0.0
+                         && pricedFleet.running == 1
+                         && pricedFleet.unpriced == 0
+                         && qAbs(pricedFleet.monthlyUsd - 0.2920 * 730.0) < 1e-9);
+        cloud.insert(QStringLiteral("fleet"), fleet);
         root.insert(QStringLiteral("cloud"), cloud);
     }
 

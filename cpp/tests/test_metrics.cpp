@@ -42,6 +42,7 @@
 #include "SensorStatus.h"
 #include "CloudStatus.h"
 #include "CloudPricing.h"
+#include "CloudFleetSource.h"
 #include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
 #include <QDate>
@@ -4310,6 +4311,388 @@ int main(int argc, char *argv[]) {
                       && junkError.contains(QStringLiteral("no products")),
                   "cloud: an empty pricing payload states the reason");
         }
+
+    {
+        // M83: the account inventory reads the provider's own CLI listing.
+        const CloudFleetStatus aws = parseAwsDescribeInstances(R"JSON(
+          {"Reservations":[{"Instances":[
+            {"InstanceId":"i-0aaa","InstanceType":"c7g.2xlarge",
+             "State":{"Name":"running"},
+             "Placement":{"AvailabilityZone":"eu-west-1a"},
+             "LaunchTime":"2023-06-01T10:00:00Z",
+             "PrivateIpAddress":"10.0.0.5","PublicIpAddress":"54.1.2.3",
+             "Tags":[{"Key":"Name","Value":"web-1"},{"Key":"team","Value":"obs"}]},
+            {"InstanceId":"i-0bbb","InstanceType":"t4g.small",
+             "State":{"Name":"stopped"},
+             "Placement":{"AvailabilityZone":"us-west-2-lax-1a"}}]}]}
+        )JSON");
+        check(aws.rows.size() == 2 && aws.available && aws.running == 1,
+              "fleet: an aws document lists every reservation's instances");
+        check(aws.rows.at(0).name == QStringLiteral("web-1")
+                  && aws.rows.at(0).instanceId == QStringLiteral("i-0aaa")
+                  && aws.rows.at(0).state == QStringLiteral("running")
+                  && aws.rows.at(0).region == QStringLiteral("eu-west-1")
+                  && aws.rows.at(0).privateIp == QStringLiteral("10.0.0.5")
+                  && aws.rows.at(0).launchedAtMs > 0,
+              "fleet: an aws row carries the name, the zone-derived region "
+              "and the launch time");
+        check(aws.rows.at(1).region == QStringLiteral("us-west-2")
+                  && aws.rows.at(1).state == QStringLiteral("stopped"),
+              "fleet: an aws local zone resolves to its parent region");
+
+        const CloudFleetStatus awsProjected = parseAwsDescribeInstances(R"JSON(
+          [{"InstanceId":"i-0ccc","InstanceType":"m7g.large",
+            "State":{"Name":"pending"},
+            "Placement":{"AvailabilityZone":"ap-south-1b"},
+            "SpotInstanceRequestId":"sir-1"}]
+        )JSON");
+        check(awsProjected.rows.size() == 1
+                  && awsProjected.rows.at(0).spot
+                  && awsProjected.rows.at(0).region
+                         == QStringLiteral("ap-south-1"),
+              "fleet: the --query projection parses the same way and a spot "
+              "request is flagged");
+
+        const CloudFleetStatus azure = parseAzureVmList(R"JSON(
+          [{"name":"vm-flat","location":"westus2","vmId":"aaaa",
+            "powerState":"VM running",
+            "hardwareProfile":{"vmSize":"Standard_D2s_v3"},
+            "timeCreated":"2023-04-01T08:30:00Z",
+            "tags":{"team":"obs"}},
+           {"name":"vm-nested","location":"eastus",
+            "properties":{"vmId":"bbbb","provisioningState":"Succeeded",
+                          "hardwareProfile":{"vmSize":"Standard_B1s"}},
+            "instanceView":{"statuses":[
+              {"code":"ProvisioningState/succeeded"},
+              {"code":"PowerState/deallocated"}]}}]
+        )JSON");
+        check(azure.rows.size() == 2
+                  && azure.rows.at(0).name == QStringLiteral("vm-flat")
+                  && azure.rows.at(0).state == QStringLiteral("running")
+                  && azure.rows.at(0).instanceType
+                         == QStringLiteral("Standard_D2s_v3")
+                  && azure.rows.at(0).launchedAtMs > 0,
+              "fleet: a flattened azure row keeps its size and creation time");
+        check(azure.rows.at(1).state == QStringLiteral("stopped")
+                  && azure.rows.at(1).instanceType
+                         == QStringLiteral("Standard_B1s")
+                  && azure.rows.at(1).launchedAtMs < 0,
+              "fleet: a nested azure row maps the deallocated power state and "
+              "states no age");
+
+        const CloudFleetStatus gcp = parseGcpInstanceList(R"JSON(
+          [{"id":"123","name":"gce-1",
+            "machineType":"https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-a/machineTypes/e2-medium",
+            "zone":"https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-a",
+            "status":"RUNNING",
+            "creationTimestamp":"2023-05-01T00:00:00.000-07:00",
+            "networkInterfaces":[{"networkIP":"10.128.0.2",
+              "accessConfigs":[{"natIP":"34.1.2.3"}]}],
+            "labels":{"team":"obs"},
+            "scheduling":{"provisioningModel":"SPOT"}},
+           {"id":"456","name":"gce-old",
+            "machineType":"https://www.googleapis.com/compute/v1/projects/p/zones/europe-west1-b/machineTypes/e2-small",
+            "zone":"https://www.googleapis.com/compute/v1/projects/p/zones/europe-west1-b",
+            "status":"TERMINATED"}]
+        )JSON");
+        check(gcp.rows.at(0).name == QStringLiteral("gce-1")
+                  && gcp.rows.at(0).instanceType == QStringLiteral("e2-medium")
+                  && gcp.rows.at(0).zone == QStringLiteral("us-central1-a")
+                  && gcp.rows.at(0).region == QStringLiteral("us-central1")
+                  && gcp.rows.at(0).spot
+                  && gcp.rows.at(0).publicIp == QStringLiteral("34.1.2.3"),
+              "fleet: a gcp row keeps type, zone, public ip and the spot model");
+        check(gcp.rows.at(1).state == QStringLiteral("stopped"),
+              "fleet: gcp TERMINATED means stopped, not deleted");
+
+        const CloudFleetStatus oci = parseOciInstanceList(R"JSON(
+          {"data":[
+            {"id":"ocid1.instance.oc1..aaa","display-name":"oci-1",
+             "shape":"VM.Standard.A1.Flex","lifecycle-state":"RUNNING",
+             "region":"eu-frankfurt-1",
+             "availability-domain":"Uocm:EU-FRANKFURT-1-AD-1",
+             "compartment-id":"ocid1.compartment.oc1..ccc",
+             "time-created":"2023-07-01T12:00:00.000Z",
+             "freeform-tags":{"team":"obs"}},
+            {"id":"ocid1.instance.oc1..bbb","display-name":"oci-old",
+             "shape":"VM.Standard.E4.Flex","lifecycle-state":"TERMINATED"}]}
+        )JSON");
+        check(oci.rows.at(0).name == QStringLiteral("oci-1")
+                  && oci.rows.at(0).instanceType
+                         == QStringLiteral("VM.Standard.A1.Flex")
+                  && oci.rows.at(0).zone
+                         == QStringLiteral("Uocm:EU-FRANKFURT-1-AD-1")
+                  && oci.rows.at(0).group
+                         == QStringLiteral("ocid1.compartment.oc1..ccc"),
+              "fleet: an oci row keeps its kebab-case fields");
+        check(oci.rows.at(1).state == QStringLiteral("stopped"),
+              "fleet: oci TERMINATED means stopped");
+
+        check(parseCloudFleetJson(CloudProvider::Aws, R"JSON({"Reservations":[]})JSON").rows.isEmpty()
+                  && parseCloudFleetJson(CloudProvider::Azure, "{}").rows.isEmpty()
+                  && parseCloudFleetJson(CloudProvider::None, "[]").rows.isEmpty()
+                  && parseAzureVmList("not json").rows.isEmpty()
+                  && parseOciInstanceList("[]").rows.isEmpty(),
+              "fleet: a malformed listing yields no rows instead of a guess");
+
+        check(fleetState(CloudProvider::Aws, QStringLiteral("terminated"))
+                      == QStringLiteral("terminated")
+                  && fleetState(CloudProvider::Gcp, QStringLiteral("TERMINATED"))
+                         == QStringLiteral("stopped")
+                  && fleetState(CloudProvider::Oci, QStringLiteral("TERMINATED"))
+                         == QStringLiteral("stopped")
+                  && fleetState(CloudProvider::Azure,
+                                QStringLiteral("VM deallocated"))
+                         == QStringLiteral("stopped")
+                  && fleetState(CloudProvider::Aws, QStringLiteral("shutting-down"))
+                         == QStringLiteral("terminated")
+                  && fleetState(CloudProvider::Gcp, QStringLiteral("SUSPENDED"))
+                         == QStringLiteral("suspended")
+                  && fleetState(CloudProvider::Gcp, QStringLiteral("STAGING"))
+                         == QStringLiteral("pending")
+                  && fleetState(CloudProvider::Oci, QStringLiteral("MOVING"))
+                         == QStringLiteral("pending")
+                  && fleetState(CloudProvider::Aws, QString())
+                         == QStringLiteral("unknown"),
+              "fleet: one state vocabulary spans four providers");
+
+        const qint64 fleetNow = 1'700'000'000'000LL;
+        check(fleetAgeSeconds(fleetNow - 2 * 86400LL * 1000LL, fleetNow)
+                      == 2 * 86400LL
+                  && fleetAgeSeconds(fleetNow, fleetNow) == 0
+                  && fleetAgeSeconds(fleetNow + 5000, fleetNow) == -1
+                  && fleetAgeSeconds(-1, fleetNow) == -1,
+              "fleet: age is whole seconds from launch and never negative");
+
+        CloudFleetStatus aged = aws;
+        aged.rows[0].launchedAtMs = fleetNow - 3 * 86400LL * 1000LL;
+        aged.rows[1].launchedAtMs = -1;
+        fleetResolveAges(aged, fleetNow);
+        check(aged.rows.at(0).ageSec == 3 * 86400LL
+                  && aged.rows.at(1).ageSec < 0,
+              "fleet: resolving ages fills the launched rows and leaves the "
+              "rest unknown");
+
+        const CloudRateTable rates =
+            parseCloudRateFile(QStringLiteral("aws/c7g.2xlarge = 0.2920\n"
+                                              "aws/t4g.small = 0.0208\n"));
+        CloudFleetStatus pricedFleet = aws;
+        fleetApplyRates(pricedFleet, rates, 730.0);
+        check(pricedFleet.running == 1 && pricedFleet.unpriced == 0
+                  && qAbs(pricedFleet.monthlyUsd - 213.16) < 1e-6
+                  && qAbs(pricedFleet.rows.at(0).monthlyUsd - 213.16) < 1e-6
+                  && pricedFleet.rows.at(1).monthlyUsd < 0.0,
+              "fleet: $/MO sums the priced running rows and a stopped row "
+              "never claims a monthly bill");
+
+        CloudFleetStatus unpricedFleet = aws;
+        unpricedFleet.rows[0].instanceType = QStringLiteral("m9.unknown");
+        fleetApplyRates(unpricedFleet, rates, 730.0);
+        check(unpricedFleet.unpriced == 1 && unpricedFleet.monthlyUsd < 0.0,
+              "fleet: an unpriceable running row is counted, never shown as $0");
+
+        CloudFleetStatus selfFleet = aws;
+        CloudIdentity awsSelf;
+        awsSelf.provider = CloudProvider::Aws;
+        awsSelf.instanceId = QStringLiteral("i-0bbb");
+        const int selfIndex = fleetMarkSelf(selfFleet, awsSelf);
+        check(selfIndex == 0 && selfFleet.selfIndex == 0
+                  && selfFleet.rows.at(0).instanceId == QStringLiteral("i-0bbb")
+                  && selfFleet.rows.at(0).isSelf
+                  && !selfFleet.rows.at(1).isSelf,
+              "fleet: this instance is matched by id and moved to the first row");
+
+        CloudFleetStatus nameFleet = aws;
+        CloudIdentity awsByName;
+        awsByName.provider = CloudProvider::Aws;
+        awsByName.instanceName = QStringLiteral("web-1");
+        check(fleetMarkSelf(nameFleet, awsByName) == 0
+                  && nameFleet.rows.at(0).name == QStringLiteral("web-1"),
+              "fleet: an instance without a provider id is matched by name");
+
+        CloudFleetStatus foreignFleet = aws;
+        CloudIdentity gcpSelf;
+        gcpSelf.provider = CloudProvider::Gcp;
+        gcpSelf.instanceId = QStringLiteral("i-0aaa");
+        check(fleetMarkSelf(foreignFleet, gcpSelf) == -1
+                  && !foreignFleet.rows.at(0).isSelf,
+              "fleet: a listing from another provider never claims a self row");
+
+        CloudIdentity awsIdentity;
+        awsIdentity.provider = CloudProvider::Aws;
+        awsIdentity.region = QStringLiteral("eu-west-1");
+        CloudIdentity azureIdentity;
+        azureIdentity.provider = CloudProvider::Azure;
+        azureIdentity.accountId = QStringLiteral("sub-1");
+        CloudIdentity gcpIdentity;
+        gcpIdentity.provider = CloudProvider::Gcp;
+        gcpIdentity.accountId = QStringLiteral("proj-1");
+        CloudIdentity ociIdentity;
+        ociIdentity.provider = CloudProvider::Oci;
+        ociIdentity.accountId = QStringLiteral("ocid1.compartment.oc1..ccc");
+        ociIdentity.region = QStringLiteral("eu-frankfurt-1");
+
+        const QStringList awsArgs = cloudFleetArguments(awsIdentity);
+        check(awsArgs.contains(QStringLiteral("ec2"))
+                  && awsArgs.contains(QStringLiteral("describe-instances"))
+                  && awsArgs.contains(QStringLiteral("--region"))
+                  && awsArgs.contains(QStringLiteral("eu-west-1"))
+                  && awsArgs.contains(QStringLiteral("--query"))
+                  && awsArgs.contains(
+                      QStringLiteral("Reservations[].Instances[]")),
+              "fleet: the aws listing asks its own region for every instance");
+        CloudIdentity awsNoRegion;
+        awsNoRegion.provider = CloudProvider::Aws;
+        check(!cloudFleetArguments(awsNoRegion).contains(QStringLiteral("--region")),
+              "fleet: an aws identity without a region leaves the CLI default");
+
+        const QStringList azureArgs = cloudFleetArguments(azureIdentity);
+        check(azureArgs.contains(QStringLiteral("vm"))
+                  && azureArgs.contains(QStringLiteral("list"))
+                  && azureArgs.contains(QStringLiteral("-d"))
+                  && azureArgs.contains(QStringLiteral("--subscription"))
+                  && azureArgs.contains(QStringLiteral("sub-1")),
+              "fleet: azure lists the subscription's vms with -d");
+
+        const QStringList gcpArgs = cloudFleetArguments(gcpIdentity);
+        check(gcpArgs.contains(QStringLiteral("compute"))
+                  && gcpArgs.contains(QStringLiteral("instances"))
+                  && gcpArgs.contains(QStringLiteral("--format=json"))
+                  && gcpArgs.contains(QStringLiteral("--project"))
+                  && gcpArgs.contains(QStringLiteral("proj-1")),
+              "fleet: gcloud lists the project's instances as json");
+
+        const QStringList ociArgs = cloudFleetArguments(ociIdentity);
+        check(ociArgs.contains(QStringLiteral("--compartment-id"))
+                  && ociArgs.contains(
+                      QStringLiteral("ocid1.compartment.oc1..ccc"))
+                  && ociArgs.contains(QStringLiteral("--region"))
+                  && ociArgs.contains(QStringLiteral("--all"))
+                  && ociArgs.contains(QStringLiteral("--output")),
+              "fleet: oci pages the whole compartment");
+        check(cloudFleetArguments(CloudIdentity{}).isEmpty()
+                  && cloudFleetCli(CloudProvider::None).isEmpty()
+                  && cloudFleetCommandText(CloudIdentity{}).isEmpty(),
+              "fleet: with no provider there is no command to run");
+
+        check(cloudFleetScope(awsIdentity) == QStringLiteral("eu-west-1")
+                  && cloudFleetScope(azureIdentity) == QStringLiteral("sub-1")
+                  && cloudFleetScope(gcpIdentity) == QStringLiteral("proj-1")
+                  && cloudFleetScope(ociIdentity)
+                         == QStringLiteral("ocid1.compartment.oc1..ccc")
+                  && cloudFleetScope(CloudIdentity{}).isEmpty(),
+              "fleet: the scope names what the listing covers");
+
+        const QString command = cloudFleetCommandText(awsIdentity);
+        check(command.startsWith(QStringLiteral("aws ec2 describe-instances"))
+                  && command.contains(QStringLiteral("--region eu-west-1")),
+              "fleet: the summary quotes the command that produced the list");
+
+        const QString winLine = cloudWindowsCmdLine(
+            QStringLiteral("C:\\Program Files\\az.cmd"),
+            {QStringLiteral("vm"), QStringLiteral("list"),
+             QStringLiteral("-d")});
+        check(winLine
+                  == QStringLiteral(
+                      "/s /c \"\"C:\\Program Files\\az.cmd\" vm list -d\""),
+              "fleet: a .cmd shim runs through cmd.exe with the line quoted");
+
+        CloudFleetStatus story = pricedFleet;
+        story.dropped = 3;
+        story.scope = QStringLiteral("eu-west-1");
+        story.source = command;
+        story.fetchedAtMs = QDateTime::currentMSecsSinceEpoch() - 90000;
+        story.rows[0].launchedAtMs = fleetNow - 5 * 86400LL * 1000LL;
+        fleetResolveAges(story, fleetNow);
+        CloudIdentity storySelf;
+        storySelf.provider = CloudProvider::Aws;
+        storySelf.instanceId = QStringLiteral("i-0aaa");
+        fleetMarkSelf(story, storySelf);
+        const QString storyText = fleetSummaryText(story);
+        check(storyText.contains(QStringLiteral("AWS fleet"))
+                  && storyText.contains(QStringLiteral("5 instances"))
+                  && storyText.contains(QStringLiteral("1 running"))
+                  && storyText.contains(QStringLiteral("$213.16/month"))
+                  && storyText.contains(QStringLiteral("eu-west-1")),
+              "fleet: the summary counts the dropped rows and names the scope");
+        check(storyText.contains(QStringLiteral("self      web-1"))
+                  && storyText.contains(QStringLiteral("5d 0h"))
+                  && storyText.contains(QStringLiteral("showing   first 2 of 5"))
+                  && storyText.contains(QStringLiteral("source    aws ec2"))
+                  && storyText.contains(QStringLiteral("listed    ")),
+              "fleet: the summary states the self row, the cap and the source");
+
+        CloudFleetStatus emptyFleet;
+        emptyFleet.attempted = true;
+        emptyFleet.provider = CloudProvider::Aws;
+        emptyFleet.cliName = QStringLiteral("aws");
+        emptyFleet.scope = QStringLiteral("eu-west-1");
+        check(fleetSummaryText(emptyFleet)
+                  == QStringLiteral("fleet: aws returned 0 instances - "
+                                    "eu-west-1 has none"),
+              "fleet: an empty account says so instead of showing a blank table");
+
+        CloudFleetStatus disabledFleet;
+        disabledFleet.note = fleetDisabledText();
+        check(fleetSummaryText(disabledFleet).contains(
+                  QStringLiteral("[cloud] inventory=false"))
+                  && fleetDisabledText().contains(QStringLiteral("no cloud CLI")),
+              "fleet: a disabled inventory names the setting and the promise");
+
+        CloudFleetStatus noProvider;
+        noProvider.attempted = true;
+        noProvider.note = fleetNoProviderText();
+        check(fleetSummaryText(noProvider).contains(
+                  QStringLiteral("no cloud instance identified"))
+                  && fleetNoProviderText().contains(
+                      QStringLiteral("metadata service")),
+              "fleet: off a cloud host the card states the gate");
+
+        check(fleetCliMissingText(QStringLiteral("az"))
+                      .contains(QStringLiteral("az not on PATH"))
+                  && fleetTimeoutText(QStringLiteral("aws"), 25)
+                         .contains(QStringLiteral("within 25 s"))
+                  && fleetFailureText(QStringLiteral("aws"), 255,
+                                      QStringLiteral("boom"))
+                         .contains(QStringLiteral("exited 255 - boom"))
+                  && fleetTableNote().contains(
+                      QStringLiteral("running rows only"))
+                  && fleetTableNote().contains(QStringLiteral("* this instance")),
+              "fleet: every refusal states the command, the time and the note");
+
+        check(cloudFleetNeedsCredentials(
+                  CloudProvider::Aws,
+                  QStringLiteral("Unable to locate credentials. You can "
+                                 "configure credentials by running \"aws "
+                                 "configure\"."))
+                  && cloudFleetNeedsCredentials(
+                      CloudProvider::Azure,
+                      QStringLiteral("Please run 'az login' to setup account."))
+                  && cloudFleetNeedsCredentials(
+                      CloudProvider::Gcp,
+                      QStringLiteral("You do not currently have an active "
+                                     "account selected."))
+                  && cloudFleetNeedsCredentials(
+                      CloudProvider::Oci,
+                      QStringLiteral("Could not find config file at "
+                                     "/home/dev/.oci/config."))
+                  && !cloudFleetNeedsCredentials(
+                      CloudProvider::Aws,
+                      QStringLiteral("An error occurred (UnauthorizedOperation)")),
+              "fleet: each provider's credential refusal is recognised");
+
+        check(fleetCredentialsText(CloudProvider::Aws)
+                      .contains(QStringLiteral("aws configure"))
+                  && fleetCredentialsText(CloudProvider::Azure)
+                         .contains(QStringLiteral("az login"))
+                  && fleetCredentialsText(CloudProvider::Gcp)
+                         .contains(QStringLiteral("gcloud auth login"))
+                  && fleetCredentialsText(CloudProvider::Oci)
+                         .contains(QStringLiteral("oci setup config"))
+                  && fleetCredentialsText(CloudProvider::Aws)
+                         .contains(QStringLiteral("never reads or stores")),
+              "fleet: the credential refusal names the fix and the promise");
+    }
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

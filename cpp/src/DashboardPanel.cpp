@@ -539,10 +539,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCostTileMonthly, #ddCostTileHourly, #ddCostTileCpuEff,"
         " #ddCostTileMemEff, #ddSettingsTileVersion, #ddSettingsTileRefresh,"
         " #ddSettingsTileMonitors, #ddSettingsTileSilenced { color: %TEXT%; }"
-        "#ddCloudTileProvider, #ddCloudTileAccrued, #ddCloudTileMonthly,"
-        " #ddCloudTileRate { color: %TEXT%; }"
-        "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp"
-        " { color: %MUTED%; }"
+        "#ddCloudTileProvider, #ddCloudTileAge, #ddCloudTileAccrued,"
+        " #ddCloudTileMonthly { color: %TEXT%; }"
+        "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
+        " #ddCloudFleetSummary, #ddCloudFleetNote { color: %MUTED%; }"
         "#ddCloudShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
@@ -4002,26 +4002,27 @@ QWidget *DashboardPanel::buildCloudView() {
     layout->setSpacing(8);
 
     // --- Instance tiles. ACCRUED is explicitly "this boot": a reboot resets
-    // host uptime, so the figure is the cost of the current boot, never the
-    // age of the instance (that is provider-side metadata, not local).
+    // host uptime, so the figure is the cost of the current boot. AGE is the
+    // provider's launch time (the fleet listing, M83); the local host cannot
+    // know it, so it reads "--" until the listing answers.
     m_cloudTileProvider = new QLabel(QStringLiteral("--"), view);
     m_cloudTileProvider->setObjectName(QStringLiteral("ddCloudTileProvider"));
+    m_cloudTileAge = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileAge->setObjectName(QStringLiteral("ddCloudTileAge"));
     m_cloudTileAccrued = new QLabel(QStringLiteral("--"), view);
     m_cloudTileAccrued->setObjectName(QStringLiteral("ddCloudTileAccrued"));
     m_cloudTileMonthly = new QLabel(QStringLiteral("--"), view);
     m_cloudTileMonthly->setObjectName(QStringLiteral("ddCloudTileMonthly"));
-    m_cloudTileRate = new QLabel(QStringLiteral("--"), view);
-    m_cloudTileRate->setObjectName(QStringLiteral("ddCloudTileRate"));
 
     auto *tiles = new QHBoxLayout();
     tiles->setSpacing(10);
     tiles->addWidget(makeTile(QStringLiteral("PROVIDER"), m_cloudTileProvider,
                               nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("AGE"), m_cloudTileAge, nullptr,
+                              view), 1);
     tiles->addWidget(makeTile(QStringLiteral("ACCRUED (BOOT)"),
                               m_cloudTileAccrued, nullptr, view), 1);
     tiles->addWidget(makeTile(QStringLiteral("$/MONTH"), m_cloudTileMonthly,
-                              nullptr, view), 1);
-    tiles->addWidget(makeTile(QStringLiteral("RATE"), m_cloudTileRate,
                               nullptr, view), 1);
     layout->addLayout(tiles);
 
@@ -4048,6 +4049,54 @@ QWidget *DashboardPanel::buildCloudView() {
     identity->addWidget(
         makeCard(QStringLiteral("detail"), m_cloudDetail, view), 1);
     layout->addLayout(identity, 2);
+
+    // --- Account inventory from the provider's own CLI. This is the only
+    // place the launch time (and therefore the instance age) exists.
+    m_chartCloudFleet = new TimeseriesChart(view);
+    m_chartCloudFleet->setObjectName(QStringLiteral("ddCloudFleetChart"));
+    m_chartCloudFleet->setUnit(QStringLiteral("inst"));
+    m_chartCloudFleet->setSeriesName(
+        QStringLiteral("syspeek.cloud.fleet_running"));
+
+    m_cloudFleetSummary = new QLabel(QStringLiteral("--"), view);
+    m_cloudFleetSummary->setObjectName(
+        QStringLiteral("ddCloudFleetSummary"));
+    m_cloudFleetSummary->setFont(monoFont(10));
+    m_cloudFleetSummary->setWordWrap(true);
+    m_cloudFleetSummary->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("FLEET INVENTORY"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(
+        QStringLiteral("running instances"), m_chartCloudFleet, view));
+    layout->addWidget(
+        makeCard(QStringLiteral("inventory"), m_cloudFleetSummary, view));
+
+    m_cloudFleet = new QTreeWidget(view);
+    m_cloudFleet->setObjectName(QStringLiteral("ddCloudFleet"));
+    m_cloudFleet->setColumnCount(5);
+    m_cloudFleet->setHeaderLabels({QStringLiteral("NAME"),
+                                   QStringLiteral("TYPE"),
+                                   QStringLiteral("STATE"),
+                                   QStringLiteral("AGE"),
+                                   QStringLiteral("$/MO")});
+    m_cloudFleet->setRootIsDecorated(false);
+    m_cloudFleet->setSelectionMode(QAbstractItemView::NoSelection);
+    m_cloudFleet->setFocusPolicy(Qt::NoFocus);
+    m_cloudFleet->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < 5; ++column) {
+        m_cloudFleet->header()->setSectionResizeMode(
+            column, QHeaderView::ResizeToContents);
+    }
+    layout->addWidget(
+        makeCard(QStringLiteral("instances"), m_cloudFleet, view));
+    m_cloudFleetNote = new QLabel(fleetTableNote(), view);
+    m_cloudFleetNote->setObjectName(QStringLiteral("ddCloudFleetNote"));
+    m_cloudFleetNote->setFont(monoFont(9));
+    m_cloudFleetNote->setWordWrap(true);
+    m_cloudFleetNote->setMinimumWidth(1);
+    layout->addWidget(m_cloudFleetNote);
+
 
     // --- Rate / accrual / projection, with the import date that decides how
     // much the number is worth.
@@ -6765,14 +6814,70 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
         priced && cloud.projectedMonthlyUsd >= 0.0
             ? formatCostMoney(cloud.projectedMonthlyUsd)
             : QStringLiteral("--"));
-    m_cloudTileRate->setText(
-        priced ? QStringLiteral("%1/hr").arg(formatCostMoney(cloud.ratePerHour))
-               : QStringLiteral("--"));
+    m_cloudTileAge->setText(
+        cloud.instanceAgeSec >= 0 ? cloudUptimeText(cloud.instanceAgeSec)
+                                  : QStringLiteral("--"));
 
     m_cloudSummary->setText(cloudSummaryText(cloud));
     m_cloudDetail->setText(cloudDetailText(cloud));
     m_cloudCost->setText(cloudCostText(cloud));
     m_cloudApp->setText(cloudAppText(cloud));
+
+    const CloudFleetStatus &fleet = cloud.fleet;
+    // Off a cloud instance there is no provider to list, so the card states
+    // the gate instead of "0 instances", which would read as an empty account.
+    const QString fleetText =
+        cloud.available ? fleetSummaryText(fleet) : fleetNoProviderText();
+    m_cloudFleetSummary->setText(fleetText);
+    if (m_cloudFleet != nullptr) {
+        m_cloudFleet->clear();
+        for (const CloudFleetInstance &row : fleet.rows) {
+            auto *item = new QTreeWidgetItem(m_cloudFleet);
+            item->setText(0, row.isSelf
+                                 ? QStringLiteral("* %1").arg(row.name)
+                                 : row.name);
+            item->setText(
+                1, row.instanceType.isEmpty() ? QStringLiteral("--")
+                                              : row.instanceType);
+            QString state = row.state;
+            if (row.spot && state == QLatin1String("running")) {
+                state = QStringLiteral("running (spot)");
+            }
+            item->setText(2, state);
+            item->setText(
+                3, row.ageSec >= 0 ? cloudUptimeText(row.ageSec)
+                                   : QStringLiteral("--"));
+            item->setText(
+                4, row.monthlyUsd >= 0.0 ? formatCostMoney(row.monthlyUsd)
+                                         : QStringLiteral("--"));
+            item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
+            if (row.isSelf) {
+                item->setForeground(0, QColor(ui_theme::accent()));
+            }
+            QColor stateColor(ui_theme::text());
+            if (row.state == QLatin1String("running")) {
+                stateColor = QColor(ui_theme::ok());
+            } else if (row.state == QLatin1String("pending")) {
+                stateColor = QColor(ui_theme::warn());
+            } else if (row.state == QLatin1String("terminated")) {
+                stateColor = QColor(ui_theme::crit());
+            } else if (row.state == QLatin1String("stopped") ||
+                       row.state == QLatin1String("suspended")) {
+                stateColor = QColor(ui_theme::dim());
+            }
+            item->setForeground(2, stateColor);
+        }
+        if (fleet.rows.isEmpty()) {
+            auto *item = new QTreeWidgetItem(m_cloudFleet);
+            item->setText(0, fleetText);
+            item->setForeground(0, QColor(ui_theme::dim()));
+            m_cloudFleet->setFirstColumnSpanned(0, QModelIndex(), true);
+        }
+    }
+    if (m_chartCloudFleet != nullptr && fleet.available) {
+        m_chartCloudFleet->push(fleet.running);
+    }
 
     if (m_cloudConsumers != nullptr) {
         m_cloudConsumers->clear();

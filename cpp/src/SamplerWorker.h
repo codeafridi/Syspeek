@@ -26,6 +26,7 @@
 #include <memory>
 
 class FocusedWindowProvider;
+class CloudFleetRunner;
 class QTimer;
 
 class SamplerWorker : public QObject {
@@ -119,6 +120,8 @@ private:
     qint64 m_cloudProbeStampMs = 0;
     qint64 m_cloudRatesStampMs = 0;
     bool m_cloudProbed = false;
+    // M83: one polled CLI listing per 10 min; the sampler never waits on it.
+    CloudFleetRunner *m_cloudFleet = nullptr;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

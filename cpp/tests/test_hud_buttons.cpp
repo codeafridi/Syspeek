@@ -1296,6 +1296,54 @@ int main(int argc, char *argv[]) {
         CloudConsumer{QStringLiteral("cursor"), 508637, 214.5, 0.0783},
         CloudConsumer{QStringLiteral("gopls"), 509001, 41.0, 0.0150},
     };
+    // M83: the account listing is the only source of the launch time, so the
+    // age tile and the fleet table cannot be faked from local uptime.
+    const qint64 fleetNow = QDateTime::currentMSecsSinceEpoch();
+    cloudSnap.cloud.instanceAgeSec = 3 * 86400;
+    cloudSnap.cloud.launchedAtMs = fleetNow - 3 * 86400LL * 1000LL;
+    cloudSnap.cloud.accruedLaunchUsd = 0.2920 * 3 * 24.0;
+    CloudFleetStatus fleetStory;
+    fleetStory.attempted = true;
+    fleetStory.available = true;
+    fleetStory.provider = CloudProvider::Aws;
+    fleetStory.cliName = QStringLiteral("aws");
+    fleetStory.scope = QStringLiteral("eu-west-1");
+    fleetStory.source =
+        QStringLiteral("aws ec2 describe-instances --output json --region "
+                       "eu-west-1");
+    fleetStory.fetchedAtMs = fleetNow - 120000;
+    CloudFleetInstance fleetSelf;
+    fleetSelf.instanceId = QStringLiteral("i-0123456789abcdef0");
+    fleetSelf.name = QStringLiteral("hud-box");
+    fleetSelf.instanceType = QStringLiteral("c7g.2xlarge");
+    fleetSelf.state = QStringLiteral("running");
+    fleetSelf.rawState = QStringLiteral("running");
+    fleetSelf.region = QStringLiteral("eu-west-1");
+    fleetSelf.zone = QStringLiteral("eu-west-1b");
+    fleetSelf.launchedAtMs = fleetNow - 3 * 86400LL * 1000LL;
+    CloudFleetInstance fleetWeb;
+    fleetWeb.instanceId = QStringLiteral("i-0feedface");
+    fleetWeb.name = QStringLiteral("web-2");
+    fleetWeb.instanceType = QStringLiteral("t4g.small");
+    fleetWeb.state = QStringLiteral("running");
+    fleetWeb.rawState = QStringLiteral("running");
+    fleetWeb.launchedAtMs = fleetNow - 5 * 86400LL * 1000LL;
+    CloudFleetInstance fleetOld;
+    fleetOld.instanceId = QStringLiteral("i-0deadbeef");
+    fleetOld.name = QStringLiteral("batch-old");
+    fleetOld.instanceType = QStringLiteral("t4g.small");
+    fleetOld.state = QStringLiteral("stopped");
+    fleetOld.rawState = QStringLiteral("stopped");
+    fleetOld.launchedAtMs = fleetNow - 12 * 86400LL * 1000LL;
+    fleetStory.rows = {fleetSelf, fleetWeb, fleetOld};
+    fleetApplyRates(
+        fleetStory,
+        parseCloudRateFile(QStringLiteral("aws/c7g.2xlarge = 0.2920\n"
+                                          "aws/t4g.small = 0.0208\n")),
+        730.0);
+    fleetResolveAges(fleetStory, fleetNow);
+    fleetMarkSelf(fleetStory, cloudSnap.cloud.identity);
+    cloudSnap.cloud.fleet = fleetStory;
     hud.setSnapshot(cloudSnap);
     hud.setSnapshot(cloudSnap);
 
@@ -1305,8 +1353,14 @@ int main(int argc, char *argv[]) {
         hud.findChild<QLabel *>(QStringLiteral("ddCloudTileAccrued"));
     auto *cloudMonthly =
         hud.findChild<QLabel *>(QStringLiteral("ddCloudTileMonthly"));
-    auto *cloudRate =
-        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileRate"));
+    auto *cloudAge =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudTileAge"));
+    auto *cloudFleet =
+        hud.findChild<QTreeWidget *>(QStringLiteral("ddCloudFleet"));
+    auto *cloudFleetSummary =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudFleetSummary"));
+    auto *cloudFleetChart =
+        hud.findChild<TimeseriesChart *>(QStringLiteral("ddCloudFleetChart"));
     auto *cloudSummary =
         hud.findChild<QLabel *>(QStringLiteral("ddCloudSummary"));
     auto *cloudDetail =
@@ -1325,9 +1379,10 @@ int main(int argc, char *argv[]) {
               && cloudAccrued->text() == QStringLiteral("$287.33")
               && cloudMonthly != nullptr
               && cloudMonthly->text() == QStringLiteral("$213.16")
-              && cloudRate != nullptr
-              && cloudRate->text() == QStringLiteral("$0.2920/hr"),
-          "cloud page tiles show provider, accrual, projection and rate");
+              && cloudAge != nullptr
+              && cloudAge->text() == QStringLiteral("3d 0h"),
+          "cloud page tiles show provider, instance age, accrual and "
+          "projection");
     check(cloudSummary != nullptr
               && cloudSummary->text().contains(QStringLiteral("c7g.2xlarge"))
               && cloudSummary->text().contains(QStringLiteral("8 vCPU")),
@@ -1338,8 +1393,59 @@ int main(int argc, char *argv[]) {
           "cloud page renders the identity detail card");
     check(cloudCost != nullptr
               && cloudCost->text().contains(QStringLiteral("this boot"))
+              && cloudCost->text().contains(
+                  QStringLiteral("since launch (upper bound)"))
               && cloudCost->text().contains(QStringLiteral("60 days old")),
-          "cloud cost card labels accrual as this boot and flags a stale price");
+          "cloud cost card splits launch-age accrual from this boot and flags "
+          "a stale price");
+    check(cloudDetail != nullptr
+              && cloudDetail->text().contains(QStringLiteral("age        3d 0h"))
+              && cloudDetail->text().contains(QStringLiteral("launched "))
+              && cloudDetail->text().contains(QStringLiteral("UTC")),
+          "cloud detail card states the provider launch time");
+    check(cloudFleet != nullptr && cloudFleet->topLevelItemCount() == 3
+              && cloudFleet->topLevelItem(0)->text(0)
+                     == QStringLiteral("* hud-box")
+              && cloudFleet->topLevelItem(0)->text(1)
+                     == QStringLiteral("c7g.2xlarge")
+              && cloudFleet->topLevelItem(0)->text(2)
+                     == QStringLiteral("running")
+              && cloudFleet->topLevelItem(0)->text(3)
+                     == QStringLiteral("3d 0h")
+              && cloudFleet->topLevelItem(0)->text(4)
+                     == QStringLiteral("$213.16"),
+          "cloud fleet table leads with this instance, its age and its monthly "
+          "rate");
+    check(cloudFleet->topLevelItem(1)->text(0) == QStringLiteral("web-2")
+              && cloudFleet->topLevelItem(1)->text(4)
+                     == QStringLiteral("$15.18")
+              && cloudFleet->topLevelItem(2)->text(0)
+                     == QStringLiteral("batch-old")
+              && cloudFleet->topLevelItem(2)->text(4) == QStringLiteral("--"),
+          "cloud fleet table prices running rows only and dashes a stopped one");
+    check(cloudFleetSummary != nullptr
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("AWS fleet"))
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("3 instances"))
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("2 running"))
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("$228.34/month"))
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("self      hud-box")),
+          "cloud fleet summary counts the listing, the running rows and the "
+          "self row");
+    check(cloudFleetChart != nullptr && cloudFleetChart->sampleCount() == 2,
+          "cloud fleet chart follows the running count per tick");
+    auto *cloudFleetNote =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudFleetNote"));
+    check(cloudFleetNote != nullptr
+              && cloudFleetNote->text().contains(
+                  QStringLiteral("* this instance"))
+              && cloudFleetNote->text().contains(
+                  QStringLiteral("running rows only")),
+          "cloud fleet note explains the star, the age source and the sum");
     check(cloudApp != nullptr
               && cloudApp->text().contains(QStringLiteral("cursor"))
               && cloudApp->text().contains(QStringLiteral("214.5%")),
@@ -1367,9 +1473,20 @@ int main(int argc, char *argv[]) {
               && cloudAccrued->text() == QStringLiteral("--")
               && cloudMonthly != nullptr
               && cloudMonthly->text() == QStringLiteral("--")
-              && cloudRate != nullptr
-              && cloudRate->text() == QStringLiteral("--"),
+              && cloudAge != nullptr
+              && cloudAge->text() == QStringLiteral("--"),
           "cloud page falls back to dashes off a cloud instance");
+    check(cloudFleetSummary != nullptr
+              && cloudFleetSummary->text().contains(
+                  QStringLiteral("no cloud instance identified"))
+              && cloudFleet != nullptr
+              && cloudFleet->topLevelItemCount() == 1
+              && cloudFleet->topLevelItem(0)->text(0)
+                     == cloudFleetSummary->text()
+              && cloudFleetChart != nullptr
+              && cloudFleetChart->sampleCount() == 2,
+          "cloud fleet card states the gate off a cloud instance and charts "
+          "nothing");
     check(cloudSummary != nullptr
               && cloudSummary->text().contains(
                   QStringLiteral("no instance metadata service")),

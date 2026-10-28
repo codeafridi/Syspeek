@@ -486,6 +486,62 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.cloud.consumers =
         cloudTopConsumers(cloudRows, s.cloud.ratePerHour, cloudVcpus, 4);
 
+    // M83: the account listing. The instance is 96 days old, which is only
+    // knowable from the provider, and four neighbours in the same region show
+    // the fleet table and the $/MO roll-up.
+    const qint64 shotNow = QDateTime::currentMSecsSinceEpoch();
+    const qint64 selfAge = (96 * 86400 + qint64(tick) * 2) * 1000LL;
+    s.cloud.instanceAgeSec = 96 * 86400 + qint64(tick) * 2;
+    s.cloud.launchedAtMs = shotNow - selfAge;
+    s.cloud.accruedLaunchUsd =
+        computeCloudCost(s.cloud.ratePerHour, s.cloud.instanceAgeSec).accruedUsd;
+    CloudFleetStatus fleet;
+    fleet.attempted = true;
+    fleet.available = true;
+    fleet.provider = CloudProvider::Aws;
+    fleet.cliName = QStringLiteral("aws");
+    fleet.scope = QStringLiteral("eu-west-1");
+    fleet.source = QStringLiteral("aws ec2 describe-instances --output json "
+                                  "--region eu-west-1 --query "
+                                  "Reservations[].Instances[]");
+    fleet.fetchedAtMs = shotNow - 180000;
+
+    const auto fleetRow = [&shotNow](const char *id, const char *name,
+                                     const char *type, const char *state,
+                                     qint64 ageDays, const char *zone) {
+        CloudFleetInstance row;
+        row.instanceId = QLatin1String(id);
+        row.name = QLatin1String(name);
+        row.instanceType = QLatin1String(type);
+        row.state = QLatin1String(state);
+        row.rawState = row.state;
+        row.zone = QLatin1String(zone);
+        row.region = cloudRegionFromZone(row.zone);
+        row.launchedAtMs = shotNow - ageDays * 86400LL * 1000LL;
+        return row;
+    };
+    fleet.rows = {
+        fleetRow("i-0123456789abcdef0", "hud-box", "c7g.2xlarge", "running",
+                 96, "eu-west-1b"),
+        fleetRow("i-0feedfacecafe0001", "web-2", "t4g.small", "running", 12,
+                 "eu-west-1a"),
+        fleetRow("i-0feedfacecafe0002", "web-3", "t4g.small", "running", 12,
+                 "eu-west-1a"),
+        fleetRow("i-0feedfacecafe0003", "api-edge", "m7g.large", "running", 3,
+                 "eu-west-1c"),
+        fleetRow("i-0deadbeefdeadbe01", "batch-old", "t4g.small", "stopped",
+                 47, "eu-west-1b"),
+    };
+    fleetApplyRates(
+        fleet,
+        parseCloudRateFile(QStringLiteral("aws/c7g.2xlarge = 0.2920\n"
+                                          "aws/t4g.small = 0.0208\n"
+                                          "aws/m7g.large = 0.0816\n")),
+        730.0);
+    fleetResolveAges(fleet, shotNow);
+    fleetMarkSelf(fleet, s.cloud.identity);
+    s.cloud.fleet = fleet;
+
     return s;
 }
 

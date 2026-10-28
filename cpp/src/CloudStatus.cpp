@@ -7,7 +7,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QStringList>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
@@ -154,12 +156,22 @@ QString cloudRegionFromZone(const QString &zone) {
         return QString();
     }
     const QString tail = trimmed.section(QLatin1Char('/'), -1);
-    // "us-central1-a" -> "us-central1"
+    // "us-central1-a" -> "us-central1": the zone letter is its own dash group.
     const int dash = tail.lastIndexOf(QLatin1Char('-'));
-    if (dash <= 0) {
-        return tail;
+    if (dash > 0 && tail.size() - dash - 1 == 1) {
+        return tail.left(dash);
     }
-    return tail.left(dash);
+    // An AWS availability zone is the region with a letter appended
+    // ("eu-west-1a"), and a local zone appends another dash group
+    // ("us-west-2-lax-1a"), so the region is the leading
+    // <area>-<place>-<number> prefix rather than "everything but the letter".
+    static const QRegularExpression awsRegion(
+        QStringLiteral("^([a-z]{2}-[a-z]+-\\d+)"));
+    const QRegularExpressionMatch match = awsRegion.match(tail);
+    if (match.hasMatch()) {
+        return match.captured(1);
+    }
+    return tail;
 }
 
 CloudIdentity parseGcpInstance(const GcpMetadataFields &fields) {
@@ -493,6 +505,21 @@ QString cloudDetailText(const CloudSnapshot &snapshot) {
         }
         lines.append(QStringLiteral("image      %1").arg(image));
     }
+    if (snapshot.instanceAgeSec >= 0) {
+        QString age = QStringLiteral("age        %1").arg(
+            cloudUptimeText(snapshot.instanceAgeSec));
+        if (snapshot.launchedAtMs > 0) {
+            age += QStringLiteral("  launched %1").arg(
+                QDateTime::fromMSecsSinceEpoch(snapshot.launchedAtMs,
+                                               QTimeZone::UTC)
+                    .toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'")));
+        }
+        lines.append(age);
+    } else {
+        lines.append(QStringLiteral(
+            "age        --  (the provider reported no launch time for this "
+            "instance)"));
+    }
     if (id.marketplace) {
         lines.append(QStringLiteral("marketplace yes - rate file decides the price"));
     }
@@ -526,6 +553,22 @@ QString cloudCostText(const CloudSnapshot &snapshot) {
         line += QStringLiteral("  (imported %1)").arg(snapshot.rateImportDate);
     }
     line += QLatin1Char('\n');
+    if (snapshot.launchedAtMs > 0 && snapshot.instanceAgeSec >= 0) {
+        line += QStringLiteral("launched   %1  age %2")
+                    .arg(QDateTime::fromMSecsSinceEpoch(snapshot.launchedAtMs,
+                                                        QTimeZone::UTC)
+                             .toString(QStringLiteral("yyyy-MM-dd")),
+                         cloudUptimeText(snapshot.instanceAgeSec));
+        line += QLatin1Char('\n');
+        if (snapshot.accruedLaunchUsd >= 0.0) {
+            // Upper bound: the provider counts from launch, so an instance
+            // that was stopped for a week is overcharged here. The honest
+            // "this boot" figure stays right below it.
+            line += QStringLiteral("accrued    %1  since launch (upper bound)")
+                        .arg(formatCostMoney(snapshot.accruedLaunchUsd));
+            line += QLatin1Char('\n');
+        }
+    }
     line += QStringLiteral("accrued    %1  this boot (%2)")
                 .arg(formatCostMoney(snapshot.accruedUsd),
                      cloudUptimeText(snapshot.uptimeSec));

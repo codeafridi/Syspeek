@@ -201,6 +201,9 @@ add_library(syspeek_core STATIC
     src/CloudStatus.h
     src/CloudProbe.cpp
     src/CloudProbe.h
+    src/CloudFleetStatus.cpp
+    src/CloudFleetSource.cpp
+    src/CloudFleetSource.h
     src/CloudPricing.cpp
     src/CloudPricing.h
     src/OverlayStatus.cpp

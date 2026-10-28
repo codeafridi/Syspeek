@@ -255,11 +255,15 @@ private:
     QLabel *m_costTileMemEff = nullptr;
     TimeseriesChart *m_chartCost = nullptr;
     QLabel *m_cloudTileProvider = nullptr;
+    QLabel *m_cloudTileAge = nullptr;
     QLabel *m_cloudTileAccrued = nullptr;
     QLabel *m_cloudTileMonthly = nullptr;
-    QLabel *m_cloudTileRate = nullptr;
     QLabel *m_cloudSummary = nullptr;
     QLabel *m_cloudDetail = nullptr;
+    QLabel *m_cloudFleetSummary = nullptr;
+    QLabel *m_cloudFleetNote = nullptr;
+    QTreeWidget *m_cloudFleet = nullptr;
+    TimeseriesChart *m_chartCloudFleet = nullptr;
     QLabel *m_cloudCost = nullptr;
     QLabel *m_cloudApp = nullptr;
     QLabel *m_cloudShare = nullptr;

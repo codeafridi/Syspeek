@@ -183,6 +183,13 @@ struct CloudConfig {
     // [cloud] timeout_ms: one metadata request budget. IMDS answers in single
     // digits of milliseconds; a slow answer means it is not there.
     int timeoutMs = 450;
+    // [cloud] inventory: list the account through the provider's CLI so the
+    // page can show the instance age and the fleet. Off means no CLI is ever
+    // spawned (the metadata read still works).
+    bool inventory = true;
+    // [cloud] inventory_timeout_ms: one listing budget. The CLI call is a
+    // network round trip to the provider API, not link-local.
+    int inventoryTimeoutMs = 25000;
 };
 
 struct Config {
