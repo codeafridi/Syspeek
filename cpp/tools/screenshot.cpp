@@ -595,6 +595,28 @@ int main(int argc, char *argv[]) {
         pod.cpuMillis = 512.0;
         kube.podsCpuMillis = 534.0;
         kube.podsMemBytes = 567LL * 1024 * 1024;
+        // Cost story (M81): a priced cluster whose usage sits below the
+        // declared requests, so the Cost page renders the split, the
+        // right-sizing card and the per-namespace shares with real numbers.
+        kube.costPods = 12;
+        kube.costMissingRequests = 1;
+        kube.costMonthly = 1180.0;
+        kube.costCpuPerCoreHour = 0.031611;
+        kube.costMemPerGbHour = 0.004237;
+        kube.costCpuMonthly = 864.0;
+        kube.costMemMonthly = 316.0;
+        kube.costCpuEfficiency = 0.42;
+        kube.costMemEfficiency = 0.61;
+        kube.costWastedMonthly = 512.40;
+        kube.costEfficiencyPods = 9;
+        kube.costByNamespace = {
+            {QStringLiteral("prod"), 712.0},
+            {QStringLiteral("staging"), 268.0},
+            {QStringLiteral("dev"), 200.0}};
+        kube.costTopWorkloads = {
+            {QStringLiteral("prod/api-7f9c"), 486.20},
+            {QStringLiteral("prod/web-5f8d"), 226.10},
+            {QStringLiteral("staging/worker-2b1a"), 148.60}};
         // Services story (M61n): three units, one crash-looping, so the
         // FAILED tile flaps🗴 and the timeline carries a restart row.
         ServicesSnapshot svc;
@@ -713,6 +735,11 @@ int main(int argc, char *argv[]) {
             docker.issueCount = 1 + (i % 31 < 8 ? 1 : 0);
             kube.totalPods = 12 + i / 40;
             kube.issueCount = 2 + (i > 150 ? 2 : 0);
+            // Cost drifts with the fleet so the estimate history has shape;
+            // the split keeps the cpu/ram ratio of the fixture.
+            kube.costMonthly = 1180.0 + 46.0 * std::sin(i / 26.0);
+            kube.costCpuMonthly = kube.costMonthly * (864.0 / 1180.0);
+            kube.costMemMonthly = kube.costMonthly - kube.costCpuMonthly;
             path.reports.first().hops[2].lossPercent = (i % 29 < 6) ? 2.5 : 0.0;
             path.reports.first().hops[4].avgMs = 12.0 + (i % 17) * 2.0;
             path.reports.first().hops[4].lastMs = path.reports.first().hops[4].avgMs;
@@ -966,6 +993,23 @@ int main(int argc, char *argv[]) {
     kube.nodesWithUsage = 1;
     kube.podsCpuMillis = 534.0;
     kube.podsMemBytes = 567LL * 1024 * 1024;
+    kube.costPods = 12;
+    kube.costMissingRequests = 1;
+    kube.costMonthly = 1180.0;
+    kube.costCpuPerCoreHour = 0.031611;
+    kube.costMemPerGbHour = 0.004237;
+    kube.costCpuMonthly = 864.0;
+    kube.costMemMonthly = 316.0;
+    kube.costCpuEfficiency = 0.42;
+    kube.costMemEfficiency = 0.61;
+    kube.costWastedMonthly = 512.40;
+    kube.costEfficiencyPods = 9;
+    kube.costByNamespace = {{QStringLiteral("prod"), 712.0},
+                            {QStringLiteral("staging"), 268.0},
+                            {QStringLiteral("dev"), 200.0}};
+    kube.costTopWorkloads = {{QStringLiteral("prod/api-7f9c"), 486.20},
+                             {QStringLiteral("prod/web-5f8d"), 226.10},
+                             {QStringLiteral("staging/worker-2b1a"), 148.60}};
     KubeNode kubeNode;
     kubeNode.name = QStringLiteral("node-1");
     kubeNode.ready = true;

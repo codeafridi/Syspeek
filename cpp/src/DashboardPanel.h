@@ -169,7 +169,9 @@ private:
     QWidget *buildSloView();
     QWidget *buildSettingsView();
     void applySettingsInfo();
+    void refreshSettingsTiles();
     void copySettingCommand();
+    void copyDiagnosticsReport();
 
     QString unsupportedOsText() const;
 
@@ -244,6 +246,11 @@ private:
     QLabel *m_costWarnings = nullptr;
     QTreeWidget *m_costNamespaces = nullptr;
     QTreeWidget *m_costWorkloads = nullptr;
+    QLabel *m_costTileMonthly = nullptr;
+    QLabel *m_costTileHourly = nullptr;
+    QLabel *m_costTileCpuEff = nullptr;
+    QLabel *m_costTileMemEff = nullptr;
+    TimeseriesChart *m_chartCost = nullptr;
     QLabel *m_diskSummary = nullptr;
     QLabel *m_diskTopNote = nullptr;
     QLabel *m_diskTop = nullptr;
@@ -598,6 +605,11 @@ private:
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
     QLabel *m_settingsDiagnostics = nullptr;
+    QLabel *m_settingsScope = nullptr;
+    QLabel *m_settingsTileVersion = nullptr;
+    QLabel *m_settingsTileRefresh = nullptr;
+    QLabel *m_settingsTileMonitors = nullptr;
+    QLabel *m_settingsTileSilenced = nullptr;
     QHash<QString, QDoubleSpinBox *> m_monitorThreshold;
     QHash<QString, QSpinBox *> m_monitorCycles;
 };

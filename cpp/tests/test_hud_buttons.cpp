@@ -6,6 +6,8 @@
 #include "ProcessActions.h"
 
 #include <QApplication>
+#include <QClipboard>
+#include <QDateTime>
 #include <QDir>
 #include <QTemporaryDir>
 #include <QCheckBox>
@@ -1134,6 +1136,107 @@ int main(int argc, char *argv[]) {
               && dashKubeTimeline->text().contains(QStringLiteral("rollout")),
           "panel shows change timeline");
 
+
+    {
+        // M81 Cost page: a priced cluster fills the tiles, the allocation
+        // split, the right-sizing card, the history line and the share
+        // tables; an unreachable cluster states the gate instead.
+        KubeSnapshot cost = kubeSnap;
+        cost.costMonthly = 1336.40;
+        cost.costPods = 9;
+        cost.costMissingRequests = 1;
+        cost.costCpuPerCoreHour = 0.031611;
+        cost.costMemPerGbHour = 0.004237;
+        cost.costCpuMonthly = 980.0;
+        cost.costMemMonthly = 356.4;
+        cost.costCpuEfficiency = 0.42;
+        cost.costMemEfficiency = 0.81;
+        cost.costWastedMonthly = 412.35;
+        cost.costEfficiencyPods = 7;
+        cost.costByNamespace = {qMakePair(QStringLiteral("prod"), 1100.0),
+                                qMakePair(QStringLiteral("dev"), 236.4)};
+        cost.costTopWorkloads = {
+            qMakePair(QStringLiteral("prod/api-7f9c"), 812.0),
+            qMakePair(QStringLiteral("prod/web-5f8d"), 288.0)};
+        hud.setKubeSnapshot(cost);
+
+        auto *tileMonthly =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostTileMonthly"));
+        auto *tileHourly =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostTileHourly"));
+        auto *tileCpuEff =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostTileCpuEff"));
+        auto *tileMemEff =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostTileMemEff"));
+        auto *costSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostSummary"));
+        auto *costWarnings =
+            hud.findChild<QLabel *>(QStringLiteral("ddCostWarnings"));
+        auto *costNamespaces =
+            hud.findChild<QTreeWidget *>(QStringLiteral("ddCostNamespaces"));
+        auto *costWorkloads =
+            hud.findChild<QTreeWidget *>(QStringLiteral("ddCostWorkloads"));
+        auto *costChart =
+            hud.findChild<TimeseriesChart *>(QStringLiteral("ddCostChart"));
+
+        check(tileMonthly != nullptr
+                  && tileMonthly->text() == QStringLiteral("$1.3K"),
+              "cost: monthly tile renders compact money");
+        check(tileHourly != nullptr
+                  && tileHourly->text() == QStringLiteral("$1.83"),
+              "cost: hourly tile divides by the month length");
+        check(tileCpuEff != nullptr
+                  && tileCpuEff->text() == QStringLiteral("42.0%")
+                  && tileCpuEff->styleSheet().contains(QStringLiteral("#c9a24a")),
+              "cost: cpu efficiency warns below 60%");
+        check(tileMemEff != nullptr
+                  && tileMemEff->text() == QStringLiteral("81.0%")
+                  && tileMemEff->styleSheet().contains(QStringLiteral("#4fae7d")),
+              "cost: ram efficiency reads healthy");
+        check(costSummary != nullptr
+                  && costSummary->text().contains(QStringLiteral("$980.00"))
+                  && costSummary->text().contains(QStringLiteral("73.3%"))
+                  && costSummary->text().contains(QStringLiteral("/core-hr")),
+              "cost: allocation card splits cpu and ram pricing");
+        check(costSummary->text().contains(QStringLiteral("9 pod(s)"))
+                  && costSummary->text().contains(QStringLiteral("2 namespace(s)")),
+              "cost: allocation card states the priced inventory");
+        check(costSummary->text().contains(
+                  QStringLiteral("1 container(s) declare no cpu/memory request")),
+              "cost: allocation card warns about missing requests");
+        check(costWarnings != nullptr
+                  && costWarnings->text().contains(QStringLiteral("42.0%"))
+                  && costWarnings->text().contains(QStringLiteral("$412.35"))
+                  && costWarnings->text().contains(QStringLiteral("buffer 1.2")),
+              "cost: right-sizing card states efficiency, waste and advice");
+        check(costNamespaces != nullptr
+                  && costNamespaces->topLevelItemCount() == 2
+                  && costNamespaces->topLevelItem(0)->text(0)
+                         == QStringLiteral("prod")
+                  && costNamespaces->topLevelItem(0)->text(2)
+                         == QStringLiteral("82.3%"),
+              "cost: namespace table carries each share");
+        check(costWorkloads != nullptr
+                  && costWorkloads->topLevelItemCount() == 2
+                  && costWorkloads->topLevelItem(0)->text(1)
+                         == QStringLiteral("$812.00"),
+              "cost: workload table formats money");
+        check(costChart != nullptr && costChart->sampleCount() >= 1,
+              "cost: the estimate history is charted");
+
+        KubeSnapshot noCost;
+        noCost.state = KubeState::NotConfigured;
+        hud.setKubeSnapshot(noCost);
+        check(tileMonthly->text() == QStringLiteral("--")
+                  && tileCpuEff->text() == QStringLiteral("--"),
+              "cost: no cluster leaves the tiles at --");
+        check(costSummary->text().contains(QStringLiteral("k8s: not configured")),
+              "cost: the allocation card states the gate");
+        check(costNamespaces->topLevelItemCount() == 0,
+              "cost: the gate leaves the tables empty");
+        hud.setKubeSnapshot(cost);
+    }
+
     DisplaySnapshot hot = makeSnapshot("hot", "9", "95%", "10 MB", "WARN");
     hot.cpuValid = true;
     hot.cpuPercent = 95.0;
@@ -1310,6 +1413,69 @@ int main(int argc, char *argv[]) {
             }
             check(QFile::remove(path), "HUD export leaves a real file behind");
         }
+
+        // M81 Settings page: KPI tiles, the collection-scope matrix and
+        // the COPY REPORT flare analog.
+        auto *scopeLabel =
+            hud.findChild<QLabel *>(QStringLiteral("ddSettingsScope"));
+        check(scopeLabel != nullptr
+                  && scopeLabel->text().contains(
+                      QStringLiteral("collection surfaces live on")),
+              "settings: COLLECTION SCOPE counts the live surfaces");
+        check(scopeLabel->text().contains(QStringLiteral("tcp health counters")),
+              "settings: the scope matrix names an OS-gated surface");
+
+        auto *tileVersion = hud.findChild<QLabel *>(
+            QStringLiteral("ddSettingsTileVersion"));
+        auto *tileRefresh = hud.findChild<QLabel *>(
+            QStringLiteral("ddSettingsTileRefresh"));
+        auto *tileMonitors = hud.findChild<QLabel *>(
+            QStringLiteral("ddSettingsTileMonitors"));
+        auto *tileSilenced = hud.findChild<QLabel *>(
+            QStringLiteral("ddSettingsTileSilenced"));
+        check(tileVersion != nullptr
+                  && tileVersion->text() == QStringLiteral("9.9.9-test"),
+              "settings: the version tile states the build");
+        check(tileRefresh != nullptr
+                  && tileRefresh->text() == QStringLiteral("1s"),
+              "settings: the refresh tile states the cadence");
+        check(tileMonitors != nullptr && tileMonitors->text().toInt() >= 10,
+              "settings: the monitor tile counts the rules");
+        check(tileSilenced != nullptr
+                  && tileSilenced->text() == QStringLiteral("0"),
+              "settings: the silence tile starts at zero");
+
+        SilenceRule liveSilence;
+        liveSilence.matcher = QStringLiteral("app_cpu");
+        liveSilence.startsAtMs = QDateTime::currentMSecsSinceEpoch() - 1000;
+        liveSilence.endsAtMs = QDateTime::currentMSecsSinceEpoch() + 60000;
+        liveSilence.comment = QStringLiteral("deploy");
+        panel->setSilences({liveSilence});
+        check(tileSilenced->text() == QStringLiteral("1")
+                  && tileSilenced->styleSheet().contains(
+                      QStringLiteral("#c9a24a")),
+              "settings: a live silence turns the tile amber");
+        panel->setSilences({});
+
+        auto *copyReport = static_cast<QPushButton *>(nullptr);
+        for (QPushButton *button : hud.findChildren<QPushButton *>()) {
+            if (button->text() == QStringLiteral("COPY REPORT")) {
+                copyReport = button;
+            }
+        }
+        check(copyReport != nullptr, "settings: COPY REPORT button exists");
+        if (copyReport != nullptr) {
+            copyReport->click();
+            const QString report = QGuiApplication::clipboard()->text();
+            check(report.contains(QStringLiteral("syspeek 9.9.9-test"))
+                      && report.contains(QStringLiteral("/tmp/syspeek.conf"))
+                      && report.contains(QStringLiteral("monitors"))
+                      && report.contains(QStringLiteral("refresh")),
+                  "settings: COPY REPORT copies the diagnostic report");
+            check(copyReport->text() == QStringLiteral("COPIED"),
+                  "settings: COPY REPORT confirms the copy");
+        }
+
         moreButton2->click();
         check(!hud.isExpanded() && panel->isHidden(),
               "LESS collapses the overlay in place");

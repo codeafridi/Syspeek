@@ -322,6 +322,79 @@ int main() {
         check(cost.topWorkloads.size() == 2
                   && cost.topWorkloads.at(0).pod == QStringLiteral("job-1"),
               "cost: top workload first is the largest");
+
+        // M81: cpu/ram split of the same estimate (OpenCost CPUHourlyCost /
+        // RAMGBHourlyCost are separate rates, so the console reports both).
+        const CostSplit split =
+            computeCostSplit(costRes.pods, cpuPrice, memPrice);
+        check(approxEq(split.cpuMonthly, 32.85), "cost split: cpu share");
+        check(approxEq(split.memMonthly, 8.03), "cost split: ram share");
+        check(approxEq(split.cpuMonthly + split.memMonthly, cost.totalMonthly),
+              "cost split: both shares add up to the estimate");
+
+        // Usage/request efficiency: only pods that report a usage sample AND
+        // declare a request can be measured; job-1 has requests but no usage.
+        KubePod used = api;
+        used.cpuMillis = 250.0;
+        used.memBytes = 402653184LL; // 0.375 GiB of a 0.75 GiB request
+        const QList<KubePod> usedPods = {used,
+                                         costRes.pods.at(1)};
+        const CostEfficiency eff =
+            computeCostEfficiency(usedPods, cpuPrice, memPrice);
+        check(eff.podsMeasured == 1, "efficiency: only measured pods count");
+        check(approxEq(costCpuEfficiency(eff), 0.5),
+              "efficiency: cpu usage/request ratio");
+        check(approxEq(costMemEfficiency(eff), 0.5),
+              "efficiency: ram usage/request ratio");
+        check(approxEq(eff.wastedMonthly, 6.57),
+              "efficiency: prices the request headroom above usage");
+        check(approxEq(costCpuEfficiency(CostEfficiency{}), -1.0),
+              "efficiency: no sample -> -1 sentinel");
+        check(approxEq(costMemEfficiency(CostEfficiency{}), -1.0),
+              "efficiency: no ram request -> -1 sentinel");
+
+        check(formatCostMoney(0.0) == QStringLiteral("$0.00"),
+              "money: zero");
+        check(formatCostMoney(12.5) == QStringLiteral("$12.50"),
+              "money: whole dollars");
+        check(formatCostMoney(0.0312) == QStringLiteral("$0.0312"),
+              "money: sub-dollar keeps precision");
+        check(formatCostMoney(1336.4) == QStringLiteral("$1.3K"),
+              "money: thousands compact");
+        check(formatCostMoney(2.5e6) == QStringLiteral("$2.50M"),
+              "money: millions compact");
+        check(formatCostShare(0.342) == QStringLiteral("34.2%"),
+              "share: percent with one decimal");
+        check(formatCostShare(-1.0) == QStringLiteral("--"),
+              "share: negative sentinel reads --");
+
+        const QString rateText = costRateText(split, cpuPrice, memPrice);
+        check(rateText.contains(QStringLiteral("cpu $0.030000/core-hr"))
+                  && rateText.contains(QStringLiteral("ram $0.004000/GB-hr"))
+                  && rateText.contains(QStringLiteral("730 h/month")),
+              "cost rate: names the applied prices and month length");
+
+        check(costEfficiencyTextFromRatios(-1.0, -1.0, 0, 0.0)
+                  .contains(QStringLiteral("no pod usage sample")),
+              "efficiency text: gates on missing usage");
+        check(costEfficiencyTextFromRatios(-1.0, -1.0, 3, 0.0)
+                  .contains(QStringLiteral("no cpu/memory requests")),
+              "efficiency text: gates on missing requests");
+        const QString effText =
+            costEfficiencyTextFromRatios(0.25, 0.5, 4, 12.5);
+        check(effText.contains(QStringLiteral("25.0%"))
+                  && effText.contains(QStringLiteral("50.0%"))
+                  && effText.contains(QStringLiteral("4 pod(s) with usage")),
+              "efficiency text: states both ratios");
+        check(effText.contains(QStringLiteral("#d1685f"))
+                  && effText.contains(QStringLiteral("#c9a24a")),
+              "efficiency text: low efficiency colors crit, mid warn");
+        check(effText.contains(QStringLiteral("$12.50"))
+                  && effText.contains(QStringLiteral("buffer 1.2")),
+              "efficiency text: prices waste and names the OpenCost buffer");
+        check(costEfficiencyTextFromRatios(0.9, -1.0, 2, 0.0)
+                  .contains(QStringLiteral("--")),
+              "efficiency text: unmeasurable side reads --");
     }
 
     {

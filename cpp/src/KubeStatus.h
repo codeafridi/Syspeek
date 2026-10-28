@@ -124,6 +124,17 @@ struct KubeSnapshot {
     int costPods = 0;
     QList<QPair<QString, double>> costByNamespace;
     QList<QPair<QString, double>> costTopWorkloads;
+    // OpenCost-style pricing detail (M81): the rates actually applied, the
+    // cpu/ram split of the estimate, and usage/request efficiency over the
+    // pods that report both (metrics.k8s.io) - -1 when unmeasurable.
+    double costCpuPerCoreHour = 0.0;
+    double costMemPerGbHour = 0.0;
+    double costCpuMonthly = 0.0;
+    double costMemMonthly = 0.0;
+    double costCpuEfficiency = -1.0;
+    double costMemEfficiency = -1.0;
+    double costWastedMonthly = 0.0;
+    int costEfficiencyPods = 0;
     bool metricsOk = false;
     QString metricsNote;
     double podsCpuMillis = 0.0;

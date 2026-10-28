@@ -45,6 +45,8 @@ public:
     // window is rendered as-is instead of being appended tick by tick).
     void setValues(const QList<double> &valuesA,
                    const QList<double> &valuesB = QList<double>());
+    // Number of plotted samples (tests + legend honesty checks).
+    int sampleCount() const { return int(m_valuesA.size()); }
 
     // Monitor bands: the axis grows to include them so a threshold above the
     // observed data still renders instead of silently falling off the plot.
