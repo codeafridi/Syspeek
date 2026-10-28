@@ -4169,6 +4169,12 @@ int main(int argc, char *argv[]) {
             check(cloudSummaryText(disabled).contains(
                       QStringLiteral("enabled=false")),
                   "cloud: a disabled probe states the switch");
+            CloudSnapshot probing;
+            probing.note = cloudProbingText();
+            check(cloudSummaryText(probing) == cloudProbingText()
+                      && cloudProbingText().contains(
+                          QStringLiteral("next tick")),
+                  "cloud: the first sampled tick says the probe is deferred");
 
             CloudSnapshot live;
             live.available = true;

@@ -180,8 +180,10 @@ struct CloudConfig {
     // [cloud] rates: the price table to read. Empty means
     // defaultCloudRatePath().
     QString ratesPath;
-    // [cloud] timeout_ms: one metadata request budget. IMDS answers in single
-    // digits of milliseconds; a slow answer means it is not there.
+    // [cloud] timeout_ms: the budget for the whole metadata sweep (GCP, OCI,
+    // Azure, AWS together). A host with no IMDS blackholes the link-local
+    // address instead of refusing it, so one budget per request would stall a
+    // sampler tick for seconds; IMDS answers in single digits of milliseconds.
     int timeoutMs = 450;
     // [cloud] inventory: list the account through the provider's CLI so the
     // page can show the instance age and the fleet. Off means no CLI is ever

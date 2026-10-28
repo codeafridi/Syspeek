@@ -815,7 +815,14 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 cadence =
         m_cloudBase.available ? qint64(300000) : qint64(900000);
-    if (!m_cloudProbed || now - m_cloudProbeStampMs >= cadence) {
+    const bool probeDue = !m_cloudProbed || now - m_cloudProbeStampMs >= cadence;
+    // The first sample must never wait on a link-local socket: on a host with
+    // no IMDS the sweep (GCP, OCI, Azure, AWS v2) can spend its whole
+    // per-request budget before it hears anything, which would delay the very
+    // first paint. The probe therefore starts on the second tick and the card
+    // states that for the one tick it is missing.
+    const bool firstTick = m_cloudTicks++ == 0;
+    if (probeDue && !firstTick) {
         CloudProbeOptions options;
         options.timeoutMs = m_cloud.timeoutMs;
         const CloudProbeResult probe = probeCloudIdentity(options);
@@ -855,6 +862,9 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
     }
 
     CloudSnapshot cloud = m_cloudBase;
+    if (!m_cloudProbed) {
+        cloud.note = cloudProbingText();
+    }
     cloud.vcpus = QThread::idealThreadCount();
     cloud.uptimeSec = cloudHostUptimeSeconds();
     if (cloud.available) {

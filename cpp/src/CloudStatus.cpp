@@ -448,6 +448,12 @@ QString cloudUnreachableText() {
         "token retrieval refused)");
 }
 
+QString cloudProbingText() {
+    return QStringLiteral(
+        "cloud: reading the instance metadata service - the probe runs on the "
+        "next tick so the first sample never waits on a link-local socket");
+}
+
 QString cloudSummaryText(const CloudSnapshot &snapshot) {
     if (!snapshot.available) {
         return snapshot.note.isEmpty() ? cloudUnreachableText() : snapshot.note;

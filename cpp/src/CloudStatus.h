@@ -278,6 +278,9 @@ bool cloudFleetNeedsCredentials(CloudProvider provider,
 
 // --- text ----------------------------------------------------------------
 QString cloudUnreachableText();
+// The first sampler tick deliberately skips the IMDS sweep so the initial
+// sample never waits on a link-local socket; the card says so for that tick.
+QString cloudProbingText();
 QString cloudSummaryText(const CloudSnapshot &snapshot);
 QString cloudDetailText(const CloudSnapshot &snapshot);
 QString cloudCostText(const CloudSnapshot &snapshot);

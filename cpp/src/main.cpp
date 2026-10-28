@@ -245,6 +245,21 @@ void autostartCommand(const QString &mode) {
 // OpenProcess/TerminateProcess, GetCurrentProcessId) and the shipped
 // taskkill self-avoidance precedent (Wine taskkill.c skips
 // pid == self_pid) - we never kill our own PID.
+// A terminated process object is signaled the moment the kernel retires it, so
+// a zero-timeout wait is the cheapest "is this really still running" test.
+// Windows verb grounding: everything.exe 1.4.1.1032 x64 import table
+// (KERNEL32) carries `OpenProcess`, `TerminateProcess` and
+// `WaitForSingleObject` side by side - the same triple this verb uses.
+bool processAlreadyExited(DWORD pid) {
+    HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (process == nullptr) {
+        return false;
+    }
+    const bool exited = ::WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    ::CloseHandle(process);
+    return exited;
+}
+
 QList<DWORD> syspeekPidsExcludingSelf() {
     QList<DWORD> out;
     HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -257,7 +272,8 @@ QList<DWORD> syspeekPidsExcludingSelf() {
     if (Process32FirstW(snapshot, &entry)) {
         do {
             if (_wcsicmp(entry.szExeFile, L"syspeek.exe") == 0
-                    && entry.th32ProcessID != selfId) {
+                    && entry.th32ProcessID != selfId
+                    && !processAlreadyExited(entry.th32ProcessID)) {
                 out.append(entry.th32ProcessID);
             }
         } while (Process32NextW(snapshot, &entry));
@@ -269,12 +285,22 @@ QList<DWORD> syspeekPidsExcludingSelf() {
 int windowsStopOthers() {
     int stopped = 0;
     for (DWORD pid : syspeekPidsExcludingSelf()) {
-        HANDLE process = ::OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+        HANDLE process = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
+                                       pid);
         if (process == nullptr) {
+            // An instance that exited between the snapshot and this call is
+            // already stopped; anything else (another user's instance) stays.
+            if (processAlreadyExited(pid)) {
+                ++stopped;
+            }
             continue;
         }
         if (::TerminateProcess(process, 0)) {
             ++stopped;
+            // "stop" has to mean stopped: Toolhelp still lists a process until
+            // the kernel retires it, so an immediate `start` used to answer
+            // "already running" for an instance that was already dead.
+            ::WaitForSingleObject(process, 2000);
         }
         ::CloseHandle(process);
     }

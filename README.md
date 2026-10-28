@@ -396,7 +396,7 @@ me?" without touching a control plane:
   inventory            = true   ; the account listing through the provider CLI
   inventory_timeout_ms = 25000  ; per listing; clamped 2000..120000
   rates                =        ; empty = ~/.config/syspeek/cloud-rates.txt
-  timeout_ms           = 450    ; one metadata request; single-digit ms when IMDS is there
+  timeout_ms           = 450    ; the whole four-provider sweep; IMDS answers in ms
   ```
 
   No CLI on `PATH`, no login, or an expired session prints the exact refusal

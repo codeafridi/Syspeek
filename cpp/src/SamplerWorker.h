@@ -119,6 +119,7 @@ private:
     QString m_cloudRatesPath;
     qint64 m_cloudProbeStampMs = 0;
     qint64 m_cloudRatesStampMs = 0;
+    int m_cloudTicks = 0;
     bool m_cloudProbed = false;
     // M83: one polled CLI listing per 10 min; the sampler never waits on it.
     CloudFleetRunner *m_cloudFleet = nullptr;

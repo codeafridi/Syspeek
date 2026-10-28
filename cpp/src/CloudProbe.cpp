@@ -269,7 +269,22 @@ QList<QPair<QByteArray, QByteArray>> headers(
 constexpr const char *kMetadataHost = "169.254.169.254";
 constexpr const char *kOciMetadataHost = "169.254.0.23";
 
-CloudIdentity probeGcp(int timeoutMs, int &attempted, QString &error) {
+// One budget for the whole sweep, not one per provider. A host with no IMDS
+// (every laptop) blackholes the link-local address instead of refusing it, so
+// a per-provider budget cost 450 ms x 5 requests (~2.7 s measured on a desktop
+// with no metadata service) inside a single sampler tick. The budget is spent
+// across GCP/OCI/Azure/AWS together; a real metadata service answers each
+// request in single-digit milliseconds.
+struct ProbeBudget {
+    explicit ProbeBudget(int totalMs) : total(qMax(1, totalMs)) { timer.start(); }
+    int remaining() const { return int(qMax<qint64>(1, total - timer.elapsed())); }
+
+    int total;
+    QElapsedTimer timer;
+};
+
+CloudIdentity probeGcp(const ProbeBudget &budget, int &attempted,
+                       QString &error) {
     // "169.254.169.254/computeMetadata/v1" + "instance/machine-type" and the
     // Metadata-Flavor request header are the agent's own GCP surface. The
     // metadata service answers without the header with 403, so a non-GCP
@@ -279,7 +294,7 @@ CloudIdentity probeGcp(int timeoutMs, int &attempted, QString &error) {
     const HttpResponse machine = httpRequest(
         QLatin1String(kMetadataHost), 80, QByteArrayLiteral("GET"),
         QStringLiteral("/computeMetadata/v1/instance/machine-type"), flavor,
-        timeoutMs);
+        budget.remaining());
     ++attempted;
     if (!machine.ok) {
         error = machine.error;
@@ -295,7 +310,7 @@ CloudIdentity probeGcp(int timeoutMs, int &attempted, QString &error) {
     const auto get = [&](const char *path) {
         return httpRequest(QLatin1String(kMetadataHost), 80,
                            QByteArrayLiteral("GET"), QLatin1String(path),
-                           flavor, timeoutMs)
+                           flavor, budget.remaining())
             .body;
     };
     fields.zone = get("/computeMetadata/v1/instance/zone");
@@ -310,13 +325,14 @@ CloudIdentity probeGcp(int timeoutMs, int &attempted, QString &error) {
     return identity;
 }
 
-CloudIdentity probeOci(int timeoutMs, int &attempted, QString &error) {
+CloudIdentity probeOci(const ProbeBudget &budget, int &attempted,
+                       QString &error) {
     // "Bearer Oracle" + "http://169.254.0.23" + the opc/v2/instance/* paths.
     const auto auth = headers({{QByteArrayLiteral("Authorization"),
                                 QByteArrayLiteral("Bearer Oracle")}});
     HttpResponse whole = httpRequest(
         QLatin1String(kOciMetadataHost), 80, QByteArrayLiteral("GET"),
-        QStringLiteral("/opc/v2/instance/"), auth, timeoutMs);
+        QStringLiteral("/opc/v2/instance/"), auth, budget.remaining());
     ++attempted;
     if (whole.ok) {
         CloudIdentity identity = parseOciInstance(whole.body);
@@ -326,7 +342,7 @@ CloudIdentity probeOci(int timeoutMs, int &attempted, QString &error) {
     }
     const HttpResponse id = httpRequest(
         QLatin1String(kOciMetadataHost), 80, QByteArrayLiteral("GET"),
-        QStringLiteral("/opc/v2/instance/id"), auth, timeoutMs);
+        QStringLiteral("/opc/v2/instance/id"), auth, budget.remaining());
     ++attempted;
     if (!id.ok || id.body.trimmed().isEmpty()) {
         error = id.error.isEmpty() ? whole.error : id.error;
@@ -334,7 +350,7 @@ CloudIdentity probeOci(int timeoutMs, int &attempted, QString &error) {
     }
     const HttpResponse shape = httpRequest(
         QLatin1String(kOciMetadataHost), 80, QByteArrayLiteral("GET"),
-        QStringLiteral("/opc/v2/instance/shape"), auth, timeoutMs);
+        QStringLiteral("/opc/v2/instance/shape"), auth, budget.remaining());
     ++attempted;
     CloudIdentity identity;
     identity.provider = CloudProvider::Oci;
@@ -344,7 +360,8 @@ CloudIdentity probeOci(int timeoutMs, int &attempted, QString &error) {
     return identity;
 }
 
-CloudIdentity probeAzure(int timeoutMs, int &attempted, QString &error) {
+CloudIdentity probeAzure(const ProbeBudget &budget, int &attempted,
+                       QString &error) {
     // "/metadata/instance/compute?api-version=2021-12-13&format=json" with
     // the Metadata: true request header.
     const auto meta = headers(
@@ -353,7 +370,7 @@ CloudIdentity probeAzure(int timeoutMs, int &attempted, QString &error) {
         QLatin1String(kMetadataHost), 80, QByteArrayLiteral("GET"),
         QStringLiteral("/metadata/instance/compute?api-version=2021-12-13"
                        "&format=json"),
-        meta, timeoutMs);
+        meta, budget.remaining());
     ++attempted;
     if (!response.ok) {
         error = response.error;
@@ -366,7 +383,8 @@ CloudIdentity probeAzure(int timeoutMs, int &attempted, QString &error) {
     return identity;
 }
 
-CloudIdentity probeAws(int timeoutMs, int &attempted, QString &error) {
+CloudIdentity probeAws(const ProbeBudget &budget, int &attempted,
+                       QString &error) {
     // PUT /latest/api/token with the TTL header, then the identity document
     // with X-aws-ec2-metadata-token. A refused token falls back to the
     // IMDSv1 document read (the agent's own bypass path).
@@ -375,7 +393,7 @@ CloudIdentity probeAws(int timeoutMs, int &attempted, QString &error) {
         QStringLiteral("/latest/api/token"),
         headers({{QByteArrayLiteral("X-aws-ec2-metadata-token-ttl-seconds"),
                   QByteArrayLiteral("21600")}}),
-        timeoutMs);
+        budget.remaining());
     ++attempted;
     QList<QPair<QByteArray, QByteArray>> extra;
     if (token.ok && !token.body.trimmed().isEmpty()) {
@@ -385,7 +403,7 @@ CloudIdentity probeAws(int timeoutMs, int &attempted, QString &error) {
     const HttpResponse document = httpRequest(
         QLatin1String(kMetadataHost), 80, QByteArrayLiteral("GET"),
         QStringLiteral("/latest/dynamic/instance-identity/document"), extra,
-        timeoutMs);
+        budget.remaining());
     ++attempted;
     if (!document.ok) {
         error = document.error;
@@ -408,30 +426,30 @@ CloudProbeResult probeCloudIdentity(const CloudProbeOptions &options) {
             "probe runs");
         return result;
     }
-    const int timeoutMs = qBound(120, options.timeoutMs, 5000);
+    const ProbeBudget budget(qBound(120, options.timeoutMs, 5000));
     // Unique request headers make each provider distinguishable without a
     // wrong-provider false positive, so the order only decides who answers
     // first on a host that runs more than one (nested virtualisation).
-    const CloudIdentity gcp = probeGcp(timeoutMs, result.attempted, result.error);
+    const CloudIdentity gcp = probeGcp(budget, result.attempted, result.error);
     if (gcp.provider != CloudProvider::None) {
         result.identity = gcp;
         result.error.clear();
         return result;
     }
-    const CloudIdentity oci = probeOci(timeoutMs, result.attempted, result.error);
+    const CloudIdentity oci = probeOci(budget, result.attempted, result.error);
     if (oci.provider != CloudProvider::None) {
         result.identity = oci;
         result.error.clear();
         return result;
     }
     const CloudIdentity azure =
-        probeAzure(timeoutMs, result.attempted, result.error);
+        probeAzure(budget, result.attempted, result.error);
     if (azure.provider != CloudProvider::None) {
         result.identity = azure;
         result.error.clear();
         return result;
     }
-    const CloudIdentity aws = probeAws(timeoutMs, result.attempted, result.error);
+    const CloudIdentity aws = probeAws(budget, result.attempted, result.error);
     if (aws.provider != CloudProvider::None) {
         result.identity = aws;
         result.error.clear();
