@@ -17,8 +17,17 @@ inline QTimeZone utcZone() {
 #endif
 }
 
+// Qt::UTC (the TimeSpec overload) on 6.4 and QTimeZone::UTC above it: both
+// render ISO dates with a literal "Z", which Alertmanager's RFC3339 schema
+// requires. fromMSecsSinceEpoch(ms, QTimeZone) keeps the TimeZone spec, and
+// Qt 6.4 then renders "+00:00"; the TimeSpec overload is deprecated only in
+// Qt 6.9+, where the QTimeZone path is taken instead.
 inline QDateTime fromMSecsSinceEpochUtc(qint64 ms) {
-    return QDateTime::fromMSecsSinceEpoch(ms, utcZone());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    return QDateTime::fromMSecsSinceEpoch(ms, QTimeZone::UTC);
+#else
+    return QDateTime::fromMSecsSinceEpoch(ms, Qt::UTC);
+#endif
 }
 
 } // namespace qtcompat

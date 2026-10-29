@@ -19,7 +19,7 @@ echo "build container: ${PRETTY_NAME}"
 
 apt-get update -qq
 apt-get install -y -qq build-essential cmake dpkg-dev qt6-base-dev \
-  libqt6dbus6 libgl-dev >/dev/null
+  libqt6dbus6 libgl-dev fonts-dejavu-core >/dev/null
 
 echo "qt6-base-dev: $(dpkg-query -W -f='${Version}' qt6-base-dev)"
 
@@ -32,6 +32,11 @@ rm -rf /work/cpp/build
 
 cmake -S /work/cpp -B /work/cpp/build -DCMAKE_BUILD_TYPE=Release
 cmake --build /work/cpp/build -j"$(nproc)"
+
+# Run the suite against the distribution's Qt, not merely build against it: a
+# Qt-version-dependent behaviour compiles on both and only shows when executed
+# (Qt 6.4 renders ISO dates as "+00:00", 6.5+ as "Z" — the webhook payload).
+QT_QPA_PLATFORM=offscreen ctest --test-dir /work/cpp/build --output-on-failure
 
 # os-release sets VERSION to the distribution release name; the
 # package version is Syspeek's own.
