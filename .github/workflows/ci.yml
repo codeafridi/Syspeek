@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82, feat_m83, feat_m84]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -24,7 +24,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # Pinned, not ubuntu-latest: the shipped .deb links the
+        # distribution's own Qt, so the build must be tested on the
+        # oldest distro that ships it (see the deb-platform job).
+        os: [ubuntu-24.04, macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -112,6 +115,127 @@ jobs:
                     "%d talkers"
                     % (pn["tracked"], pn["unattributed"],
                        len(pn.get("talkers", []))))
+              pd = d.get("processDisk", {})
+              assert pd.get("available") is True, pd
+              assert pd["scan"] is True, pd
+              assert pd["readable"] >= 0 and pd["pids"] >= pd["readable"], pd
+              assert pd["readBps"] >= 0 and pd["writeBps"] >= 0, pd
+              for c in pd.get("top", []):
+                  assert c["readBps"] >= 0 and c["writeBps"] >= 0, c
+              print("processDisk ok: %d read/%d pids, %d top, r %d B/s"
+                    % (pd["readable"], pd["pids"], len(pd.get("top", [])),
+                       int(pd["readBps"])))
+              gpu = d.get("gpu", {})
+              if gpu.get("capable"):
+                  assert gpu.get("ok") in (True, False), gpu
+                  if gpu.get("ok"):
+                      assert gpu["devices"], gpu
+                      for dev in gpu["devices"]:
+                          assert dev["memUsed"] >= 0 and dev["memTotal"] >= 0, dev
+                          u = dev.get("utilPercent")
+                          assert u is None or 0 <= u <= 100, dev
+                      print("gpu ok: %d device(s), %s, %d client(s), %d proc(s)"
+                            % (len(gpu["devices"]),
+                               gpu["devices"][0]["vendor"],
+                               gpu.get("clientsFound", 0),
+                               len(gpu.get("processes", []))))
+                  else:
+                      print("gpu not detectable here:", gpu.get("note"))
+              sen = d.get("sensors", {})
+              assert sen.get("thermalCapable") is True, sen
+              assert sen.get("batteryCapable") is True, sen
+              assert isinstance(sen.get("readings"), int), sen
+              assert sen["readings"] >= sum(c["readings"]
+                                            for c in sen.get("chips", [])), sen
+              for chip in sen.get("chips", []):
+                  assert chip["name"] and chip["readings"] > 0, chip
+              for row in sen.get("batteries", []):
+                  assert 0 <= row["chargePercent"] <= 100, row
+                  assert row["energyNowWh"] <= row["energyFullWh"] + 0.5, row
+              if sen.get("available"):
+                  assert sen["readings"] > 0, sen
+                  assert sen.get("hottestCelsius", 0) >= 0, sen
+                  print("sensors ok: %d chips, %d readings, hottest %s C, "
+                        "%s fan(s), %d battery(ies), %d adapter(s)"
+                        % (len(sen["chips"]), sen["readings"],
+                           sen.get("hottestCelsius"), sen.get("fans"),
+                           len(sen.get("batteries", [])),
+                           len(sen.get("adapters", []))))
+              else:
+                  print("sensors not exposed here:", sen.get("note"))
+              hist = d.get("history", {})
+              assert hist.get("ok") is True, hist
+              assert hist["count"] == 8 and hist["total"] == 11, hist
+              assert hist["wrapped"] is True, hist
+              assert hist["bytes"] == 64 + 8 * 108, hist
+              assert hist["ordered"] is True, hist
+              assert hist["capacityChangeResets"] is True, hist
+              assert hist["reopened"] is True and hist["reopenedCount"] == 8, hist
+              assert hist["resumedOrdered"] is True, hist
+              assert hist["oldestCpu"] == 13 and hist["newestCpu"] == 20, hist
+              assert hist["spanMs"] == 7000, hist
+              print("history ok: %d/%d samples, total %d, %d bytes, span %d ms"
+                    % (hist["count"], hist["capacity"], hist["total"],
+                       hist["bytes"], hist["spanMs"]))
+              ov = d.get("overlay", {})
+              assert ov.get("session") in ("x11", "wayland", "unknown"), ov
+              assert isinstance(ov.get("shapeAvailable"), bool), ov
+              assert isinstance(ov.get("stickySupported"), bool), ov
+              assert ov.get("clickThroughCapable") == (
+                  ov["session"] == "x11" and ov["shapeAvailable"]), ov
+              assert ov.get("note"), ov
+              print("overlay ok: session %s, x11 shape %s, click-through %s "
+                    "- %s"
+                    % (ov["session"], ov["shapeAvailable"],
+                       ov["clickThroughCapable"], ov["note"]))
+          if d["platform"] == "macos":
+              sen = d.get("sensors", {})
+              assert sen.get("thermalCapable") is False, sen
+              assert sen.get("batteryCapable") is True, sen
+              assert isinstance(sen.get("readings"), int), sen
+              assert sen["readings"] == 0, sen
+              for row in sen.get("batteries", []):
+                  assert 0 <= row["chargePercent"] <= 100, row
+                  assert row["energyNowWh"] <= row["energyFullWh"] + 0.5, row
+              print("sensors ok (macos): thermals gated, %d battery(ies) - %s"
+                    % (len(sen.get("batteries", [])), sen.get("note", "-")))
+              ov = d.get("overlay", {})
+              assert ov.get("session") == "macos", ov
+              assert ov.get("clickThroughCapable") is False, ov
+              assert ov.get("note"), ov
+              print("overlay ok (macos): click-through gated -", ov["note"])
+          act = d.get("actions", {})
+          assert act.get("signals") is True, act
+          assert act.get("spawned") is True, act
+          assert act.get("signalOk") is True, act
+          assert act.get("childExited") is True, act
+          assert act.get("invalidPidRefused") is True, act
+          assert act.get("renice") is True and act.get("reniceOk") is True, act
+          assert act.get("pause") is True, act
+          if d["platform"] == "linux":
+              assert act.get("ionice") is True and act.get("ioniceOk") is True, act
+              assert act.get("oomScore") is True and act.get("oomOk") is True, act
+              print("actions ok: TERM/renice/ionice/oom applied to pid %d, "
+                    "invalid pid refused (%s)"
+                    % (act["childPid"], act.get("invalidPidError")))
+          else:
+              # macOS ships signals + relative renice; ionice is a Linux
+              # scheduler surface and oom_score_adj has no Darwin analogue, so
+              # both stay gated rather than silently reported as applied.
+              assert act.get("ionice") is False, act
+              assert act.get("oomScore") is False, act
+              print("actions ok (macos): TERM/renice applied to pid %d, "
+                    "ionice/oom gated, invalid pid refused (%s)"
+                    % (act["childPid"], act.get("invalidPidError")))
+          met = d.get("metrics", {})
+          assert met.get("bind") == "127.0.0.1", met
+          assert met.get("authRequired") is False, met
+          assert met.get("refusedNonLoopback") is True, met
+          assert met.get("tokenGuarded") is True, met
+          assert met.get("headerAccepted") is True, met
+          assert met.get("headerRejected") is True, met
+          print("metrics endpoint ok: bind %s port %d auth %s"
+                % (met["bind"], met["port"], met["authRequired"]))
           tcp = d.get("tcp", {})
           if tcp.get("available"):
               for key in ("inSegs", "outSegs", "retransSegs", "timeouts"):
@@ -130,6 +254,57 @@ jobs:
           assert all(e["freeG"] <= e["totalG"] + 0.01
                      for e in fs if "freeG" in e), fs[:3]
           print("filesystems ok:", len(fs), "entries")
+          cloud = d.get("cloud", {})
+          assert cloud.get("rateLookupOk") is True, cloud
+          assert cloud.get("costMathOk") is True, cloud
+          assert cloud.get("shareOk") is True, cloud
+          assert cloud.get("topOk") is True, cloud
+          assert cloud.get("staleOk") is True, cloud
+          assert cloud.get("vcpus", 0) >= 1, cloud
+          # A full gated sweep costs 5 requests (gcp 1, oci 1, azure 1,
+          # aws 2); a host where an earlier provider answers short-circuits
+          # the rest, and ci runners are themselves cloud VMs.
+          assert cloud.get("attempted", 0) >= 4, cloud
+          assert cloud.get("uptimeSec", 0) > 0, cloud
+          assert cloud.get("ratePath"), cloud
+          # M83: the listing runs only where a provider was identified, so the
+          # parsers, age maths, self-match and pricing carry deterministic
+          # self-tests that every runner asserts (a gated run proves the maths
+          # instead of merely failing to find a metadata service).
+          fleet = cloud.get("fleet", {})
+          assert fleet.get("fleetParseOk") is True, fleet
+          assert fleet.get("fleetAzureOk") is True, fleet
+          assert fleet.get("fleetAgeOk") is True, fleet
+          assert fleet.get("fleetSelfOk") is True, fleet
+          assert fleet.get("fleetCostOk") is True, fleet
+          assert fleet.get("note"), fleet
+          print("cloud fleet: %s" % fleet["note"].splitlines()[0])
+          if cloud.get("available"):
+              assert cloud.get("provider") != "-", cloud
+              assert cloud.get("instanceId"), cloud
+              assert cloud.get("instanceType"), cloud
+              if cloud.get("ratePerHour", -1.0) >= 0:
+                  print("cloud ok: %s %s %s, $%.4f this boot"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-",
+                           cloud.get("accruedUsd", -1.0)))
+              else:
+                  print("cloud ok: %s %s %s, no rate file on this runner"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-"))
+          else:
+              assert cloud.get("note"), cloud
+              print("cloud gated (no IMDS here): %d probes, rate/cost/share "
+                    "self-tests ok" % cloud["attempted"])
+          budget = d["budget"]
+          assert budget["sortedOk"] is True, budget
+          assert budget["windowOk"] is True, budget
+          assert budget["unmeasuredOk"] is True, budget
+          assert budget["selfTextOk"] is True, budget
+          assert budget["sections"] == 3, budget
+          print("budget ok: avg %d ms worst %d ms slowest %s"
+                % (int(budget["avgMs"]), int(budget["worstMs"]),
+                   budget["slowest"]))
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -148,6 +323,21 @@ jobs:
             "${RUNNER_TEMP}/syspeek-probe.txt"
           grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
           ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+          python3 - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1]).read().splitlines()
+          ticks = [l for l in lines if l.startswith("probe tick=")]
+          assert ticks, lines
+          for line in ticks:
+              assert "tickMs=" in line, line
+              assert "slowest=" in line, line
+              assert "selfRssKb=" in line, line
+          cost = [l for l in lines if l.startswith("probe cost")]
+          assert cost, lines
+          worst = re.search(r"worstMs=([\d.]+)", cost[0])
+          assert worst and float(worst.group(1)) <= 1500.0, cost[0]
+          print(cost[0])
+          PY
         env:
           QT_QPA_PLATFORM: offscreen
 
@@ -163,6 +353,21 @@ jobs:
             "${RUNNER_TEMP}/syspeek-probe.txt"
           grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
           ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+          python - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1]).read().splitlines()
+          ticks = [l for l in lines if l.startswith("probe tick=")]
+          assert ticks, lines
+          for line in ticks:
+              assert "tickMs=" in line, line
+              assert "slowest=" in line, line
+              assert "selfRssKb=" in line, line
+          cost = [l for l in lines if l.startswith("probe cost")]
+          assert cost, lines
+          worst = re.search(r"worstMs=([\d.]+)", cost[0])
+          assert worst and float(worst.group(1)) <= 1500.0, cost[0]
+          print(cost[0])
+          PY
 
       - name: Record smoke
         if: runner.os != 'Windows'
@@ -257,10 +462,118 @@ jobs:
           assert all(e["freeG"] <= e["totalG"] + 0.01
                      for e in fs if "freeG" in e), fs[:3]
           print("filesystems ok:", len(fs), "entries")
+          cloud = d.get("cloud", {})
+          assert cloud.get("rateLookupOk") is True, cloud
+          assert cloud.get("costMathOk") is True, cloud
+          assert cloud.get("shareOk") is True, cloud
+          assert cloud.get("topOk") is True, cloud
+          assert cloud.get("staleOk") is True, cloud
+          assert cloud.get("vcpus", 0) >= 1, cloud
+          # A full gated sweep costs 5 requests (gcp 1, oci 1, azure 1,
+          # aws 2); a host where an earlier provider answers short-circuits
+          # the rest, and ci runners are themselves cloud VMs.
+          assert cloud.get("attempted", 0) >= 4, cloud
+          assert cloud.get("uptimeSec", 0) > 0, cloud
+          assert cloud.get("ratePath"), cloud
+          # M83: the listing runs only where a provider was identified, so the
+          # parsers, age maths, self-match and pricing carry deterministic
+          # self-tests that every runner asserts (a gated run proves the maths
+          # instead of merely failing to find a metadata service).
+          fleet = cloud.get("fleet", {})
+          assert fleet.get("fleetParseOk") is True, fleet
+          assert fleet.get("fleetAzureOk") is True, fleet
+          assert fleet.get("fleetAgeOk") is True, fleet
+          assert fleet.get("fleetSelfOk") is True, fleet
+          assert fleet.get("fleetCostOk") is True, fleet
+          assert fleet.get("note"), fleet
+          print("cloud fleet: %s" % fleet["note"].splitlines()[0])
+          if cloud.get("available"):
+              assert cloud.get("provider") != "-", cloud
+              assert cloud.get("instanceId"), cloud
+              assert cloud.get("instanceType"), cloud
+              if cloud.get("ratePerHour", -1.0) >= 0:
+                  print("cloud ok: %s %s %s, $%.4f this boot"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-",
+                           cloud.get("accruedUsd", -1.0)))
+              else:
+                  print("cloud ok: %s %s %s, no rate file on this runner"
+                        % (cloud["provider"], cloud["instanceType"],
+                           cloud.get("region") or "-"))
+          else:
+              assert cloud.get("note"), cloud
+              print("cloud gated (no IMDS here): %d probes, rate/cost/share "
+                    "self-tests ok" % cloud["attempted"])
+          budget = d["budget"]
+          assert budget["sortedOk"] is True, budget
+          assert budget["windowOk"] is True, budget
+          assert budget["unmeasuredOk"] is True, budget
+          assert budget["selfTextOk"] is True, budget
+          assert budget["sections"] == 3, budget
+          print("budget ok: avg %d ms worst %d ms slowest %s"
+                % (int(budget["avgMs"]), int(budget["worstMs"]),
+                   budget["slowest"]))
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
                 "installed programs")
+          gpu = d.get("gpu", {})
+          if gpu.get("capable") and gpu.get("ok"):
+              assert gpu["devices"], gpu
+              for dev in gpu["devices"]:
+                  assert dev["memUsed"] >= 0 and dev["memTotal"] >= 0, dev
+              print("gpu ok: %d adapter(s), %d proc(s)"
+                    % (len(gpu["devices"]), len(gpu.get("processes", []))))
+          else:
+              print("gpu not exposed here:", gpu.get("note"))
+          sen = d.get("sensors", {})
+          assert sen.get("thermalCapable") is False, sen
+          assert sen.get("batteryCapable") is True, sen
+          assert isinstance(sen.get("readings"), int), sen
+          for row in sen.get("batteries", []):
+              assert 0 <= row["chargePercent"] <= 100, row
+          if sen.get("available"):
+              assert sen["readings"] >= 0, sen
+              print("battery ok: %d battery(ies), %d adapter(s), %s"
+                    % (len(sen.get("batteries", [])),
+                       len(sen.get("adapters", [])),
+                       sen.get("note", "-")))
+          else:
+              print("battery not reported here (desktop or VM):",
+                    sen.get("note"))
+          hist = d.get("history", {})
+          assert hist.get("ok") is True, hist
+          assert hist["count"] == 8 and hist["total"] == 11, hist
+          assert hist["wrapped"] is True and hist["ordered"] is True, hist
+          assert hist["bytes"] == 64 + 8 * 108, hist
+          assert hist["reopened"] is True and hist["resumedOrdered"] is True, hist
+          assert hist["capacityChangeResets"] is True, hist
+          print("history ok: %d/%d samples, total %d, %d bytes"
+                % (hist["count"], hist["capacity"], hist["total"],
+                   hist["bytes"]))
+          met = d.get("metrics", {})
+          assert met.get("bind") == "127.0.0.1", met
+          assert met.get("authRequired") is False, met
+          assert met.get("refusedNonLoopback") is True, met
+          assert met.get("tokenGuarded") is True, met
+          assert met.get("headerAccepted") is True, met
+          assert met.get("headerRejected") is True, met
+          print("metrics endpoint ok: bind %s port %d auth %s"
+                % (met["bind"], met["port"], met["authRequired"]))
+          ov = d.get("overlay", {})
+          assert ov.get("session") == "windows", ov
+          assert ov.get("clickThroughCapable") is False, ov
+          assert ov.get("note"), ov
+          print("overlay ok (windows): click-through gated -", ov["note"])
+          act = d.get("actions", {})
+          assert act.get("signals") is True, act
+          assert act.get("spawned") is True, act
+          assert act.get("signalOk") is True, act
+          assert act.get("childExited") is True, act
+          assert act.get("invalidPidRefused") is True, act
+          assert act.get("renice") is False and act.get("ionice") is False, act
+          print("actions ok: terminate applied to pid %d, refused: %s"
+                % (act["childPid"], act.get("invalidPidError")))
           depth = d.get("selfDepth", {})
           assert depth.get("ctxSwitches", 0) > 0, depth
           assert depth.get("cmdlineLength", 0) > 0, depth
@@ -366,7 +679,7 @@ jobs:
           echo "linux installer ok"
 
       - name: Screenshot evidence (linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           cmake --build cpp/build --target syspeek_screenshot -j 3
           mkdir -p "${RUNNER_TEMP}/screens"
@@ -393,14 +706,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 26); do
+          for i in $(seq 0 30); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 27, files
+          assert len(files) == 31, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",
@@ -408,7 +721,7 @@ jobs:
           PY
 
       - name: Upload screenshot artifact (linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v7
         with:
           name: syspeek-screenshots
@@ -541,3 +854,33 @@ jobs:
             cpp/build/packaging/Syspeek-*-macos.dmg
             cpp/build/packaging/Syspeek-*-macos.dmg.sha256
           if-no-files-found: error
+
+  # The Debian package links the DISTRIBUTION's Qt, not the aqt Qt the matrix
+  # builds against, so it is built and then installed in a clean container of
+  # the same release. This is the gate that catches a Qt API newer than the
+  # floor (QTimeZone::UTC was one) and an under-declared Depends: line
+  # (libqt6network6 was one) before a user's `apt install` does.
+  deb-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "ubuntu:24.04"]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    name: deb (${{ matrix.image }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the .deb inside ${{ matrix.image }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/deb"
+          docker run --rm -v "$PWD":/src:ro -v "${RUNNER_TEMP}/deb":/out \
+            "${{ matrix.image }}" \
+            bash /src/cpp/packaging/ci/deb_container_build.sh
+          ls -l "${RUNNER_TEMP}/deb"
+
+      - name: Clean-room install + run in ${{ matrix.image }}
+        run: |
+          docker run --rm -v "${RUNNER_TEMP}/deb":/pkg:ro \
+            -v "$PWD/cpp/packaging/ci":/ci:ro \
+            "${{ matrix.image }}" bash /ci/deb_container_verify.sh

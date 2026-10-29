@@ -1,9 +1,11 @@
 #pragma once
 
 #include "DisplaySnapshot.h"
+#include "HistoryLog.h"
 #include "DockerStatus.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
+#include "ProcessActions.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
 
@@ -11,7 +13,6 @@
 
 #include "IncidentStatus.h"
 #include "WatchdogStatus.h"
-#include "Notifier.h"
 #include "AlertWebhook.h"
 #include "MetricsExport.h"
 #include "SyntheticStatus.h"
@@ -21,6 +22,7 @@
 #include "DbmStatus.h"
 #include "TlsStatus.h"
 #include "FimStatus.h"
+#include "OverlayStatus.h"
 
 #include <QPoint>
 #include <QRect>
@@ -32,7 +34,10 @@ class QLabel;
 class QKeyEvent;
 class QLayout;
 class QMouseEvent;
+class QMoveEvent;
 class QPushButton;
+class QResizeEvent;
+class QTimer;
 class DashboardPanel;
 struct SettingsInfo;
 
@@ -57,9 +62,24 @@ public:
     void applyMonitorChange(const AlertRule &rule);
     void resetMonitors();
 
-public:
+    // M78 verbs: process actions are applied in-process through the platform
+    // seam; service/container verbs are forwarded to their own source
+    // objects (they own the supervisor / Engine API sockets).
+    void applyProcessAction(const ProcessAction &action);
+    void setActionsEnabled(bool enabled);
+    void setServiceActionStatus(const QString &text, bool ok);
+    void setContainerActionStatus(const QString &text, bool ok);
 
-    void setNotifier(std::unique_ptr<Notifier> notifier);
+    // M75 silences: authored quiet windows over single monitors.
+    void setSilences(const QList<SilenceRule> &rules);
+    void addSilence(const QString &matcher, int minutes);
+    void expireSilence(const QString &matcher);
+
+signals:
+    void serviceRestartRequested(const QString &unit);
+    void containerActionRequested(const QString &id, const QString &verb);
+
+public:
 
     void setWebhookConfig(const WebhookConfig &config);
 
@@ -80,11 +100,19 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+    void setHistoryStore(const QString &path, int capacity);
+
+    // M80: the overlay's own state (session, click-through, pinned, geometry).
+    // An empty path disables persistence, which is what tests use.
+    void setOverlayConfig(const OverlayConfig &config, const QString &path);
+    OverlayState overlayState() const { return m_overlay; }
 
     bool isExpanded() const { return m_detailsExpanded; }
 
 protected:
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void moveEvent(QMoveEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -120,25 +148,52 @@ private:
     QString m_kubeDetailsText;
     bool m_kubeOpen = false;
     DashboardPanel *m_panel = nullptr;
+    HistoryLog m_historyLog;
+    int m_historyCapacity = 0;
+    int m_historySeek = -1;
+    int m_historyTick = 0;
+    int m_historyWindowCount = -1;
+    qint64 m_historySpanMs = 0;
+    void publishHistory();
     QWidget *m_pages = nullptr;
     QWidget *m_compactPage = nullptr;
     QRect m_savedGeometry;
     AlertEngine m_alerts;
     IncidentTracker m_incidents;
+    QList<SilenceRule> m_silences;
     QList<double> m_cpuHistory;
     QList<double> m_hostCpuHistory;
     QList<double> m_stealHistory;
     AlertInput m_alertInput;
-    std::unique_ptr<Notifier> m_notifier;
     AlertWebhook *m_webhook = nullptr;
     QList<ExportRow> m_exportRows;
     int m_exportIntervalMs = 1000;
     void exportHistory(const QString &format);
+    void seekHistory(int index);
     void evaluateAlerts();
     QPushButton *m_moreButton = nullptr;
     QPushButton *m_showHideButton = nullptr;
+    QPushButton *m_clickButton = nullptr;
+    QTimer *m_overlaySaveTimer = nullptr;
+    OverlaySession m_overlaySession = OverlaySession::Unknown;
+    OverlayState m_overlay;
+    OverlayConfig m_overlayConfig;
+    QString m_overlayPath;
+    QRect m_overlayPersisted;
+    bool m_overlayRestored = false;
+    bool m_overlayAboveRequested = false;
+    bool m_overlayStickySupported = false;
+    void toggleClickThrough();
+    void applyClickThrough(bool on);
+    void persistOverlay();
+    void restoreOverlay();
+    void ensureOnScreen();
+    void verifyOverlayStates(int attempt);
+    void publishOverlayState();
+    void refreshOverlayState();
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
+    bool m_actionsEnabled = true;
     bool m_compact = false;
 
     bool m_dragging = false;

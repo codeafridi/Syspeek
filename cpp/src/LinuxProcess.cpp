@@ -334,6 +334,8 @@ bool parseProcIo(const QByteArray &content, ProcDetail &out) {
             out.readBytes = value;
         } else if (key == "write_bytes:") {
             out.writeBytes = value;
+        } else if (key == "cancelled_write_bytes:") {
+            out.cancelledWriteBytes = value;
         }
     }
     return found;
@@ -1569,6 +1571,30 @@ bool parseStatmShared(const QByteArray &statmContent, unsigned long long pageSiz
     }
 
     sharedKb = pages * pageSize / 1024;
+    return true;
+}
+
+bool procDiskCounters(int pid, long long &readBytes, long long &writeBytes) {
+    QFile io(procPath(pid, "io"));
+    if (!io.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    ProcDetail detail;
+    if (!parseProcIo(io.readAll(), detail)) {
+        return false;
+    }
+    if (detail.readBytes < 0 || detail.writeBytes < 0) {
+        return false;
+    }
+    readBytes = detail.readBytes;
+    // iotop's DISK WRITE column is write_bytes minus cancelled_write_bytes
+    // (ui.py: written_bytes = stats.write_bytes - stats.cancelled_write_bytes,
+    // clamped at 0): page-cache writes that were dropped before reaching the
+    // device never count as block I/O.
+    writeBytes = detail.writeBytes;
+    if (detail.cancelledWriteBytes > 0) {
+        writeBytes = std::max(0LL, writeBytes - detail.cancelledWriteBytes);
+    }
     return true;
 }
 

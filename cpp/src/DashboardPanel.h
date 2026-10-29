@@ -1,12 +1,16 @@
 #pragma once
 
 #include "DisplaySnapshot.h"
+#include "MetricsExport.h"
 #include "DockerStatus.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
 #include "MetricStore.h"
+#include "ProcessActions.h"
 #include "ServicesStatus.h"
 #include "AlertEngine.h"
+#include "AlertSilence.h"
+#include "MonitorBands.h"
 #include "SyntheticStatus.h"
 #include "TraceStatus.h"
 #include "PathStatus.h"
@@ -26,15 +30,33 @@ class QLabel;
 class QListWidget;
 class QStackedWidget;
 class QTreeWidget;
+class QSlider;
 class QPushButton;
 class QDoubleSpinBox;
 class QSpinBox;
+class QComboBox;
+class QCheckBox;
 class Sparkline;
 class TimeseriesChart;
 
 // Data for the Settings view - static shell facts the sampler does not
 // own (version, paths, thresholds from the loaded config, autostart
 // across installers). Filled by main.cpp after startup succeeds.
+// Local history ring summary (M74): the panel renders the storage facts and
+// the stored window; rewinding to a specific sample is answered by the owner
+// (HudWindow) through setHistorySelection, so the panel never touches files.
+struct HistoryViewInfo {
+    bool enabled = false;
+    QString path;
+    int count = 0;
+    int capacity = 0;
+    qint64 bytes = 0;
+    qint64 spanMs = 0;
+    qint64 intervalMs = 1000;
+    qint64 newestMs = 0;
+    QList<ExportRow> window;
+};
+
 struct SettingsInfo {
     QString version;
     QString configPath;
@@ -45,6 +67,9 @@ struct SettingsInfo {
     QString metricsLine;
     QString webhookLine;
     QString exportLine;
+    QString historyLine;
+    QString overlayLine;
+    QString cloudLine;
     int sampleIntervalMs = 1000;
     double cpuWarnPercent = 70.0;
     double cpuHighPercent = 90.0;
@@ -75,24 +100,46 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+    void setHistoryView(const HistoryViewInfo &view);
+    void setHistorySelection(const QString &position, const QString &detail);
 
     void setWebhookLine(const QString &line);
 
     void setExportLine(const QString &line);
 
+    void setOverlayLine(const QString &line);
+
     // M66: editable monitors — populates the threshold/cycles editors and
     // refreshes them without re-emitting editor signals (block during fill).
     void setMonitors(const QList<AlertRule> &rules);
+
+    // M75: alert silences (Alertmanager model). The panel renders the
+    // authored windows and lets the user snooze a monitor from the Alerts
+    // page; the engine keeps evaluating, notification paths stay quiet.
+    void setSilences(const QList<SilenceRule> &rules);
+
+    // M78: last verb outcome, rendered on the page that asked for it.
+    void setActionStatus(const QString &text, bool ok);
+    void setServiceStatus(const QString &text, bool ok);
+    void setContainerStatus(const QString &text, bool ok);
 
 signals:
     void collapseRequested();
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
     void historyExportRequested(const QString &format);
+    void historySeekRequested(int index);
+    void silenceRequested(const QString &monitorId, int minutes);
+    void silenceExpireRequested(const QString &monitorId);
+    void processActionRequested(const ProcessAction &action);
+    void serviceRestartRequested(const QString &unit);
+    void containerActionRequested(const QString &id, const QString &verb);
 
 private:
     void updateOverviewText(const DisplaySnapshot &snapshot);
     void updateSloPanel(const SloReport &report);
+    void updateSensorsPanel(const DisplaySnapshot &snapshot);
+    void updateCloudPanel(const DisplaySnapshot &snapshot);
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -110,8 +157,12 @@ private:
     QWidget *buildSyntheticView();
     QWidget *buildInstrumentationView();
     QWidget *buildDatabasesView();
+    QWidget *buildHistoryView();
     QWidget *buildCostView();
+    QWidget *buildCloudView();
     QWidget *buildDisksView();
+    QWidget *buildGpuView();
+    QWidget *buildSensorsView();
     QWidget *buildHostView();
     QWidget *buildSecurityView();
     QWidget *buildTracesView();
@@ -121,7 +172,9 @@ private:
     QWidget *buildSloView();
     QWidget *buildSettingsView();
     void applySettingsInfo();
+    void refreshSettingsTiles();
     void copySettingCommand();
+    void copyDiagnosticsReport();
 
     QString unsupportedOsText() const;
 
@@ -133,6 +186,18 @@ private:
     bool m_osFim = true;
     bool m_osSecurity = true;
     bool m_osProcessNet = true;
+    bool m_osProcessDisk = true;
+    bool m_osProcessDiskScan = true;
+    bool m_osGpu = true;
+    bool m_osGpuClients = true;
+    bool m_osGpuProcess = true;
+    bool m_osSensors = false;
+    bool m_osBattery = false;
+    bool m_osProcessSignals = true;
+    bool m_osProcessRenice = true;
+    bool m_osProcessIonice = true;
+    bool m_osProcessOomScore = true;
+    bool m_osProcessPause = true;
     QString m_osName = QStringLiteral("linux");
 
     QLabel *m_appValue = nullptr;
@@ -161,6 +226,7 @@ private:
     QLabel *m_memDetail = nullptr;
     QTreeWidget *m_procs = nullptr;
     QLabel *m_procNetNote = nullptr;
+    QLabel *m_procDiskNote = nullptr;
     QLabel *m_focusDetail = nullptr;
     QLabel *m_openFiles = nullptr;
     QLabel *m_net = nullptr;
@@ -183,7 +249,30 @@ private:
     QLabel *m_costWarnings = nullptr;
     QTreeWidget *m_costNamespaces = nullptr;
     QTreeWidget *m_costWorkloads = nullptr;
+    QLabel *m_costTileMonthly = nullptr;
+    QLabel *m_costTileHourly = nullptr;
+    QLabel *m_costTileCpuEff = nullptr;
+    QLabel *m_costTileMemEff = nullptr;
+    TimeseriesChart *m_chartCost = nullptr;
+    QLabel *m_cloudTileProvider = nullptr;
+    QLabel *m_cloudTileAge = nullptr;
+    QLabel *m_cloudTileAccrued = nullptr;
+    QLabel *m_cloudTileMonthly = nullptr;
+    QLabel *m_cloudSummary = nullptr;
+    QLabel *m_cloudDetail = nullptr;
+    QLabel *m_cloudFleetSummary = nullptr;
+    QLabel *m_cloudFleetNote = nullptr;
+    QTreeWidget *m_cloudFleet = nullptr;
+    TimeseriesChart *m_chartCloudFleet = nullptr;
+    QLabel *m_cloudCost = nullptr;
+    QLabel *m_cloudApp = nullptr;
+    QLabel *m_cloudShare = nullptr;
+    QLabel *m_cloudFootprint = nullptr;
+    QTreeWidget *m_cloudConsumers = nullptr;
+    TimeseriesChart *m_chartCloudApp = nullptr;
     QLabel *m_diskSummary = nullptr;
+    QLabel *m_diskTopNote = nullptr;
+    QLabel *m_diskTop = nullptr;
     QLabel *m_diskPressure = nullptr;
     QTreeWidget *m_disks = nullptr;
     QLabel *m_hostInfoSummary = nullptr;
@@ -301,6 +390,41 @@ private:
     QLabel *m_alResolved = nullptr;
     TimeseriesChart *m_chartAlertTrans = nullptr;
     QLabel *m_alertTimeline = nullptr;
+    QList<SilenceRule> m_silences;
+    QComboBox *m_silenceTarget = nullptr;
+    QSpinBox *m_silenceMinutes = nullptr;
+    QPushButton *m_silenceAdd = nullptr;
+    QPushButton *m_silenceExpire = nullptr;
+    QLabel *m_silenceSummary = nullptr;
+    QLabel *m_silenceList = nullptr;
+    QCheckBox *m_procHealthyOnly = nullptr;
+    QLabel *m_procFilterNote = nullptr;
+    QLabel *m_procActionsNote = nullptr;
+    QLabel *m_actionStatus = nullptr;
+    QLabel *m_serviceActionsNote = nullptr;
+    QLabel *m_serviceStatus = nullptr;
+    QLabel *m_containerActionsNote = nullptr;
+    QLabel *m_containerStatus = nullptr;
+    QComboBox *m_servicePick = nullptr;
+    QComboBox *m_containerPick = nullptr;
+    QPushButton *m_serviceRestart = nullptr;
+    QPushButton *m_containerStart = nullptr;
+    QPushButton *m_containerStop = nullptr;
+    QPushButton *m_containerRestart = nullptr;
+    QList<QPushButton *> m_processActionButtons;
+    QList<ProcessRow> m_lastProcessRows;
+    int m_confirmPid = 0;
+    ProcessSignal m_confirmSignal = ProcessSignal::Term;
+    bool m_procFilterActive = false;
+    void updateSilencesPanel();
+    void requestSilence();
+    void expireSelectedSilence();
+    void populateProcessTree(const QList<ProcessRow> &rows);
+    int selectedProcessPid() const;
+    QString selectedProcessName() const;
+    void triggerProcessAction(const QString &id);
+    QPushButton *makeActionButton(const QString &text, const QString &id,
+                                  QWidget *parent);
     QSet<QString> m_alertSeen;
     quint64 m_alertsFired = 0;
     quint64 m_alertsResolved = 0;
@@ -357,6 +481,49 @@ private:
     QLabel *m_diskTilePsi = nullptr;
     TimeseriesChart *m_chartIoRw = nullptr;
     TimeseriesChart *m_chartIoUtil = nullptr;
+
+    // History page (M74): bounded on-disk ring + rewind scrubber.
+    QLabel *m_histTileSamples = nullptr;
+    QLabel *m_histTileSpan = nullptr;
+    QLabel *m_histTileDisk = nullptr;
+    QLabel *m_histTileInterval = nullptr;
+    QLabel *m_histSummary = nullptr;
+    QLabel *m_histPos = nullptr;
+    QLabel *m_histDetail = nullptr;
+    QList<QLabel *> m_histDetailLines;
+    QSlider *m_histSlider = nullptr;
+    QPushButton *m_histFirst = nullptr;
+    QPushButton *m_histPrev = nullptr;
+    QPushButton *m_histNext = nullptr;
+    QPushButton *m_histLast = nullptr;
+    TimeseriesChart *m_chartHistCpu = nullptr;
+    TimeseriesChart *m_chartHistMem = nullptr;
+    HistoryViewInfo m_historyView;
+    qint64 m_histWindowNewest = 0;
+
+    // GPU page (M73): device utilization/memory/sensors + gpu processes.
+    QLabel *m_gpuTileUtil = nullptr;
+    QLabel *m_gpuTileMem = nullptr;
+    QLabel *m_gpuTileTemp = nullptr;
+    QLabel *m_gpuTileProcs = nullptr;
+    QLabel *m_gpuSummary = nullptr;
+    QLabel *m_gpuDevices = nullptr;
+    QLabel *m_gpuProcessNote = nullptr;
+    QTreeWidget *m_gpuTable = nullptr;
+    TimeseriesChart *m_chartGpu = nullptr;
+
+    // Sensors page (M79): hwmon thermal/fan/power + battery and AC state.
+    QLabel *m_sensorTileHot = nullptr;
+    QLabel *m_sensorTileFans = nullptr;
+    QLabel *m_sensorTilePower = nullptr;
+    QLabel *m_sensorTileBattery = nullptr;
+    QLabel *m_sensorSummary = nullptr;
+    QLabel *m_batterySummary = nullptr;
+    QLabel *m_batteryDetail = nullptr;
+    QLabel *m_adapters = nullptr;
+    QTreeWidget *m_sensorTree = nullptr;
+    TimeseriesChart *m_chartSensorTemp = nullptr;
+    TimeseriesChart *m_chartSensorPower = nullptr;
 
     // Datadog-style Host page (M61k): live-vitals tiles + inventory cards.
     QLabel *m_hostTileCpu = nullptr;
@@ -454,9 +621,16 @@ private:
     QSet<int> m_collapsedPids;
     bool m_populating = false;
     SettingsInfo m_settings;
+    SelfCost m_liveSelf;
+    TickCost m_liveTick;
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
     QLabel *m_settingsDiagnostics = nullptr;
+    QLabel *m_settingsScope = nullptr;
+    QLabel *m_settingsTileVersion = nullptr;
+    QLabel *m_settingsTileRefresh = nullptr;
+    QLabel *m_settingsTileMonitors = nullptr;
+    QLabel *m_settingsTileSilenced = nullptr;
     QHash<QString, QDoubleSpinBox *> m_monitorThreshold;
     QHash<QString, QSpinBox *> m_monitorCycles;
 };

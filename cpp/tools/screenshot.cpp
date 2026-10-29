@@ -1,5 +1,9 @@
 #include "HudWindow.h"
 #include "DashboardPanel.h"
+#include "HistoryLog.h"
+#include "SensorStatus.h"
+#include "CloudStatus.h"
+#include "TickBudget.h"
 
 #include <QApplication>
 #include <QListWidget>
@@ -84,6 +88,8 @@ DisplaySnapshot demoSnapshot(int tick) {
     proc.cpuPercent = 12.4;
     proc.netRxPerSec = 1'258'291.0;
     proc.netTxPerSec = 196'608.0;
+    proc.diskReadPerSec = 3'145'728.0;
+    proc.diskWritePerSec = 524'288.0;
     proc.listenPorts = {9222};
     proc.name = QStringLiteral("cursor");
     proc.memory = QStringLiteral("612.4 MB");
@@ -103,11 +109,18 @@ DisplaySnapshot demoSnapshot(int tick) {
         row.memory = QString::fromUtf8(mem);
         s.processes.append(row);
     }
+    // The focused group root carries the aggregate the top bar shows, so the
+    // Cloud page's app share and its consumer table describe the same pid.
+    s.processes.first().cpuPercent = cpuPct;
     s.processes[1].netRxPerSec = 262'144.0;
     s.processes[1].netTxPerSec = 65'536.0;
+    s.processes[1].diskReadPerSec = 65'536.0;
+    s.processes[1].diskWritePerSec = 1'048'576.0;
     s.processes[1].listenPorts = {3000, 3001};
     s.processes.last().netRxPerSec = 0.0;
     s.processes.last().netTxPerSec = 0.0;
+    s.processes.last().diskReadPerSec = 0.0;
+    s.processes.last().diskWritePerSec = 0.0;
     s.processNetAvailable = true;
     s.processNetTracked = 14;
     s.processNetUnattributed = 39;
@@ -134,6 +147,62 @@ DisplaySnapshot demoSnapshot(int tick) {
     talkerC.txPerSec = 40'960.0;
     talkerC.name = QStringLiteral("rsync");
     s.processNetTalkers = {talkerA, talkerB, talkerC};
+
+    s.processDiskAvailable = true;
+    s.processDiskScanning = true;
+    s.processDiskTracked = 11;
+    s.processDiskUnreadable = 42;
+    s.processDiskReadPerSec = 3'211'264.0;
+    s.processDiskWritePerSec = 5'242'880.0;
+    ProcessDiskConsumer diskA;
+    diskA.pid = 8842;
+    diskA.name = QStringLiteral("rsync");
+    diskA.readPerSec = 2'097'152.0;
+    diskA.writePerSec = 4'194'304.0;
+    ProcessDiskConsumer diskB;
+    diskB.pid = 2092708;
+    diskB.name = QStringLiteral("node");
+    diskB.readPerSec = 1'048'576.0;
+    diskB.writePerSec = 524'288.0;
+    ProcessDiskConsumer diskC;
+    diskC.pid = 611;
+    diskC.name = QStringLiteral("postgres");
+    diskC.readPerSec = 65'536.0;
+    diskC.writePerSec = 524'288.0;
+    s.processDiskTop = {diskA, diskB, diskC};
+
+
+    s.gpu.ok = true;
+    s.gpu.vendor = QStringLiteral("intel");
+    s.gpuClientsAvailable = true;
+    {
+        GpuDevice dev;
+        dev.index = 0;
+        dev.vendor = QStringLiteral("intel");
+        dev.name = QStringLiteral("Iris Xe Graphics");
+        dev.driver = QStringLiteral("i915");
+        dev.pciId = QStringLiteral("8086:A7A1");
+        dev.utilPercent = 62.5;
+        dev.memUsed = 2ULL * 1024 * 1024 * 1024;
+        dev.memTotal = 8ULL * 1024 * 1024 * 1024;
+        dev.tempC = 64.0;
+        dev.powerW = 18.5;
+        dev.clockMhz = 1150;
+        s.gpu.devices = {dev};
+        GpuProcess game;
+        game.pid = 2092707;
+        game.name = QStringLiteral("cursor");
+        game.busyPercent = 62.5;
+        game.memBytes = 1ULL * 1024 * 1024 * 1024;
+        game.engines = QStringLiteral("render 62%");
+        GpuProcess shell;
+        shell.pid = 2048;
+        shell.name = QStringLiteral("gnome-shell");
+        shell.busyPercent = 11.0;
+        shell.memBytes = 512ULL * 1024 * 1024;
+        shell.engines = QStringLiteral("render 11%");
+        s.gpu.processes = {game, shell};
+    }
 
     ConnectionRow conn;
     conn.proto = QStringLiteral("tcp");
@@ -283,6 +352,225 @@ DisplaySnapshot demoSnapshot(int tick) {
     disk.utilPercent = std::clamp(18.0 + 55.0 * std::abs(w1), 0.0, 99.0);
     s.disks = {disk};
     s.disksAvailable = true;
+
+    SensorChip cpuChip;
+    cpuChip.name = QStringLiteral("coretemp");
+    {
+        SensorReading pkg;
+        pkg.chip = cpuChip.name;
+        pkg.key = QStringLiteral("temp1");
+        pkg.label = QStringLiteral("Package id 0");
+        pkg.kind = SensorKind::Temperature;
+        pkg.value = std::clamp(58.0 + 13.0 * w2 + 3.0 * w4, 40.0, 96.0);
+        pkg.hasCrit = true;
+        pkg.crit = 100.0;
+        pkg.hasWarn = true;
+        pkg.warn = 95.0;
+        SensorReading core0;
+        core0.chip = cpuChip.name;
+        core0.key = QStringLiteral("temp2");
+        core0.label = QStringLiteral("Core 0");
+        core0.kind = SensorKind::Temperature;
+        core0.value = pkg.value - 4.0;
+        cpuChip.readings = {pkg, core0};
+    }
+    SensorChip boardChip;
+    boardChip.name = QStringLiteral("acpitz");
+    {
+        SensorReading board;
+        board.chip = boardChip.name;
+        board.key = QStringLiteral("temp1");
+        board.label = QStringLiteral("temp1");
+        board.kind = SensorKind::Temperature;
+        board.value = 44.5;
+        boardChip.readings = {board};
+    }
+    SensorChip nvmeChip;
+    nvmeChip.name = QStringLiteral("nvme");
+    {
+        SensorReading composite;
+        composite.chip = nvmeChip.name;
+        composite.key = QStringLiteral("temp1");
+        composite.label = QStringLiteral("Composite");
+        composite.kind = SensorKind::Temperature;
+        composite.value = 47.0 + 4.0 * w3;
+        composite.hasWarn = true;
+        composite.warn = 80.0;
+        nvmeChip.readings = {composite};
+    }
+    SensorChip fanChip;
+    fanChip.name = QStringLiteral("hp");
+    {
+        SensorReading cpuFan;
+        cpuFan.chip = fanChip.name;
+        cpuFan.key = QStringLiteral("fan1");
+        cpuFan.label = QStringLiteral("cpu_fan");
+        cpuFan.kind = SensorKind::Fan;
+        cpuFan.value = 2900.0 + 420.0 * std::abs(w1);
+        SensorReading caseFan;
+        caseFan.chip = fanChip.name;
+        caseFan.key = QStringLiteral("fan2");
+        caseFan.label = QStringLiteral("fan2");
+        caseFan.kind = SensorKind::Fan;
+        caseFan.value = 0.0;
+        SensorReading rail;
+        rail.chip = fanChip.name;
+        rail.key = QStringLiteral("power1");
+        rail.label = QStringLiteral("cpu_power");
+        rail.kind = SensorKind::Power;
+        rail.value = 11.5 + 4.5 * std::abs(w1);
+        fanChip.readings = {cpuFan, caseFan, rail};
+    }
+    s.sensors.chips = {cpuChip, boardChip, nvmeChip, fanChip};
+
+    BatteryReading battery;
+    battery.name = QStringLiteral("BAT0");
+    battery.model = QStringLiteral("Primary");
+    battery.manufacturer = QStringLiteral("HP");
+    battery.technology = QStringLiteral("Li-ion");
+    battery.state = BatteryState::Discharging;
+    battery.capacityPercent = 18;
+    battery.energyNowWh = 6.9;
+    battery.energyFullWh = 38.1;
+    battery.energyDesignWh = 41.0;
+    battery.powerW = 8.4;
+    battery.voltageV = 12.4;
+    battery.cycleCount = 93;
+    battery.timeToEmptyMin = 49;
+    battery.temperatureC = 31.0;
+    s.sensors.batteries = {battery};
+    AdapterReading adapter;
+    adapter.name = QStringLiteral("ADP1");
+    adapter.online = false;
+    s.sensors.adapters = {adapter};
+    s.sensors.available = true;
+    recomputeSensorTotals(s.sensors);
+
+    // M82: a priced AWS instance so the Cloud page renders real numbers --
+    // identity from IMDS, accrual since boot, and the focused app's share of
+    // the hourly rate split by the CPU it actually used.
+    const int cloudVcpus = 8;
+    s.cloud.available = true;
+    s.cloud.identity.provider = CloudProvider::Aws;
+    s.cloud.identity.instanceId = QStringLiteral("i-0123456789abcdef0");
+    s.cloud.identity.instanceType = QStringLiteral("c7g.2xlarge");
+    s.cloud.identity.region = QStringLiteral("eu-west-1");
+    s.cloud.identity.zone = QStringLiteral("eu-west-1b");
+    s.cloud.identity.accountId = QStringLiteral("123456789012");
+    s.cloud.identity.privateIp = QStringLiteral("10.0.3.17");
+    s.cloud.identity.imageId = QStringLiteral("ami-0d3f6a4b2c1e9f8a7");
+    s.cloud.identity.architecture = QStringLiteral("arm64");
+    s.cloud.vcpus = cloudVcpus;
+    s.cloud.uptimeSec = 41 * 86400 + qint64(tick) * 2;
+    s.cloud.ratePerHour = 0.2920;
+    s.cloud.rateKey = QStringLiteral("aws/c7g.2xlarge");
+    s.cloud.rateSource =
+        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt");
+    s.cloud.rateImportDate = QStringLiteral("2026-09-01");
+    s.cloud.rateStaleDays = 56;
+    const CloudCostMath cloudMath =
+        computeCloudCost(s.cloud.ratePerHour, s.cloud.uptimeSec);
+    s.cloud.accruedUsd = cloudMath.accruedUsd;
+    s.cloud.projectedMonthlyUsd = cloudMath.projectedMonthlyUsd;
+    s.cloud.appName = s.appName;
+    s.cloud.appPid = s.pid.toInt();
+    s.cloud.appCpuPercent = cpuPct;
+    s.cloud.appCostPerHour =
+        cloudProcessCostPerHour(s.cloud.ratePerHour, cpuPct, cloudVcpus);
+    QList<CloudProcessSample> cloudRows;
+    for (const ProcessRow &row : s.processes) {
+        if (row.depth != 0) {
+            continue;
+        }
+        cloudRows.append(CloudProcessSample{row.name, row.pid, row.cpuPercent});
+    }
+    s.cloud.consumers =
+        cloudTopConsumers(cloudRows, s.cloud.ratePerHour, cloudVcpus, 4);
+
+    // M83: the account listing. The instance is 96 days old, which is only
+    // knowable from the provider, and four neighbours in the same region show
+    // the fleet table and the $/MO roll-up.
+    const qint64 shotNow = QDateTime::currentMSecsSinceEpoch();
+    const qint64 selfAge = (96 * 86400 + qint64(tick) * 2) * 1000LL;
+    s.cloud.instanceAgeSec = 96 * 86400 + qint64(tick) * 2;
+    s.cloud.launchedAtMs = shotNow - selfAge;
+    s.cloud.accruedLaunchUsd =
+        computeCloudCost(s.cloud.ratePerHour, s.cloud.instanceAgeSec).accruedUsd;
+    CloudFleetStatus fleet;
+    fleet.attempted = true;
+    fleet.available = true;
+    fleet.provider = CloudProvider::Aws;
+    fleet.cliName = QStringLiteral("aws");
+    fleet.scope = QStringLiteral("eu-west-1");
+    fleet.source = QStringLiteral("aws ec2 describe-instances --output json "
+                                  "--region eu-west-1 --query "
+                                  "Reservations[].Instances[]");
+    fleet.fetchedAtMs = shotNow - 180000;
+
+    const auto fleetRow = [&shotNow](const char *id, const char *name,
+                                     const char *type, const char *state,
+                                     qint64 ageDays, const char *zone) {
+        CloudFleetInstance row;
+        row.instanceId = QLatin1String(id);
+        row.name = QLatin1String(name);
+        row.instanceType = QLatin1String(type);
+        row.state = QLatin1String(state);
+        row.rawState = row.state;
+        row.zone = QLatin1String(zone);
+        row.region = cloudRegionFromZone(row.zone);
+        row.launchedAtMs = shotNow - ageDays * 86400LL * 1000LL;
+        return row;
+    };
+    fleet.rows = {
+        fleetRow("i-0123456789abcdef0", "hud-box", "c7g.2xlarge", "running",
+                 96, "eu-west-1b"),
+        fleetRow("i-0feedfacecafe0001", "web-2", "t4g.small", "running", 12,
+                 "eu-west-1a"),
+        fleetRow("i-0feedfacecafe0002", "web-3", "t4g.small", "running", 12,
+                 "eu-west-1a"),
+        fleetRow("i-0feedfacecafe0003", "api-edge", "m7g.large", "running", 3,
+                 "eu-west-1c"),
+        fleetRow("i-0deadbeefdeadbe01", "batch-old", "t4g.small", "stopped",
+                 47, "eu-west-1b"),
+    };
+    fleetApplyRates(
+        fleet,
+        parseCloudRateFile(QStringLiteral("aws/c7g.2xlarge = 0.2920\n"
+                                          "aws/t4g.small = 0.0208\n"
+                                          "aws/m7g.large = 0.0816\n")),
+        730.0);
+    fleetResolveAges(fleet, shotNow);
+    fleetMarkSelf(fleet, s.cloud.identity);
+    s.cloud.fleet = fleet;
+
+    // M84: the footprint card. A measured sweep, so the render proves the
+    // request count and budget both reach the page.
+    s.cloud.footprint.enabled = true;
+    s.cloud.footprint.inventory = true;
+    s.cloud.footprint.cliName = fleet.cliName;
+    s.cloud.footprint.probed = true;
+    s.cloud.footprint.identified = true;
+    s.cloud.footprint.lastSweepMs = 62;
+    s.cloud.footprint.lastRequests = 4;
+    s.cloud.footprint.ratesPath = QStringLiteral(
+        "/home/you/.config/syspeek/cloud-rates.txt");
+
+    // M84: the console measures itself. A measured footprint and a 62 ms tick
+    // with named sections, so the Settings render shows real rows.
+    s.self.available = true;
+    s.self.warming = false;
+    s.self.cpuPercent = 6.04;
+    s.self.rssKb = 36864.0;
+    {
+        QList<TickSection> sections;
+        sections.append(TickSection{QStringLiteral("processes"), 41.2});
+        sections.append(TickSection{QStringLiteral("host"), 12.4});
+        sections.append(TickSection{QStringLiteral("sockets"), 4.1});
+        sections.append(TickSection{QStringLiteral("gpu"), 1.2});
+        s.tick = tickbudget::summarize(
+            sections, 62.0,
+            QList<double>{54.0, 48.0, 62.0, 84.0, 51.0});
+    }
 
     return s;
 }
@@ -438,6 +726,28 @@ int main(int argc, char *argv[]) {
         pod.cpuMillis = 512.0;
         kube.podsCpuMillis = 534.0;
         kube.podsMemBytes = 567LL * 1024 * 1024;
+        // Cost story (M81): a priced cluster whose usage sits below the
+        // declared requests, so the Cost page renders the split, the
+        // right-sizing card and the per-namespace shares with real numbers.
+        kube.costPods = 12;
+        kube.costMissingRequests = 1;
+        kube.costMonthly = 1180.0;
+        kube.costCpuPerCoreHour = 0.031611;
+        kube.costMemPerGbHour = 0.004237;
+        kube.costCpuMonthly = 864.0;
+        kube.costMemMonthly = 316.0;
+        kube.costCpuEfficiency = 0.42;
+        kube.costMemEfficiency = 0.61;
+        kube.costWastedMonthly = 512.40;
+        kube.costEfficiencyPods = 9;
+        kube.costByNamespace = {
+            {QStringLiteral("prod"), 712.0},
+            {QStringLiteral("staging"), 268.0},
+            {QStringLiteral("dev"), 200.0}};
+        kube.costTopWorkloads = {
+            {QStringLiteral("prod/api-7f9c"), 486.20},
+            {QStringLiteral("prod/web-5f8d"), 226.10},
+            {QStringLiteral("staging/worker-2b1a"), 148.60}};
         // Services story (M61n): three units, one crash-looping, so the
         // FAILED tile flaps🗴 and the timeline carries a restart row.
         ServicesSnapshot svc;
@@ -556,6 +866,11 @@ int main(int argc, char *argv[]) {
             docker.issueCount = 1 + (i % 31 < 8 ? 1 : 0);
             kube.totalPods = 12 + i / 40;
             kube.issueCount = 2 + (i > 150 ? 2 : 0);
+            // Cost drifts with the fleet so the estimate history has shape;
+            // the split keeps the cpu/ram ratio of the fixture.
+            kube.costMonthly = 1180.0 + 46.0 * std::sin(i / 26.0);
+            kube.costCpuMonthly = kube.costMonthly * (864.0 / 1180.0);
+            kube.costMemMonthly = kube.costMonthly - kube.costCpuMonthly;
             path.reports.first().hops[2].lossPercent = (i % 29 < 6) ? 2.5 : 0.0;
             path.reports.first().hops[4].avgMs = 12.0 + (i % 17) * 2.0;
             path.reports.first().hops[4].lastMs = path.reports.first().hops[4].avgMs;
@@ -809,6 +1124,23 @@ int main(int argc, char *argv[]) {
     kube.nodesWithUsage = 1;
     kube.podsCpuMillis = 534.0;
     kube.podsMemBytes = 567LL * 1024 * 1024;
+    kube.costPods = 12;
+    kube.costMissingRequests = 1;
+    kube.costMonthly = 1180.0;
+    kube.costCpuPerCoreHour = 0.031611;
+    kube.costMemPerGbHour = 0.004237;
+    kube.costCpuMonthly = 864.0;
+    kube.costMemMonthly = 316.0;
+    kube.costCpuEfficiency = 0.42;
+    kube.costMemEfficiency = 0.61;
+    kube.costWastedMonthly = 512.40;
+    kube.costEfficiencyPods = 9;
+    kube.costByNamespace = {{QStringLiteral("prod"), 712.0},
+                            {QStringLiteral("staging"), 268.0},
+                            {QStringLiteral("dev"), 200.0}};
+    kube.costTopWorkloads = {{QStringLiteral("prod/api-7f9c"), 486.20},
+                             {QStringLiteral("prod/web-5f8d"), 226.10},
+                             {QStringLiteral("staging/worker-2b1a"), 148.60}};
     KubeNode kubeNode;
     kubeNode.name = QStringLiteral("node-1");
     kubeNode.ready = true;
@@ -850,7 +1182,7 @@ int main(int argc, char *argv[]) {
     panel.setIncidents(incidents);
 
     SettingsInfo settingsInfo;
-    settingsInfo.version = QStringLiteral("0.8.3");
+    settingsInfo.version = QStringLiteral(SYSPEEK_APP_VERSION);
     settingsInfo.configPath = QStringLiteral("~/.config/Syspeek/syspeek.conf");
     settingsInfo.logPath = QStringLiteral("~/.cache/dev.syspeek/syspeek/hud.log");
     settingsInfo.autostartLine =
@@ -858,19 +1190,109 @@ int main(int argc, char *argv[]) {
     settingsInfo.verbsLine =
         QStringLiteral("install.sh run|start|stop|restart|status|enable|"
                        "disable|update|uninstall|logs|vers");
-    settingsInfo.metricsLine = QStringLiteral("http://127.0.0.1:9107/metrics");
+    settingsInfo.metricsLine = QStringLiteral(
+        "http://127.0.0.1:9107/metrics (no auth, loopback only)");
     settingsInfo.webhookLine =
         QStringLiteral("generic -> https://alerts.example.test/syspeek"
                        " - 4 sent, 0 failed; last ok 17:42 (1 firing)");
     settingsInfo.exportLine =
         QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
                        "syspeek-history-20261026-174210.csv");
+    settingsInfo.historyLine =
+        QStringLiteral("3600 samples max - ~/.cache/dev.syspeek/syspeek/"
+                       "history.ring");
+    settingsInfo.overlayLine = QStringLiteral(
+        "wm GNOME Shell - pinned above - follows every desktop - "
+        "click-through on - 430x191 at 200,120");
+    settingsInfo.cloudLine = cloudSettingsLine(
+        true,
+        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt"),
+        parseCloudRateFile(QStringLiteral("# imported 2026-09-01\n"
+                                          "aws/c7g.2xlarge = 0.2920\n")),
+        QDateTime(QDate(2026, 10, 28), QTime(12, 0)).toMSecsSinceEpoch());
     settingsInfo.sampleIntervalMs = 1000;
     settingsInfo.cpuWarnPercent = 70.0;
     settingsInfo.cpuHighPercent = 90.0;
     settingsInfo.rssWarnGb = 1.0;
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
+
+    {
+        // M75 silences: two live quiet windows and one expired, so the
+        // Alerts page shows counts, remaining times and the muted-alert mark.
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        QList<SilenceRule> silences;
+        auto addSilence = [nowMs, &silences](const QString &matcher,
+                                            const QString &comment,
+                                            qint64 startOffsetMs,
+                                            qint64 endOffsetMs) {
+            SilenceRule rule;
+            rule.matcher = matcher;
+            rule.startsAtMs = nowMs + startOffsetMs;
+            rule.endsAtMs = nowMs + endOffsetMs;
+            rule.author = QStringLiteral("ops");
+            rule.comment = comment;
+            silences.append(rule);
+        };
+        addSilence(QStringLiteral("host_cpu"),
+                   QStringLiteral("index rebuild window"), -420000, 1500000);
+        addSilence(QStringLiteral("a-cpu"),
+                   QStringLiteral("same window, alert id"), -420000, 1500000);
+        addSilence(QStringLiteral("disk"), QStringLiteral("one-off cleanup"),
+                   -7200000, -3600000);
+        panel.setSilences(silences);
+    }
+
+    auto driveHistoryLog = [&app, &panel]() {
+        // Local history ring (M74): a full hour of 1 s samples with a
+        // rewound selection so the tiles, card, scrubber, detail line and
+        // stored-window charts all render from real records.
+        const qint64 baseMs = QDateTime::currentMSecsSinceEpoch() - 900 * 1000;
+        HistoryViewInfo info;
+        info.enabled = true;
+        info.path = QStringLiteral("/home/dev/.cache/dev.syspeek/syspeek/"
+                                   "history.ring");
+        info.count = 900;
+        info.capacity = 3600;
+        info.bytes = 97264;
+        info.intervalMs = 1000;
+        info.spanMs = 899000;
+        for (int i = 0; i < 240; ++i) {
+            const double wave = std::sin(double(i) / 9.0);
+            ExportRow row;
+            row.atMs = baseMs + i * 1000;
+            row.appName = QStringLiteral("cursor");
+            row.pid = QStringLiteral("508637");
+            row.appCpuPercent = 22.0 + wave * 9.0;
+            row.appRssKb = 4194304;
+            row.hostCpuPercent = 28.0 + wave * 12.0;
+            row.hostStealPercent = 0.4;
+            row.hostMemAvailableKb = 5242880 - qint64(wave * 262144.0);
+            row.hostMemTotalKb = 16659456;
+            row.load1 = 1.8 + wave * 0.6;
+            row.diskReadKbPerSec = 380.0 + wave * 120.0;
+            row.diskWriteKbPerSec = 940.0 - wave * 300.0;
+            row.diskUtilPercent = 12.0 + wave * 4.0;
+            row.netRxKbPerSec = 240.0 + wave * 90.0;
+            row.netTxKbPerSec = 64.0;
+            row.tcpInSegsPerSec = 420.0;
+            row.tcpOutSegsPerSec = 380.0;
+            row.tcpRetransPerSec = 1.4;
+            row.tcpRetransPercent = 0.31;
+            row.tcpCurrEstab = 34;
+            info.window.append(row);
+        }
+        info.newestMs = info.window.last().atMs;
+        panel.setHistoryView(info);
+
+        HistoryRecord selected = historyRecordFrom(info.window.at(180));
+        selected.appName = QStringLiteral("cursor");
+        selected.pid = 508637;
+        panel.setHistorySelection(
+            historyPositionText(660, info.count, selected, false),
+            historyRecordText(selected));
+        app.processEvents();
+    };
 
     panel.resize(1020, 1040);
     panel.show();
@@ -890,6 +1312,8 @@ int main(int argc, char *argv[]) {
     driveHistory();
     tracePhase("drive statsd");
     driveStatsd();
+    tracePhase("drive history log");
+    driveHistoryLog();
     tracePhase("grab");
     QScrollArea *grabScroll = nullptr;
     if (argc > 4

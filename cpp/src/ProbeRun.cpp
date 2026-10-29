@@ -65,12 +65,33 @@ int probeRun(int argc, char **argv) {
     SamplerWorker worker(provider.get(), config);
 
     int received = 0;
+    double slowestTickMs = 0.0;
+    QString slowestSection;
+    double tickSumMs = 0.0;
+    double selfCpuSum = 0.0;
+    int selfCpuSamples = 0;
     QObject::connect(&worker, &SamplerWorker::snapshotReady, [&](const DisplaySnapshot &snapshot) {
         const int hostOk = snapshot.hostAvailable ? 1 : 0;
         bool focusOk = !snapshot.appName.isEmpty() && snapshot.appName != QStringLiteral("--");
         ++received;
+        // M84: every probe tick carries its own cost, so a blocking call
+        // introduced inside a collector shows up in the CI log instead of
+        // hiding behind a green snapshot count.
+        const double tickMs = snapshot.tick.lastMs;
+        tickSumMs += tickMs;
+        if (tickMs > slowestTickMs) {
+            slowestTickMs = tickMs;
+            slowestSection = snapshot.tick.sections.isEmpty()
+                                 ? QStringLiteral("-")
+                                 : snapshot.tick.sections.first().name;
+        }
+        if (snapshot.self.cpuPercent >= 0.0) {
+            selfCpuSum += snapshot.self.cpuPercent;
+            ++selfCpuSamples;
+        }
         std::printf("probe tick=%d seq=%llu provider=%s status=%s app=%s pid=%s cpu=%s "
-                    "mem=%s host=%d hostCpu=%.1f hostMemTotalKb=%llu\n",
+                    "mem=%s host=%d hostCpu=%.1f hostMemTotalKb=%llu "
+                    "tickMs=%.1f slowest=%s selfCpu=%.2f selfRssKb=%lld\n",
                     received,
                     static_cast<unsigned long long>(snapshot.sequence),
                     provider ? provider->name().toUtf8().constData() : "none",
@@ -81,7 +102,13 @@ int probeRun(int argc, char **argv) {
                     snapshot.memory.toUtf8().constData(),
                     hostOk,
                     snapshot.hostCpuPercent,
-                    static_cast<unsigned long long>(snapshot.hostMemTotalKb));
+                    static_cast<unsigned long long>(snapshot.hostMemTotalKb),
+                    tickMs,
+                    snapshot.tick.sections.isEmpty()
+                        ? "-"
+                        : snapshot.tick.sections.first().name.toUtf8().constData(),
+                    snapshot.self.cpuPercent,
+                    static_cast<long long>(snapshot.self.rssKb));
         std::fflush(stdout);
     });
 
@@ -104,6 +131,11 @@ int probeRun(int argc, char **argv) {
             QMetaObject::invokeMethod(&worker, "stop", Qt::DirectConnection);
             std::printf("probe summary requested=%d received=%d\n",
                         ticks, received);
+            std::printf("probe cost avgMs=%.1f worstMs=%.1f worstSection=%s "
+                        "selfCpuAvg=%.2f\n",
+                        received > 0 ? tickSumMs / received : 0.0, slowestTickMs,
+                        slowestSection.toUtf8().constData(),
+                        selfCpuSamples > 0 ? selfCpuSum / selfCpuSamples : -1.0);
             std::fflush(stdout);
             app.quit();
             return;

@@ -2,6 +2,9 @@
 
 #include "DiskStatus.h"
 #include "LinuxProcess.h"
+#include "GpuStatus.h"
+#include "SensorStatus.h"
+#include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "SecurityStatus.h"
@@ -11,6 +14,8 @@
 #include "HostInfoStatus.h"
 #include "TcpStatus.h"
 #include "FimStatus.h"
+#include "CloudStatus.h"
+#include "TickBudget.h"
 
 #include <QList>
 #include <QPair>
@@ -25,7 +30,10 @@ struct ProcessRow {
     double cpuPercent = 0.0;
     double netRxPerSec = -1.0;
     double netTxPerSec = -1.0;
+    double diskReadPerSec = -1.0;
+    double diskWritePerSec = -1.0;
     QList<quint16> listenPorts;
+    double rssKb = 0.0;
     QString name;
     QString memory;
 };
@@ -95,6 +103,19 @@ struct DisplaySnapshot {
     double focusNetRxPerSec = -1.0;
     double focusNetTxPerSec = -1.0;
     QList<ProcessNetTalker> processNetTalkers;
+    bool processDiskAvailable = false;
+    bool processDiskWarming = false;
+    bool processDiskScanning = false;
+    int processDiskTracked = 0;
+    int processDiskUnreadable = 0;
+    double processDiskReadPerSec = -1.0;
+    double processDiskWritePerSec = -1.0;
+    QList<ProcessDiskConsumer> processDiskTop;
+    GpuReading gpu;
+    bool gpuWarming = false;
+    SensorsSnapshot sensors;
+    CloudSnapshot cloud;
+    bool gpuClientsAvailable = false;
     QList<ConnectionRow> connections;
     QList<QString> listeningPorts;
     QList<EndpointRow> endpoints;
@@ -157,5 +178,9 @@ struct DisplaySnapshot {
     double focusIoWritePerSec = 0.0;
     QList<QString> focusOpenFiles;
     QList<QString> dependencies;
+    // M84: Syspeek's own footprint and the cost of the tick that produced
+    // this snapshot (both self-measured, both shown in Settings).
+    SelfCost self;
+    TickCost tick;
     quint64 sequence = 0;
 };

@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -109,6 +110,8 @@ void validate(Config &config) {
     if (config.fim.paths.size() > 64) {
         config.fim.paths = config.fim.paths.mid(0, 64);
     }
+
+    config.cloud.timeoutMs = clampInt(config.cloud.timeoutMs, 120, 5000);
 }
 
 } // namespace
@@ -265,6 +268,64 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (sample > 0) {
             config.sampleIntervalMs = sample;
         }
+        if (settings.contains(QStringLiteral("click_through"))) {
+            config.overlay.clickThrough =
+                settings.value(QStringLiteral("click_through")).toBool();
+        }
+        if (settings.contains(QStringLiteral("sticky"))) {
+            config.overlay.sticky =
+                settings.value(QStringLiteral("sticky")).toBool();
+        }
+        bool ok = false;
+        const int x = settings.value(QStringLiteral("x")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.x = x;
+        }
+        ok = false;
+        const int y = settings.value(QStringLiteral("y")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.y = y;
+        }
+        ok = false;
+        const int width =
+            settings.value(QStringLiteral("width")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.width = width;
+        }
+        ok = false;
+        const int height =
+            settings.value(QStringLiteral("height")).toString().toInt(&ok);
+        if (ok) {
+            config.overlay.height = height;
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("cloud"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.cloud.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        const QString rates =
+            settings.value(QStringLiteral("rates")).toString().trimmed();
+        if (!rates.isEmpty()) {
+            config.cloud.ratesPath = rates;
+        }
+        const int timeout = settings.value(QStringLiteral("timeout_ms")).toInt();
+        if (timeout > 0) {
+            config.cloud.timeoutMs = timeout;
+        }
+        if (settings.contains(QStringLiteral("inventory"))) {
+            config.cloud.inventory =
+                settings.value(QStringLiteral("inventory")).toBool();
+        }
+        const int inventoryTimeout =
+            settings.value(QStringLiteral("inventory_timeout_ms")).toInt();
+        if (inventoryTimeout > 0) {
+            config.cloud.inventoryTimeoutMs =
+                qBound(2000, inventoryTimeout, 120000);
+        }
     }
     settings.endGroup();
 
@@ -350,6 +411,58 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("history"));
+    {
+        bool ok = false;
+        const bool enabled =
+            settings.value(QStringLiteral("enabled"), true).toBool();
+        config.history.enabled = enabled;
+        ok = false;
+        const int samples =
+            settings.value(QStringLiteral("samples")).toString().toInt(&ok);
+        if (ok) {
+            config.history.samples = clampInt(samples, 60, 100000);
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("silences"));
+    for (const QString &key : settings.childKeys()) {
+        if (key.endsWith(QStringLiteral("_comment"))
+            || key.endsWith(QStringLiteral("_author"))) {
+            continue;
+        }
+        QString matcher = key;
+        qint64 endsAtMs = 0;
+        qint64 startsAtMs = 0;
+        if (key.endsWith(QStringLiteral("_until"))) {
+            matcher = key.left(key.size() - 6);
+            bool ok = false;
+            endsAtMs = settings.value(key).toString().toLongLong(&ok);
+            if (!ok || endsAtMs <= 0) {
+                continue;
+            }
+        } else {
+            const qint64 duration =
+                parseSilenceDurationMs(settings.value(key).toString());
+            if (duration < 0) {
+                continue;
+            }
+            startsAtMs = QDateTime::currentMSecsSinceEpoch();
+            endsAtMs = startsAtMs + duration;
+        }
+        SilenceRule rule;
+        rule.matcher = matcher;
+        rule.startsAtMs = startsAtMs;
+        rule.endsAtMs = endsAtMs;
+        rule.comment =
+            settings.value(matcher + QStringLiteral("_comment")).toString();
+        rule.author =
+            settings.value(matcher + QStringLiteral("_author")).toString();
+        config.silences.rules.append(rule);
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("metrics"));
     {
         if (settings.contains(QStringLiteral("enabled"))) {
@@ -360,11 +473,26 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (port > 0) {
             config.metrics.port = clampInt(port, 1, 65535);
         }
+        const QString bind =
+            settings.value(QStringLiteral("bind")).toString().trimmed();
+        if (!bind.isEmpty()) {
+            config.metrics.bindAddress = bind;
+        }
+        config.metrics.token =
+            settings.value(QStringLiteral("token")).toString().trimmed();
     }
     settings.endGroup();
 
-    settings.beginGroup(QStringLiteral("webhook"));
+    settings.beginGroup(QStringLiteral("actions"));
     {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.actions.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("webhook"));    {
         if (settings.contains(QStringLiteral("enabled"))) {
             config.webhook.enabled =
                 settings.value(QStringLiteral("enabled")).toBool();
@@ -507,6 +635,43 @@ void saveAlertOverrides(const QString &path,
     settings.sync();
 }
 
+void saveSilences(const QString &path, const QList<SilenceRule> &rules) {
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("silences"));
+    settings.remove(QString());
+    for (const SilenceRule &rule : rules) {
+        if (rule.matcher.isEmpty() || rule.endsAtMs <= 0) {
+            continue;
+        }
+        settings.setValue(rule.matcher + QStringLiteral("_until"),
+                          QString::number(rule.endsAtMs));
+        if (!rule.comment.isEmpty()) {
+            settings.setValue(rule.matcher + QStringLiteral("_comment"),
+                              rule.comment);
+        }
+        if (!rule.author.isEmpty()) {
+            settings.setValue(rule.matcher + QStringLiteral("_author"),
+                              rule.author);
+        }
+    }
+    settings.endGroup();
+    settings.sync();
+}
+
+void saveOverlayConfig(const QString &path, const OverlayConfig &overlay) {
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("overlay"));
+    settings.setValue(QStringLiteral("click_through"), overlay.clickThrough);
+    settings.setValue(QStringLiteral("sticky"), overlay.sticky);
+    settings.setValue(QStringLiteral("x"), QString::number(overlay.x));
+    settings.setValue(QStringLiteral("y"), QString::number(overlay.y));
+    settings.setValue(QStringLiteral("width"), QString::number(overlay.width));
+    settings.setValue(QStringLiteral("height"),
+                      QString::number(overlay.height));
+    settings.endGroup();
+    settings.sync();
+}
+
 QString defaultConfigPath() {
     const QString override =
         QProcessEnvironment::systemEnvironment().value(
@@ -526,5 +691,27 @@ QString defaultConfigPath() {
     const QString base =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     return base + QStringLiteral("/config.ini");
+#endif
+}
+
+QString defaultCloudRatePath() {
+    const QString override =
+        QProcessEnvironment::systemEnvironment().value(
+            QStringLiteral("SYSPEEK_CLOUD_RATES"));
+    if (!override.isEmpty()) {
+        return override;
+    }
+
+#if defined(Q_OS_LINUX)
+    const QString configHome =
+        QProcessEnvironment::systemEnvironment().value(
+            QStringLiteral("XDG_CONFIG_HOME"),
+            QProcessEnvironment::systemEnvironment().value(
+                QStringLiteral("HOME")) + QStringLiteral("/.config"));
+    return configHome + QStringLiteral("/syspeek/cloud-rates.txt");
+#else
+    const QString base =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return base + QStringLiteral("/cloud-rates.txt");
 #endif
 }

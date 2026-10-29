@@ -13,7 +13,17 @@ public:
     explicit DockerEngineClient(const QString &socketPath, int timeoutMs);
 
     // Single blocking GET; body without headers on success.
-    bool get(const QString &path, QByteArray *body, QString *error);
+    bool get(const QString &path, QByteArray *body, QString *error,
+             int timeoutMs = -1);
+
+    // Single blocking POST with an empty body (engine lifecycle verbs:
+    // /containers/{id}/start|stop|restart answer 204, or 304 when already
+    // in the requested state). GET-only status handling stays strict (200).
+    // A lifecycle verb must outlast the engine's own graceful-stop grace
+    // (dockerd kills the container after 10 s by default), so callers pass a
+    // larger timeoutMs than the list/stats budget.
+    bool post(const QString &path, QByteArray *body, QString *error,
+              int timeoutMs = -1);
 
     // Concurrent stats over one body per container id, round-robin on the
     // calling thread so the wall time is the slowest request (~1-2 s of
@@ -25,6 +35,8 @@ public:
     const QString &lastError() const { return m_lastError; }
 
 private:
+    bool perform(const QByteArray &method, const QString &path,
+                 QByteArray *body, QString *error, int timeoutMs);
     QString m_socketPath;
     int m_timeoutMs;
     QString m_lastError;

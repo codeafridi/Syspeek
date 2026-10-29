@@ -1,10 +1,13 @@
 #pragma once
 
 #include "DiskStatus.h"
+#include "GpuStatus.h"
 #include "LinuxProcess.h"
+#include "ProcessActions.h"
 #include "ProcessIdentity.h"
 #include "ProfileStatus.h"
 #include "SecurityStatus.h"
+#include "SensorStatus.h"
 #include "ServicesStatus.h"
 #include "TcpStatus.h"
 
@@ -23,6 +26,29 @@ struct PlatformCapabilities {
     bool psi = false;
     bool namespaces = false;
     bool perProcessNet = false;
+    bool perProcessDisk = false;
+    bool perProcessDiskScan = false;
+    bool gpu = false;
+    // Per-process GPU attribution exists on this OS by some mechanism
+    // (Linux fdinfo, Windows PDH GPU Engine); macOS reports device only.
+    bool gpuProcessData = false;
+    // The fdinfo client API specifically (Linux): per-process engine deltas.
+    bool gpuClients = false;
+    // M78 process verbs. Signals exist everywhere; nice is POSIX + Windows
+    // priority classes; ioprio and oom_score_adj are Linux-only surfaces.
+    bool processSignals = false;
+    bool processRenice = false;
+    bool processIonice = false;
+    bool processOomScore = false;
+    // SIGSTOP/SIGCONT: POSIX only (Windows has no process suspend verb here).
+    bool processPause = false;
+    // hwmon-style thermal/fan/power readings (/sys/class/hwmon). macOS needs
+    // the privileged SMC helper Stats ships separately, Windows needs a
+    // kernel driver, so both report false and the page says why.
+    bool sensors = false;
+    // A battery/AC surface exists (power_supply, AppleSmartBattery, the
+    // Windows battery class devices). Data can still be absent on a desktop.
+    bool battery = false;
 };
 
 class SystemBackend {
@@ -113,6 +139,18 @@ public:
         Q_UNUSED(startTime);
         return false;
     }
+    // M78: apply one process verb. Implementations report the errno / API
+    // error text so the console can state exactly why a verb was refused
+    // instead of pretending it worked.
+    virtual bool applyProcessAction(const ProcessAction &action,
+                                    QString *error) {
+        Q_UNUSED(action);
+        if (error != nullptr) {
+            *error = QStringLiteral("process actions are not supported on %1")
+                         .arg(platformName());
+        }
+        return false;
+    }
     virtual bool totalCpuTicks(unsigned long long &out) {
         Q_UNUSED(out);
         return false;
@@ -138,6 +176,32 @@ public:
     virtual int countFds(int pid) {
         Q_UNUSED(pid);
         return -1;
+    }
+    // Cumulative block-i/o bytes of one process. readBytes is device traffic
+    // (Linux /proc/<pid>/io read_bytes); writeBytes already has
+    // cancelled_write_bytes subtracted where the platform reports it.
+    virtual bool processDiskCounters(int pid, long long &readBytes,
+                                     long long &writeBytes) {
+        Q_UNUSED(pid);
+        Q_UNUSED(readBytes);
+        Q_UNUSED(writeBytes);
+        return false;
+    }
+    // Device-level GPU state (utilization, memory, temperature, power,
+    // clock) plus whatever per-process usage the platform can attribute.
+    virtual GpuReading gpuInfo() { return GpuReading{}; }
+    // Hardware sensors (temperatures, fans, power) plus battery and AC
+    // adapter state. Platforms without the surface return an empty snapshot
+    // with a note so the page never renders a silent blank.
+    virtual SensorsSnapshot sensors() { return SensorsSnapshot{}; }
+    // Per-DRM-client engine-time counters for the given pids (Linux fdinfo).
+    // Platforms without a readable per-client surface leave this empty and
+    // report gpuClients == false so the page stays honest.
+    virtual bool gpuClients(const QList<int> &pids,
+                            QList<GpuEngineSample> &out) {
+        Q_UNUSED(pids);
+        Q_UNUSED(out);
+        return false;
     }
     virtual QList<QString> fdTargets(int pid) {
         Q_UNUSED(pid);
@@ -219,5 +283,15 @@ public:
     // own source strategies and do not fill this.
     virtual QList<ServiceRecord> readServices() {
         return QList<ServiceRecord>();
+    }
+    // M78: restart one unit through the platform supervisor. Linux/macOS go
+    // through their own tools in ServicesSource; Windows uses the SCM.
+    virtual bool restartService(const QString &name, QString *error) {
+        Q_UNUSED(name);
+        if (error != nullptr) {
+            *error = QStringLiteral("service restart is not supported on %1")
+                         .arg(platformName());
+        }
+        return false;
     }
 };

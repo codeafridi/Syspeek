@@ -150,8 +150,8 @@ QStringList fimWatchRoots(const QStringList &paths) {
         }
         const QString parent = info.absolutePath();
         if (info.isFile()
-            || QFileInfo(parent).isDir()
-                                 && !QFileInfo(parent).isSymLink()) {
+            || (QFileInfo(parent).isDir()
+                && !QFileInfo(parent).isSymLink())) {
             const QString canonical =
                 QFileInfo(parent).canonicalFilePath();
             roots.append(canonical.isEmpty() ? parent : canonical);

@@ -2,8 +2,9 @@
 
 #include "DashboardPanel.h"
 #include "Theme.h"
-#include "platform/NotifierFactory.h"
 #include "platform/PlatformFactory.h"
+
+#include "platform/linux/LinuxOverlay.h"
 
 #ifdef Q_OS_MACOS
 #include "platform/mac/MacOverlay.h"
@@ -20,10 +21,13 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QMoveEvent>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -66,7 +70,6 @@ HudWindow::HudWindow(QWidget *parent)
 #endif
     setObjectName(QStringLiteral("hudRoot"));
 
-    m_notifier = createNotifier();
     m_webhook = new AlertWebhook(this);
     connect(m_webhook, &AlertWebhook::deliveryFinished, this,
             [this](bool, const QString &) {
@@ -178,12 +181,34 @@ HudWindow::HudWindow(QWidget *parent)
     m_showHideButton->setCursor(Qt::PointingHandCursor);
     connect(m_showHideButton, &QPushButton::clicked, this, &HudWindow::toggleCompact);
 
+    m_clickButton = new QPushButton(QStringLiteral("CLICK"), this);
+    m_clickButton->setObjectName(QStringLiteral("clickButton"));
+    m_clickButton->setFocusPolicy(Qt::NoFocus);
+    m_clickButton->setCursor(Qt::PointingHandCursor);
+    m_clickButton->setToolTip(QStringLiteral(
+        "click-through: let every click except this button reach the window "
+        "below"));
+    connect(m_clickButton, &QPushButton::clicked, this,
+            &HudWindow::toggleClickThrough);
+
+    // Geometry is remembered from the signals the window actually emits rather
+    // than from the values we asked for: a layout can grow a frame the moment
+    // it is laid out (wider fonts, a longer monitor name) and a resize we
+    // requested would then be persisted as a size the window does not have.
+    // Debounced so a drag does not write the file on every mouse move.
+    m_overlaySaveTimer = new QTimer(this);
+    m_overlaySaveTimer->setSingleShot(true);
+    m_overlaySaveTimer->setInterval(400);
+    connect(m_overlaySaveTimer, &QTimer::timeout, this,
+            &HudWindow::persistOverlay);
+
     footer->addWidget(m_moreButton);
+    footer->addWidget(m_clickButton);
     footer->addWidget(m_showHideButton);
     root->addLayout(footer);
 
     for (QPushButton *button : {m_dockerButton, m_kubeButton, m_moreButton,
-                                m_showHideButton}) {
+                                m_clickButton, m_showHideButton}) {
         button->installEventFilter(this);
     }
 
@@ -222,14 +247,14 @@ HudWindow::HudWindow(QWidget *parent)
         "  background-color: %SURFACE%;"
         "  border-left: 1px solid %BORDER%;"
         "}"
-        "#moreButton, #showHideButton {"
+        "#moreButton, #clickButton, #showHideButton {"
         "  color: %MUTED%;"
         "  background-color: transparent;"
         "  border: 1px solid %BORDER%;"
         "  font-size: 9px;"
         "  padding: 3px 10px;"
         "}"
-        "#moreButton:hover, #showHideButton:hover {"
+        "#moreButton:hover, #clickButton:hover, #showHideButton:hover {"
         "  color: %TEXT%; border-color: %MUTED%;"
         "}"
         "QLabel   { color: %DIM%; }")
@@ -249,6 +274,18 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::resetMonitors);
     connect(m_panel, &DashboardPanel::historyExportRequested, this,
             &HudWindow::exportHistory);
+    connect(m_panel, &DashboardPanel::historySeekRequested, this,
+            &HudWindow::seekHistory);
+    connect(m_panel, &DashboardPanel::silenceRequested, this,
+            &HudWindow::addSilence);
+    connect(m_panel, &DashboardPanel::silenceExpireRequested, this,
+            &HudWindow::expireSilence);
+    connect(m_panel, &DashboardPanel::processActionRequested, this,
+            &HudWindow::applyProcessAction);
+    connect(m_panel, &DashboardPanel::serviceRestartRequested, this,
+            &HudWindow::serviceRestartRequested);
+    connect(m_panel, &DashboardPanel::containerActionRequested, this,
+            &HudWindow::containerActionRequested);
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -292,6 +329,10 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     while (m_exportRows.size() > 1800) {
         m_exportRows.removeFirst();
     }
+    if (m_historyLog.isOpen()) {
+        m_historyLog.append(historyRecordFrom(m_exportRows.last()));
+        publishHistory();
+    }
 
     if (m_appValue->text() != snapshot.appName) {
         m_appValue->setText(snapshot.appName);
@@ -330,6 +371,26 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
         }
     } else {
         m_alertInput.stealValid = false;
+    }
+    if (snapshot.sensors.available && snapshot.sensors.hottestCelsius >= 0.0) {
+        m_alertInput.tempValid = true;
+        m_alertInput.tempCelsius = snapshot.sensors.hottestCelsius;
+    } else {
+        m_alertInput.tempValid = false;
+    }
+    double lowestCharge = -1.0;
+    for (const BatteryReading &battery : snapshot.sensors.batteries) {
+        if (battery.capacityPercent < 0) {
+            continue;
+        }
+        const double charge = static_cast<double>(battery.capacityPercent);
+        lowestCharge = lowestCharge < 0.0 ? charge : qMin(lowestCharge, charge);
+    }
+    if (lowestCharge >= 0.0) {
+        m_alertInput.batteryValid = true;
+        m_alertInput.batteryPercent = lowestCharge;
+    } else {
+        m_alertInput.batteryValid = false;
     }
     if (snapshot.kernelLimits.available && snapshot.kernelLimits.fdMax > 0) {
         m_alertInput.kernelFdValid = true;
@@ -496,10 +557,6 @@ void HudWindow::setJournalSnapshot(const JournalSnapshot &snapshot) {
     evaluateAlerts();
 }
 
-void HudWindow::setNotifier(std::unique_ptr<Notifier> notifier) {
-    m_notifier = std::move(notifier);
-}
-
 void HudWindow::setWebhookConfig(const WebhookConfig &config) {
     if (m_webhook != nullptr) {
         m_webhook->setConfig(config);
@@ -596,6 +653,91 @@ void HudWindow::setFimSnapshot(const FimSnapshot &snapshot) {
     }
 }
 
+void HudWindow::setHistoryStore(const QString &path, int capacity) {
+    m_historySeek = -1;
+    m_historyTick = 0;
+    m_historyWindowCount = -1;
+    m_historySpanMs = 0;
+    m_historyCapacity = capacity;
+    if (capacity <= 0) {
+        m_historyLog.close();
+        publishHistory();
+        return;
+    }
+    if (!m_historyLog.open(path, capacity)) {
+        qWarning() << "history: could not open the ring at" << path
+                   << "- rewinding stays unavailable";
+    }
+    publishHistory();
+}
+
+void HudWindow::publishHistory() {
+    if (m_panel == nullptr) {
+        return;
+    }
+    HistoryViewInfo info;
+    info.enabled = m_historyLog.isOpen();
+    info.path = m_historyLog.path();
+    info.count = m_historyLog.count();
+    info.capacity = m_historyLog.capacity();
+    info.bytes = m_historyLog.isOpen() ? m_historyLog.fileBytes() : 0;
+    info.intervalMs = m_historyLog.isOpen() ? m_historyLog.intervalMs() : 1000;
+    info.spanMs = m_historySpanMs;
+    // The stored window is read off disk on a slow cadence (every 5th tick
+    // or when the sample count jumps): one append per tick is the only
+    // steady disk traffic the history costs.
+    ++m_historyTick;
+    if (info.count > 0
+        && (m_historyWindowCount < 0 || m_historyTick % 5 == 0
+            || info.count != m_historyWindowCount)) {
+        QList<HistoryRecord> window;
+        m_historyLog.readLast(240, window);
+        for (const HistoryRecord &record : window) {
+            info.window.append(exportRowFromHistory(record));
+        }
+        m_historyWindowCount = info.count;
+        m_historySpanMs = m_historyLog.spanMs();
+        info.spanMs = m_historySpanMs;
+        if (!info.window.isEmpty()) {
+            info.newestMs = info.window.last().atMs;
+        }
+    }
+    m_panel->setHistoryView(info);
+    if (!info.enabled || info.count <= 0) {
+        m_panel->setHistorySelection(QStringLiteral("history: disabled"),
+                                     QStringLiteral("--"));
+        return;
+    }
+    const int last = info.count - 1;
+    if (m_historySeek < 0 || m_historySeek > last) {
+        m_historySeek = last;
+    }
+    if (m_historySeek == last) {
+        if (m_exportRows.isEmpty()) {
+            return;
+        }
+        const HistoryRecord newest = historyRecordFrom(m_exportRows.last());
+        m_panel->setHistorySelection(
+            historyPositionText(last, info.count, newest, true),
+            historyRecordText(newest));
+        return;
+    }
+    HistoryRecord record;
+    if (m_historyLog.readAt(m_historySeek, record)) {
+        m_panel->setHistorySelection(
+            historyPositionText(m_historySeek, info.count, record, false),
+            historyRecordText(record));
+    }
+}
+
+void HudWindow::seekHistory(int index) {
+    if (!m_historyLog.isOpen()) {
+        return;
+    }
+    m_historySeek = index;
+    publishHistory();
+}
+
 void HudWindow::setSettingsInfo(const SettingsInfo &info) {
     if (m_panel != nullptr) {
         m_panel->setSettingsInfo(info);
@@ -620,21 +762,131 @@ void HudWindow::resetMonitors() {
     setMonitors(m_alerts.rules());
 }
 
+void HudWindow::setActionsEnabled(bool enabled) {
+    m_actionsEnabled = enabled;
+}
+
+void HudWindow::applyProcessAction(const ProcessAction &action) {
+    if (m_panel == nullptr) {
+        return;
+    }
+    if (!m_actionsEnabled) {
+        m_panel->setActionStatus(
+            QStringLiteral("%1 refused: actions are disabled in [actions]")
+                .arg(processActionLabel(action)),
+            false);
+        return;
+    }
+    QString error;
+    const bool ok = systemBackend().applyProcessAction(action, &error);
+    const QString text = processActionResultText(action, ok, error);
+    m_panel->setActionStatus(text, ok);
+    if (ok) {
+        qInfo().noquote() << QStringLiteral("[actions]") << text;
+    } else {
+        qWarning().noquote() << QStringLiteral("[actions]") << text;
+    }
+}
+
+void HudWindow::setServiceActionStatus(const QString &text, bool ok) {
+    if (m_panel != nullptr) {
+        m_panel->setServiceStatus(text, ok);
+    }
+}
+
+void HudWindow::setContainerActionStatus(const QString &text, bool ok) {
+    if (m_panel != nullptr) {
+        m_panel->setContainerStatus(text, ok);
+    }
+}
+
+void HudWindow::setSilences(const QList<SilenceRule> &rules) {
+    m_silences = rules;
+    if (m_panel != nullptr) {
+        m_panel->setSilences(m_silences);
+    }
+}
+
+void HudWindow::addSilence(const QString &matcher, int minutes) {
+    const QString pattern = matcher.trimmed();
+    if (pattern.isEmpty() || minutes <= 0) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    SilenceRule rule;
+    rule.matcher = pattern;
+    rule.startsAtMs = now;
+    rule.endsAtMs = now + qint64(minutes) * 60 * 1000;
+    rule.author = qEnvironmentVariable("USER");
+    if (rule.author.isEmpty()) {
+        rule.author = qEnvironmentVariable("USERNAME");
+    }
+    if (rule.author.isEmpty()) {
+        rule.author = QStringLiteral("local");
+    }
+    rule.comment = QStringLiteral("snoozed from the alerts page");
+
+    // Re-snoozing the same matcher replaces its window instead of stacking
+    // a second rule the user cannot see separately.
+    QList<SilenceRule> rules;
+    for (const SilenceRule &existing : m_silences) {
+        if (existing.matcher.compare(pattern, Qt::CaseInsensitive) != 0) {
+            rules.append(existing);
+        }
+    }
+    rules.append(rule);
+    setSilences(rules);
+    saveSilences(defaultConfigPath(), m_silences);
+}
+
+void HudWindow::expireSilence(const QString &matcher) {
+    const QString pattern = matcher.trimmed();
+    if (pattern.isEmpty()) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    bool changed = false;
+    for (SilenceRule &rule : m_silences) {
+        if (rule.matcher.compare(pattern, Qt::CaseInsensitive) == 0
+            && rule.endsAtMs > now) {
+            rule.endsAtMs = now;
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+    setSilences(m_silences);
+    saveSilences(defaultConfigPath(), m_silences);
+}
+
 void HudWindow::evaluateAlerts() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const QList<Alert> fired = m_alerts.update(m_alertInput, now);
-    if (m_notifier != nullptr) {
-        for (const Alert &alert : fired) {
-            m_notifier->send(alert);
+    const QList<Alert> active = m_alerts.active();
+
+    // A live silence keeps the monitor evaluating (the page still shows the
+    // breach) and only mutes the outbound paths: webhook delivery and
+    // incident creation.
+    QList<Alert> loudFired;
+    for (const Alert &alert : fired) {
+        if (activeSilenceFor(m_silences, alert.id, now) == nullptr) {
+            loudFired.append(alert);
         }
     }
-    const QList<Alert> active = m_alerts.active();
+    QList<Alert> loudActive;
+    for (const Alert &alert : active) {
+        if (activeSilenceFor(m_silences, alert.id, now) == nullptr) {
+            loudActive.append(alert);
+        }
+    }
+
     if (m_webhook != nullptr) {
-        m_webhook->processEvents(fired, active, now);
+        m_webhook->processEvents(loudFired, loudActive, now);
     }
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
-        m_incidents.update(active, now);
+        m_incidents.update(loudActive, now);
         m_panel->setIncidents(m_incidents.incidents());
     }
 }
@@ -687,12 +939,22 @@ void HudWindow::toggleDetails() {
         }
         if (screen != nullptr) {
             const QRect avail = screen->availableGeometry();
-            const int w = avail.width() * 7 / 10;
-            const int h = avail.height() * 7 / 10;
+            QSize want(avail.width() * 7 / 10, avail.height() * 7 / 10);
+            if (m_overlayConfig.width >= 430 && m_overlayConfig.height >= 120) {
+                // The console remembers the size the user last gave it.
+                want = QSize(m_overlayConfig.width, m_overlayConfig.height);
+            }
             setMinimumSize(0, 0);
             setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-            resize(w, h);
-            move(avail.center().x() - w / 2, avail.center().y() - h / 2);
+            const QRect target = clampOverlayGeometry(
+                QRect(QPoint(avail.center().x() - want.width() / 2,
+                             avail.center().y() - want.height() / 2),
+                      want),
+                avail, QSize(430, 120));
+            if (target.isValid()) {
+                resize(target.size());
+                move(target.topLeft());
+            }
         }
 
         m_detailsExpanded = true;
@@ -709,6 +971,13 @@ void HudWindow::toggleDetails() {
 
     m_moreButton->setText(m_detailsExpanded ? QStringLiteral("LESS")
                                             : QStringLiteral("MORE"));
+
+    if (m_overlay.clickThrough) {
+        // The kept input rectangle follows the CLICK button when the layout
+        // changes, so re-shape rather than leaving a stale clickable island.
+        applyClickThrough(true);
+    }
+    persistOverlay();
 }
 
 void HudWindow::toggleCompact() {
@@ -731,6 +1000,218 @@ void HudWindow::toggleCompact() {
     }
 
     adjustSize();
+
+    if (m_overlay.clickThrough) {
+        applyClickThrough(true);
+    }
+}
+
+void HudWindow::setOverlayConfig(const OverlayConfig &config,
+                                const QString &path) {
+    m_overlayConfig = config;
+    m_overlayPath = path;
+}
+
+void HudWindow::refreshOverlayState() {
+    m_overlaySession = detectOverlaySession(
+        QGuiApplication::platformName(),
+        QString::fromLocal8Bit(qgetenv("WAYLAND_DISPLAY")),
+        QString::fromLocal8Bit(qgetenv("DISPLAY")));
+
+    m_overlay.workArea = QRect();
+    m_overlay.wmName.clear();
+    m_overlay.pinnedAbove = (m_overlaySession != OverlaySession::X11);
+    m_overlay.dockWindow = false;
+    m_overlay.hidden = false;
+
+    if (m_overlaySession == OverlaySession::X11) {
+        const linuxoverlay::X11Probe probe = linuxoverlay::probe();
+        m_overlay.wmName = probe.wmName;
+        m_overlay.workArea = probe.workArea;
+        m_overlay.clickThroughCapable = probe.display && probe.shapeAvailable;
+        m_overlayStickySupported = probe.stickySupported;
+        const QStringList states = linuxoverlay::windowStates(winId());
+        m_overlay.pinnedAbove = overlayAboveConfirmed(states);
+        m_overlay.sticky = overlaySticky(states);
+        m_overlay.hidden = overlayHidden(states);
+        m_overlay.dockWindow =
+            overlayDockWindow(linuxoverlay::windowTypes(winId()));
+    } else {
+        // Every other window server keeps the frame above by construction
+        // (NSFloatingWindowLevel / SetWindowPos' top-most band / the
+        // compositor's layer), so nothing needs to be requested.
+        m_overlay.clickThroughCapable = false;
+    }
+
+    if (!m_overlay.clickThrough) {
+        m_overlay.note = overlayClickThroughNote(m_overlaySession,
+                                                 m_overlay.clickThroughCapable);
+    }
+    publishOverlayState();
+}
+
+void HudWindow::publishOverlayState() {
+    m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    if (m_panel != nullptr) {
+        m_panel->setOverlayLine(
+            overlaySummaryText(m_overlaySession, m_overlay));
+    }
+}
+
+void HudWindow::restoreOverlay() {
+    // The saved rectangle is only a hint: monitors go away, resolutions
+    // change and a HUD restored onto a vanished screen is unreachable.
+    if (m_overlayConfig.x < 0 || m_overlayConfig.y < 0) {
+        return;
+    }
+
+    QList<QRect> screens;
+    for (const QScreen *screen : QGuiApplication::screens()) {
+        screens.append(screen->availableGeometry());
+    }
+    if (screens.isEmpty()) {
+        return;
+    }
+
+    // In compact mode the frame is a fixed-width strip, so the saved size
+    // belongs to the expanded console: clamp the launch position against the
+    // size the window actually has, or an 820px-wide hint on a narrow screen
+    // would pull the HUD to the left edge.
+    const QSize savedSize =
+        m_detailsExpanded
+            ? QSize(m_overlayConfig.width > 0 ? m_overlayConfig.width : width(),
+                    m_overlayConfig.height > 0 ? m_overlayConfig.height
+                                               : height())
+            : size();
+    const QRect saved(QPoint(m_overlayConfig.x, m_overlayConfig.y), savedSize);
+    const QRect target =
+        restoreOverlayGeometry(saved, screens, QSize(430, 120));
+    if (!target.isValid()) {
+        return;
+    }
+
+    move(target.topLeft());
+    if (m_detailsExpanded && m_overlayConfig.width > 0
+        && m_overlayConfig.height > 0) {
+        resize(target.size());
+    }
+}
+
+void HudWindow::verifyOverlayStates(int attempt) {
+    if (m_overlaySession != OverlaySession::X11) {
+        return;
+    }
+    const QStringList states = linuxoverlay::windowStates(winId());
+    m_overlay.pinnedAbove = overlayAboveConfirmed(states);
+    m_overlay.sticky = overlaySticky(states);
+    m_overlay.hidden = overlayHidden(states);
+    m_overlay.dockWindow = overlayDockWindow(linuxoverlay::windowTypes(winId()));
+
+    // A request sent from showEvent can land before the window manager has
+    // finished managing the frame, in which case it is dropped. Retry twice,
+    // then report whatever the wm actually did instead of assuming success.
+    if (!m_overlay.sticky && m_overlayConfig.sticky && m_overlayStickySupported
+        && attempt < 2) {
+        linuxoverlay::requestSticky(winId(), nullptr);
+        QTimer::singleShot(1000, this, [this, attempt] {
+            verifyOverlayStates(attempt + 1);
+        });
+        return;
+    }
+    publishOverlayState();
+}
+
+void HudWindow::ensureOnScreen() {
+    // A monitor can go away, or the frame can be dragged past the last edge,
+    // and then the HUD is unreachable with no way back from the UI. Pull it
+    // onto the screen it overlaps most (or the primary one when it overlaps
+    // nothing at all).
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        return;
+    }
+    QList<QRect> areas;
+    for (const QScreen *screen : screens) {
+        areas.append(screen->availableGeometry());
+    }
+    const QRect current(QPoint(x(), y()), size());
+    for (const QRect &area : areas) {
+        if (area.intersects(current)) {
+            return;
+        }
+    }
+    const QRect target =
+        restoreOverlayGeometry(current, areas, QSize(430, 120));
+    if (!target.isValid()) {
+        return;
+    }
+    move(target.topLeft());
+    persistOverlay();
+}
+
+void HudWindow::persistOverlay() {
+    if (m_overlayPath.isEmpty()) {
+        return;
+    }
+    const QRect current = geometry();
+    if (current == m_overlayPersisted) {
+        return;
+    }
+    m_overlayPersisted = current;
+
+    OverlayConfig next = m_overlayConfig;
+    next.clickThrough = m_overlay.clickThrough;
+    next.x = current.x();
+    next.y = current.y();
+    if (m_detailsExpanded) {
+        next.width = current.width();
+        next.height = current.height();
+    }
+    saveOverlayConfig(m_overlayPath, next);
+    m_overlayConfig = next;
+}
+
+void HudWindow::applyClickThrough(bool on) {
+    QString note;
+    bool applied = false;
+
+    if (m_overlaySession == OverlaySession::X11) {
+        // The CLICK button itself stays inside the input region, otherwise
+        // the mode would be a one-way trip with no way back from the HUD.
+        QRect keep(QPoint(0, 0), m_clickButton->size());
+        keep.moveTo(m_clickButton->mapTo(this, QPoint(0, 0)));
+        keep.adjust(-4, -4, 4, 4);
+        applied = linuxoverlay::setClickThrough(winId(), on, keep, &note);
+        if (!applied && note.isEmpty()) {
+            note = QStringLiteral("x11: the shape request was refused");
+        }
+    } else {
+        note = overlayClickThroughNote(m_overlaySession,
+                                      m_overlay.clickThroughCapable);
+    }
+
+    m_overlay.clickThrough = on && applied;
+    m_overlay.note = note;
+    m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    m_clickButton->setText(m_overlay.clickThrough ? QStringLiteral("CLICK+")
+                                                 : QStringLiteral("CLICK"));
+    m_clickButton->setToolTip(overlayClickThroughNote(
+        m_overlaySession, m_overlay.clickThroughCapable));
+
+    if (m_overlaySession == OverlaySession::X11 && !applied) {
+        m_clickButton->setText(QStringLiteral("CLICK"));
+        m_overlay.clickThrough = false;
+    }
+
+    publishOverlayState();
+    persistOverlay();
+}
+
+void HudWindow::toggleClickThrough() {
+    if (m_overlaySession == OverlaySession::Unknown) {
+        refreshOverlayState();
+    }
+    applyClickThrough(!m_overlay.clickThrough);
 }
 
 void HudWindow::showEvent(QShowEvent *event) {
@@ -738,6 +1219,60 @@ void HudWindow::showEvent(QShowEvent *event) {
 #ifdef Q_OS_MACOS
     applyMacOverlay(this);
 #endif
+
+    if (m_overlayRestored) {
+        return;
+    }
+    m_overlayRestored = true;
+    m_overlayPersisted = geometry();
+
+    restoreOverlay();
+    refreshOverlayState();
+
+    if (m_overlaySession == OverlaySession::X11) {
+        // Qt marks the window top-most through the WM as well, but not every
+        // window manager honours the initial hint; verify and ask once.
+        if (!m_overlay.pinnedAbove && !m_overlayAboveRequested) {
+            m_overlayAboveRequested = true;
+            linuxoverlay::requestAbove(winId(), nullptr);
+        }
+        // A HUD that vanishes when the user switches desktop is useless, so
+        // ask for sticky once and report what the wm actually did.
+        if (m_overlayConfig.sticky && m_overlayStickySupported
+            && !m_overlay.sticky) {
+            linuxoverlay::requestSticky(winId(), nullptr);
+        }
+        QTimer::singleShot(250, this, [this] { verifyOverlayStates(0); });
+    }
+
+    QTimer *overlayTimer = new QTimer(this);
+    overlayTimer->setInterval(1000);
+    connect(overlayTimer, &QTimer::timeout, this, [this] {
+        ensureOnScreen();
+        persistOverlay();
+        m_overlay.geometry = QRect(QPoint(x(), y()), size());
+    });
+    overlayTimer->start();
+
+    // The saved mode is applied only after the window exists, and only when
+    // the session can actually honour it.
+    if (m_overlayConfig.clickThrough) {
+        applyClickThrough(true);
+    }
+}
+
+void HudWindow::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    if (m_overlaySaveTimer != nullptr && m_overlayRestored) {
+        m_overlaySaveTimer->start();
+    }
+}
+
+void HudWindow::moveEvent(QMoveEvent *event) {
+    QWidget::moveEvent(event);
+    if (m_overlaySaveTimer != nullptr && m_overlayRestored) {
+        m_overlaySaveTimer->start();
+    }
 }
 
 void HudWindow::keyPressEvent(QKeyEvent *event) {

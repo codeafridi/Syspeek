@@ -42,8 +42,6 @@ add_library(syspeek_core STATIC
     src/AlertEngine.h
     src/AlertWebhook.cpp
     src/AlertWebhook.h
-    src/Notifier.cpp
-    src/Notifier.h
     src/HostSampler.cpp
     src/HostSampler.h
     src/IoRateTracker.cpp
@@ -153,6 +151,8 @@ add_library(syspeek_core STATIC
     src/PrometheusStatus.h
     src/MetricsServer.cpp
     src/MetricsServer.h
+    src/MetricsEndpoint.cpp
+    src/MetricsEndpoint.h
     src/WatchdogStatus.cpp
     src/WatchdogStatus.h
     src/TlsSource.cpp
@@ -175,14 +175,42 @@ add_library(syspeek_core STATIC
     src/DumpReport.h
     src/AppLog.cpp
     src/AppLog.h
+    src/QtCompat.h
+    src/TickBudget.cpp
+    src/TickBudget.h
     src/ProbeRun.cpp
     src/ProbeRun.h
     src/MetricsExport.cpp
     src/MetricsExport.h
     src/ExportRun.cpp
     src/ExportRun.h
+    src/ProcessDiskStatus.cpp
+    src/ProcessDiskStatus.h
+    src/GpuStatus.cpp
+    src/GpuStatus.h
+    src/HistoryLog.cpp
+    src/HistoryLog.h
+    src/AlertSilence.cpp
+    src/AlertSilence.h
+    src/MonitorBands.cpp
+    src/MonitorBands.h
     src/ProcessNetStatus.cpp
     src/ProcessNetStatus.h
+    src/ProcessActions.cpp
+    src/ProcessActions.h
+    src/SensorStatus.cpp
+    src/SensorStatus.h
+    src/CloudStatus.cpp
+    src/CloudStatus.h
+    src/CloudProbe.cpp
+    src/CloudProbe.h
+    src/CloudFleetStatus.cpp
+    src/CloudFleetSource.cpp
+    src/CloudFleetSource.h
+    src/CloudPricing.cpp
+    src/CloudPricing.h
+    src/OverlayStatus.cpp
+    src/OverlayStatus.h
     src/KubeStatus.cpp
     src/KubeStatus.h
     src/KubeSource.cpp
@@ -192,16 +220,17 @@ add_library(syspeek_core STATIC
     src/platform/PlatformFactory.h
     src/platform/PortCatalog.cpp
     src/platform/PortCatalog.h
-    src/platform/NotifierFactory.cpp
-    src/platform/NotifierFactory.h
-    src/platform/NullNotifier.h
     src/platform/null/NullBackend.cpp
     src/platform/null/NullBackend.h)
 
 if(UNIX AND NOT APPLE)
     target_sources(syspeek_core PRIVATE
         src/platform/linux/LinuxBackend.cpp
-        src/platform/linux/LinuxBackend.h)
+        src/platform/linux/LinuxBackend.h
+        src/platform/linux/LinuxGpu.cpp
+        src/platform/linux/LinuxGpu.h
+        src/platform/linux/LinuxOverlay.cpp
+        src/platform/linux/LinuxOverlay.h)
 elseif(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
@@ -209,10 +238,12 @@ elseif(APPLE)
     target_sources(syspeek_core PRIVATE
         src/platform/mac/MacBackend.cpp
         src/platform/mac/MacBackend.h
+        src/platform/mac/MacGpu.cpp
+        src/platform/mac/MacGpu.h
+        src/platform/mac/MacSensors.cpp
+        src/platform/mac/MacSensors.h
         src/platform/mac/MacFocusProvider.mm
         src/platform/mac/MacFocusProvider.h
-        src/platform/mac/MacNotifier.mm
-        src/platform/mac/MacNotifier.h
         src/platform/mac/MacLogSource.mm
         src/platform/mac/MacLogSource.h
         src/platform/mac/MacOverlay.mm
@@ -224,17 +255,17 @@ elseif(WIN32)
     target_sources(syspeek_core PRIVATE
         src/platform/win/WindowsBackend.cpp
         src/platform/win/WindowsBackend.h
+        src/platform/win/WindowsSensors.cpp
+        src/platform/win/WindowsSensors.h
         src/platform/win/WinFocusProvider.cpp
         src/platform/win/WinFocusProvider.h
         src/platform/win/WinLogSource.cpp
-        src/platform/win/WinLogSource.h
-        src/platform/win/WindowsNotifier.cpp
-        src/platform/win/WindowsNotifier.h)
+        src/platform/win/WinLogSource.h)
     if(TARGET Qt6::DBus)
         target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
     endif()
     target_link_libraries(syspeek_core PUBLIC
-        iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi)
+        iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi setupapi)
     target_compile_definitions(syspeek_core PUBLIC
         WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_WARNINGS)

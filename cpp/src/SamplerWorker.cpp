@@ -1,16 +1,38 @@
 #include "SamplerWorker.h"
 
+#include "CloudFleetSource.h"
+#include "CostModel.h"
 #include "FocusedWindowProvider.h"
 #include "MemoryFormat.h"
 #include "ProcessGrouper.h"
 #include "platform/PortCatalog.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
 #include <QSet>
+#include <QFile>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
+
+namespace {
+
+// iotop's DISK WRITE column is write_bytes - cancelled_write_bytes, clamped
+// at zero (ui.py format_stats). Windows and macOS report the net figure
+// already, so only Linux carries the cancelled counter.
+long long diskWriteBytes(const linuxproc::ProcDetail &detail) {
+    if (detail.writeBytes < 0) {
+        return -1;
+    }
+    if (detail.cancelledWriteBytes > 0) {
+        return qMax(0LL, detail.writeBytes - detail.cancelledWriteBytes);
+    }
+    return detail.writeBytes;
+}
+
+}  // namespace
 
 SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
                              const Config &config,
@@ -28,6 +50,7 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
     , m_groupCache(5000, *m_backend)
     , m_health(config.health) {
     m_intervalMs = config.sampleIntervalMs;
+    m_cloud = config.cloud;
     m_sloSpec.name = config.slo.name;
     m_sloSpec.objective = config.slo.objective;
     m_sloSpec.windowHours = config.slo.windowHours;
@@ -35,6 +58,9 @@ SamplerWorker::SamplerWorker(FocusedWindowProvider *provider,
 }
 
 void SamplerWorker::start() {
+    if (m_cloudFleet == nullptr) {
+        m_cloudFleet = new CloudFleetRunner(this);
+    }
     if (!m_hostInfoReady) {
         m_hostInfo = collectHostInfo();
         m_hostInfoReady = true;
@@ -52,13 +78,62 @@ void SamplerWorker::stop() {
     if (m_timer != nullptr) {
         m_timer->stop();
     }
+    if (m_cloudFleet != nullptr) {
+        m_cloudFleet->stop();
+    }
 }
 
 void SamplerWorker::sampleNow() {
-    const FocusSample focus = m_sampler.sample();
+    // M84: bracket the whole tick. The section list is rebuilt per tick and
+    // the bounded total window keeps the memory cost flat for a HUD that runs
+    // for days. A blocking call on this thread shows up as one slow section
+    // instead of as a mystery stutter.
+    m_tickSections.clear();
+    QElapsedTimer tickClock;
+    tickClock.start();
+
+    FocusSample focus;
+    {
+        tickbudget::Section section(&m_tickSections, "focus");
+        focus = m_sampler.sample();
+    }
     DisplaySnapshot snapshot = buildSnapshot(focus);
     snapshot.sequence = ++m_sequence;
+
+    const double totalMs = static_cast<double>(tickClock.nsecsElapsed()) / 1.0e6;
+    m_tickTotals.append(totalMs);
+    while (m_tickTotals.size() > 120) {
+        m_tickTotals.removeFirst();
+    }
+    m_tickCost = tickbudget::summarize(m_tickSections, totalMs, m_tickTotals);
+    updateSelfCost();
+    snapshot.tick = m_tickCost;
+    snapshot.self = m_selfCost;
+
     emit snapshotReady(snapshot);
+}
+
+void SamplerWorker::updateSelfCost() {
+    // Self cost rides the same source as the focused app: procCpu deltas over
+    // machine-wide totalCpu deltas x cores. One /proc or API read per tick.
+    const int selfPid = static_cast<int>(QCoreApplication::applicationPid());
+    unsigned long long ticks = 0;    unsigned long long start = 0;
+    if (!m_backend->procCpu(selfPid, ticks, start) || start == 0) {
+        m_selfCost = SelfCost{};
+        return;
+    }
+    const ProcessIdentity selfIdentity{selfPid, start};
+    const CpuSample sample = m_selfCpu.sample(QList<int>{selfPid}, selfIdentity);
+
+    SelfCost cost;
+    cost.available = sample.available;
+    cost.warming = sample.warming;
+    cost.cpuPercent = sample.warming ? -1.0 : sample.percent;
+    unsigned long long rss = 0;
+    if (m_backend->rssKb(selfPid, rss)) {
+        cost.rssKb = static_cast<double>(rss);
+    }
+    m_selfCost = cost;
 }
 
 DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
@@ -79,11 +154,17 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         m_health.reset();
         m_slo.record(false, QDateTime::currentMSecsSinceEpoch());
         snap.slo = m_slo.report(m_sloSpec);
-        const QList<linuxproc::SocketInfo> sockets =
-            m_backend->capabilities().perProcessNet
-                ? m_backend->readNetSockets()
-                : QList<linuxproc::SocketInfo>{};
-        fillProcessNet(snap, sockets);
+        QList<linuxproc::SocketInfo> sockets;
+        {
+            tickbudget::Section section(&m_tickSections, "sockets");
+            sockets = m_backend->capabilities().perProcessNet
+                          ? m_backend->readNetSockets()
+                          : QList<linuxproc::SocketInfo>{};
+        }
+        {
+            tickbudget::Section section(&m_tickSections, "process net");
+            fillProcessNet(snap, sockets);
+        }
         fillHostTail(snap, sockets);
         return snap;
     }
@@ -128,8 +209,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     unsigned long long swapTotal = 0;
     unsigned long long sharedTotal = 0;
     QList<ProcessRow> rows;
+    m_rowDiskCounters.clear();
     linuxproc::ProcDetail rootDetail;
     int rootPid = -1;
+    tickbudget::Section processSection(&m_tickSections, "processes");
     for (const ProcNode &node : tree) {
         linuxproc::MemInfo info;
         linuxproc::ProcDetail detail;
@@ -146,6 +229,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
             rootDetail = detail;
         }
 
+        m_rowDiskCounters.insert(
+            node.pid,
+            ProcessDiskCounters{detail.readBytes, diskWriteBytes(detail)});
+
         ProcessRow row;
         row.pid = node.pid;
         row.depth = node.depth;
@@ -156,9 +243,11 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
         if (row.name.isEmpty()) {
             row.name = QString::number(node.pid);
         }
+        row.rssKb = static_cast<double>(info.rssKb);
         row.memory = formatMemoryKb(info.rssKb);
         rows.append(row);
     }
+    processSection.end();
 
     if (rootPid > 0) {
         const IoRateTracker::Rate rate =
@@ -201,7 +290,11 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     QList<QString> dbConnections;
     QHash<QString, int> stateCounts;
     QSet<QString> listenSeen;
-    const QList<linuxproc::SocketInfo> sockets = m_backend->readNetSockets();
+    QList<linuxproc::SocketInfo> sockets;
+    {
+        tickbudget::Section section(&m_tickSections, "sockets");
+        sockets = m_backend->readNetSockets();
+    }
 #if defined(Q_OS_LINUX)
     QHash<unsigned long long, linuxproc::TcpDiagInfo> tcpDiag;
     if (!inodeSet.isEmpty()) {
@@ -330,7 +423,10 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
     snap.endpoints = endpoints;
     snap.dbConnections = dbConnections;
 
-    fillProcessNet(snap, sockets);
+    {
+        tickbudget::Section section(&m_tickSections, "process net");
+        fillProcessNet(snap, sockets);
+    }
 
     m_backend->processInstrumentation(focus.identity.pid, snap.instrumentation);
 
@@ -419,6 +515,8 @@ DisplaySnapshot SamplerWorker::buildSnapshot(const FocusSample &focus) {
 
 void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
                                  const QList<linuxproc::SocketInfo> &sockets) {
+    Q_UNUSED(sockets);
+    tickbudget::Section hostSection(&m_tickSections, "host");
 #if defined(Q_OS_LINUX)
     linuxproc::KernelLimits kernel;
     if (m_backend->kernelLimits(kernel) && kernel.available) {
@@ -443,15 +541,37 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
     }
 
     snapshot.hostInfo = m_hostInfo;
+    hostSection.end();
 
-    const DiskSnapshot disk = m_diskSampler.sample();
-    snapshot.disksAvailable = disk.available;
-    snapshot.disksWarming = disk.warming;
-    snapshot.disks = disk.disks;
-    snapshot.ioPressure = disk.pressure;
-    snapshot.ioPressureAvailable = disk.pressure.available;
-    snapshot.diskIntervalMs = disk.intervalMs;
+    {
+        tickbudget::Section section(&m_tickSections, "disks");
+        const DiskSnapshot disk = m_diskSampler.sample();
+        snapshot.disksAvailable = disk.available;
+        snapshot.disksWarming = disk.warming;
+        snapshot.disks = disk.disks;
+        snapshot.ioPressure = disk.pressure;
+        snapshot.ioPressureAvailable = disk.pressure.available;
+        snapshot.diskIntervalMs = disk.intervalMs;
+    }
 
+    {
+        tickbudget::Section section(&m_tickSections, "process disk");
+        fillProcessDisk(snapshot);
+    }
+    {
+        tickbudget::Section section(&m_tickSections, "gpu");
+        fillGpu(snapshot);
+    }
+    {
+        tickbudget::Section section(&m_tickSections, "sensors");
+        fillSensors(snapshot);
+    }
+    {
+        tickbudget::Section section(&m_tickSections, "cloud");
+        fillCloud(snapshot);
+    }
+
+    tickbudget::Section tcpSection(&m_tickSections, "tcp");
     const TcpHealth tcp = m_tcpSampler.sample();
     snapshot.tcpHealth = tcp;
     snapshot.tcpHealthAvailable = tcp.available;
@@ -467,6 +587,7 @@ void SamplerWorker::fillHostTail(DisplaySnapshot &snapshot,
         snapshot.tcpHealth.currEstab = established;
     }
 #endif
+    tcpSection.end();
 }
 
 void SamplerWorker::fillProcessNet(
@@ -563,4 +684,348 @@ void SamplerWorker::fillProcessNet(
             processNetListenPorts(sockets, inodesOfPid.value(talker.pid));
     }
     snapshot.processNetTalkers = talkers;
+}
+
+void SamplerWorker::fillGpu(DisplaySnapshot &snapshot) {
+    if (!m_backend->capabilities().gpu) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence = qBound<qint64>(qint64(2000), m_intervalMs * 2,
+                                          qint64(5000));
+    if (m_gpuStampMs == 0 || now - m_gpuStampMs >= cadence) {
+        const qint64 windowMs = m_gpuStampMs > 0
+            ? qBound<qint64>(qint64(200), now - m_gpuStampMs, qint64(60000))
+            : 0;
+        GpuReading reading = m_backend->gpuInfo();
+        if (m_backend->capabilities().gpuClients && reading.ok) {
+            const QList<int> all = m_backend->allPids();
+            QList<int> scan;
+            QSet<int> queued;
+            for (auto it = m_gpuClients.constBegin();
+                 it != m_gpuClients.constEnd(); ++it) {
+                if (!queued.contains(it->pid)) {
+                    queued.insert(it->pid);
+                    scan.append(it->pid);
+                }
+            }
+            // The focused app must show up on the first scan, so its pids
+            // are always in the window; the rotating slice discovers the
+            // machine-wide clients without paying a full fdinfo sweep.
+            for (const ProcessRow &row : snapshot.processes) {
+                if (!queued.contains(row.pid)) {
+                    queued.insert(row.pid);
+                    scan.append(row.pid);
+                }
+            }
+            constexpr int kRotate = 120;
+            if (!all.isEmpty()) {
+                const int count = qMin<int>(kRotate, all.size());
+                for (int i = 0; i < count; ++i) {
+                    const int pid = all.at((m_gpuRotate + i) % all.size());
+                    if (!queued.contains(pid)) {
+                        queued.insert(pid);
+                        scan.append(pid);
+                    }
+                }
+                m_gpuRotate = (m_gpuRotate + count) % all.size();
+            }
+            QList<GpuEngineSample> found;
+            m_backend->gpuClients(scan, found);
+            for (auto it = m_gpuClients.begin(); it != m_gpuClients.end();) {
+                if (!m_backend->exists(it->pid)) {
+                    it = m_gpuClients.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (const GpuEngineSample &client : found) {
+                m_gpuClients.insert(client.clientId, client);
+            }
+            if (m_gpuClients.size() > 512) {
+                m_gpuClients.clear();
+            }
+            const QList<GpuEngineSample> live = m_gpuClients.values();
+            const QHash<quint64, GpuClientBusy> busy =
+                gpuClientBusy(live, windowMs, m_gpuPrior);
+            m_gpuProcesses = gpuMergeClients(live, busy, 8);
+            const double clientTotal = gpuClientTotalBusy(m_gpuProcesses);
+            quint64 clientMem = 0;
+            for (const GpuEngineSample &client : live) {
+                clientMem += client.memLocal > 0 ? client.memLocal
+                                                 : client.memSystem;
+            }
+            for (GpuDevice &device : reading.devices) {
+                if (device.utilFromClients) {
+                    device.utilPercent = clientTotal > 0.0 ? clientTotal
+                        : (windowMs == 0 ? -1.0 : 0.0);
+                }
+                if (device.memUsed == 0 && clientMem > 0) {
+                    device.memUsed = clientMem;
+                }
+            }
+            if (reading.processes.isEmpty()) {
+                reading.processes = m_gpuProcesses;
+            }
+        }
+        m_gpuWarming =
+            m_backend->capabilities().gpuClients && windowMs == 0;
+        m_gpuStampMs = now;
+        m_gpuWindowMs = windowMs;
+        m_gpuReading = reading;
+    }
+    snapshot.gpu = m_gpuReading;
+    snapshot.gpuWarming = m_gpuWarming;
+    snapshot.gpuClientsAvailable = m_backend->capabilities().gpuClients;
+}
+
+void SamplerWorker::fillSensors(DisplaySnapshot &snapshot) {
+    const PlatformCapabilities caps = m_backend->capabilities();
+    if (!caps.sensors && !caps.battery) {
+        snapshot.sensors.note = QStringLiteral(
+            "sensors: no unprivileged sensor surface on %1 - thermal and "
+            "battery telemetry need a privileged helper or kernel driver")
+                                    .arg(m_backend->platformName());
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence = qBound<qint64>(qint64(2000), m_intervalMs * 2,
+                                          qint64(5000));
+    if (m_sensorsStampMs == 0 || now - m_sensorsStampMs >= cadence) {
+        m_sensors = m_backend->sensors();
+        m_sensorsStampMs = now;
+    }
+    snapshot.sensors = m_sensors;
+}
+
+void SamplerWorker::fillProcessDisk(DisplaySnapshot &snapshot) {
+    if (!m_backend->capabilities().perProcessDisk) {
+        return;
+    }
+    snapshot.processDiskAvailable = true;
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Per-row rates: the counters came out of procSample() in this same
+    // tick, so the window is the time since the previous tick.
+    if (!m_rowDiskCounters.isEmpty()) {
+        if (!snapshot.processes.isEmpty()) {
+            qint64 windowMs = m_intervalMs;
+            if (m_rowDiskStampMs > 0) {
+                windowMs = qBound<qint64>(qint64(50),
+                                          now - m_rowDiskStampMs,
+                                          qint64(60000));
+            }
+            m_rowDiskStampMs = now;
+            const QHash<int, ProcessDiskRate> rates =
+                processDiskRates(m_rowDiskCounters, windowMs, m_rowDiskPrior);
+            for (ProcessRow &row : snapshot.processes) {
+                const auto it = rates.constFind(row.pid);
+                if (it != rates.constEnd()) {
+                    row.diskReadPerSec = it->readPerSec;
+                    row.diskWritePerSec = it->writePerSec;
+                }
+            }
+        } else {
+            m_rowDiskStampMs = 0;
+        }
+        m_rowDiskCounters.clear();
+    }
+
+    // Machine-wide consumers need one /proc/<pid>/io read per pid, so the
+    // scan rides a 2 s cadence (the same cost argument as M71's inode map)
+    // and every tick just re-publishes the cached rows.
+    if (m_backend->capabilities().perProcessDiskScan
+        && (m_scanDiskStampMs == 0 || now - m_scanDiskStampMs >= 2000)) {
+        const QList<int> pids = m_backend->allPids();
+        QHash<int, ProcessDiskCounters> counters;
+        counters.reserve(pids.size());
+        int unreadable = 0;
+        for (int pid : pids) {
+            long long readBytes = -1;
+            long long writeBytes = -1;
+            if (m_backend->processDiskCounters(pid, readBytes, writeBytes)) {
+                counters.insert(pid, ProcessDiskCounters{readBytes, writeBytes});
+            } else {
+                ++unreadable;
+            }
+        }
+        qint64 windowMs = m_intervalMs;
+        if (m_scanDiskStampMs > 0) {
+            windowMs = qBound<qint64>(qint64(100), now - m_scanDiskStampMs,
+                                      qint64(60000));
+        }
+        m_scanDiskStampMs = now;
+        const QHash<int, ProcessDiskRate> rates =
+            processDiskRates(counters, windowMs, m_scanDiskPrior);
+        QList<ProcessDiskConsumer> top = processDiskTopConsumers(rates, {}, 8);
+        for (ProcessDiskConsumer &consumer : top) {
+            consumer.name = m_backend->comm(consumer.pid);
+            if (consumer.name.isEmpty()) {
+                consumer.name = QStringLiteral("pid %1").arg(consumer.pid);
+            }
+        }
+        m_scanDiskTop = top;
+        m_scanDiskReadPerSec = processDiskTotal(rates, true);
+        m_scanDiskWritePerSec = processDiskTotal(rates, false);
+        m_scanDiskTracked = counters.size();
+        m_scanDiskUnreadable = unreadable;
+        snapshot.processDiskScanning = true;
+    }
+
+    if (m_backend->capabilities().perProcessDiskScan) {
+        snapshot.processDiskScanning = true;
+        snapshot.processDiskTop = m_scanDiskTop;
+        snapshot.processDiskReadPerSec = m_scanDiskReadPerSec;
+        snapshot.processDiskWritePerSec = m_scanDiskWritePerSec;
+        snapshot.processDiskTracked = m_scanDiskTracked;
+        snapshot.processDiskUnreadable = m_scanDiskUnreadable;
+        snapshot.processDiskWarming = m_scanDiskTracked == 0;
+    }
+}
+
+void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
+    if (!m_cloud.enabled) {
+        snapshot.cloud.available = false;
+        snapshot.cloud.note = QStringLiteral(
+            "cloud: disabled ([cloud] enabled=false) - the instance metadata "
+            "service is never contacted");
+        CloudFootprint footprint;
+        footprint.enabled = false;
+        footprint.inventory = false;
+        footprint.timeoutMs = m_cloud.timeoutMs;
+        footprint.inventoryTimeoutMs = m_cloud.inventoryTimeoutMs;
+        footprint.ratesPath = m_cloud.ratesPath.isEmpty() ? defaultCloudRatePath()
+                                                          : m_cloud.ratesPath;
+        snapshot.cloud.footprint = footprint;
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 cadence =
+        m_cloudBase.available ? qint64(300000) : qint64(900000);
+    const bool probeDue = !m_cloudProbed || now - m_cloudProbeStampMs >= cadence;
+    // M84: the sweep is timed so the footprint card can state what the last
+    // one actually cost instead of only what it was allowed to cost.
+    QElapsedTimer sweepClock;
+    // The first sample must never wait on a link-local socket: on a host with
+    // no IMDS the sweep (GCP, OCI, Azure, AWS v2) can spend its whole
+    // per-request budget before it hears anything, which would delay the very
+    // first paint. The probe therefore starts on the second tick and the card
+    // states that for the one tick it is missing.
+    const bool firstTick = m_cloudTicks++ == 0;
+    if (probeDue && !firstTick) {
+        CloudProbeOptions options;
+        options.timeoutMs = m_cloud.timeoutMs;
+        sweepClock.start();
+        const CloudProbeResult probe = probeCloudIdentity(options);
+        m_cloudSweepMs = sweepClock.elapsed();
+        m_cloudSweepRequests = probe.attempted;
+        m_cloudProbed = true;
+        m_cloudProbeStampMs = now;
+
+        m_cloudBase = CloudSnapshot{};
+        m_cloudBase.identity = probe.identity;
+        m_cloudBase.available =
+            probe.identity.provider != CloudProvider::None;
+        m_cloudBase.note = probe.error;
+        m_cloudBase.sampledAtMs = now;
+
+        m_cloudRatesPath = m_cloud.ratesPath.isEmpty()
+            ? defaultCloudRatePath()
+            : m_cloud.ratesPath;
+        m_cloudRates = CloudRateTable{};
+        QFile ratesFile(m_cloudRatesPath);
+        if (ratesFile.open(QIODevice::ReadOnly)) {
+            m_cloudRates = parseCloudRateFile(
+                QString::fromUtf8(ratesFile.readAll()), m_cloudRatesPath);
+            ratesFile.close();
+        }
+        m_cloudRatesStampMs = now;
+
+        if (m_cloudBase.available) {
+            m_cloudBase.rateKey = cloudRateKey(
+                probe.identity.provider, probe.identity.instanceType);
+            m_cloudBase.ratePerHour = cloudRateFor(
+                m_cloudRates, probe.identity.provider,
+                probe.identity.instanceType);
+            m_cloudBase.rateSource = m_cloudRatesPath;
+            m_cloudBase.rateImportDate = m_cloudRates.importDate;
+            m_cloudBase.rateStaleDays =
+                cloudRateStaleDays(m_cloudRates.importDate, now);
+        }
+    }
+
+    CloudSnapshot cloud = m_cloudBase;
+    CloudFootprint footprint;
+    footprint.enabled = m_cloud.enabled;
+    footprint.inventory = m_cloud.inventory;
+    footprint.timeoutMs = m_cloud.timeoutMs;
+    footprint.inventoryTimeoutMs = m_cloud.inventoryTimeoutMs;
+    footprint.probed = m_cloudProbed;
+    footprint.lastSweepMs = m_cloudSweepMs;
+    footprint.lastRequests = m_cloudSweepRequests;
+    footprint.ratesPath = m_cloud.ratesPath.isEmpty() ? defaultCloudRatePath()
+                                                      : m_cloud.ratesPath;
+    footprint.identified = m_cloudBase.available;
+    if (!m_cloudProbed) {
+        cloud.note = cloudProbingText();
+    }
+    cloud.vcpus = QThread::idealThreadCount();
+    cloud.uptimeSec = cloudHostUptimeSeconds();
+    if (cloud.available) {
+        const CloudCostMath math =
+            computeCloudCost(cloud.ratePerHour, cloud.uptimeSec);
+        cloud.accruedUsd = math.accruedUsd;
+        cloud.projectedMonthlyUsd = math.projectedMonthlyUsd;
+
+        cloud.appName = snapshot.appName;
+        cloud.appPid = snapshot.pid.toInt();
+        if (snapshot.cpuValid) {
+            cloud.appCpuPercent = snapshot.cpuPercent;
+            cloud.appCostPerHour = cloudProcessCostPerHour(
+                cloud.ratePerHour, snapshot.cpuPercent, cloud.vcpus);
+        }
+
+        QList<CloudProcessSample> rows;
+        rows.reserve(snapshot.processes.size());
+        for (const ProcessRow &row : snapshot.processes) {
+            if (row.depth != 0) {
+                continue;
+            }
+            rows.append(CloudProcessSample{row.name, row.pid, row.cpuPercent});
+        }
+        cloud.consumers =
+            cloudTopConsumers(rows, cloud.ratePerHour, cloud.vcpus, 8);
+    }
+
+    // M83: instance age and the account inventory. The CLI is polled, never
+    // waited on; ages and the since-launch cost are recomputed from the cached
+    // launch time on every tick.
+    if (m_cloudFleet != nullptr) {
+        CloudFleetOptions fleetOptions;
+        fleetOptions.enabled = m_cloud.inventory;
+        fleetOptions.timeoutMs = m_cloud.inventoryTimeoutMs;
+        m_cloudFleet->setOptions(fleetOptions);
+        m_cloudFleet->update(cloud.identity, now);
+        CloudFleetStatus fleet = m_cloudFleet->status();
+        fleetResolveAges(fleet, now);
+        fleetApplyRates(fleet, m_cloudRates, kCostHoursPerMonth);
+        fleetMarkSelf(fleet, cloud.identity);
+        cloud.fleet = fleet;
+        footprint.fleetAttempted = fleet.attempted;
+        footprint.cliName = fleet.cliName;
+        if (fleet.selfIndex >= 0 && fleet.selfIndex < fleet.rows.size()) {
+            const CloudFleetInstance &self = fleet.rows.at(fleet.selfIndex);
+            cloud.launchedAtMs = self.launchedAtMs;
+            cloud.instanceAgeSec = self.ageSec;
+            if (cloud.instanceAgeSec >= 0 && cloud.ratePerHour >= 0.0) {
+                cloud.accruedLaunchUsd =
+                    computeCloudCost(cloud.ratePerHour, cloud.instanceAgeSec)
+                        .accruedUsd;
+            }
+        }
+    }
+    cloud.footprint = footprint;
+    snapshot.cloud = cloud;
 }

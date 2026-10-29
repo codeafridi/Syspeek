@@ -1,7 +1,7 @@
-#include "platform/NullNotifier.h"
 #include "platform/PlatformFactory.h"
 #include "platform/PortCatalog.h"
 #include "platform/null/NullBackend.h"
+#include "ProcessActions.h"
 
 #include "DumpReport.h"
 
@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 
 #if defined(Q_OS_WIN)
 #include <process.h>
@@ -119,12 +120,6 @@ int main(int argc, char *argv[]) {
     check(systemBackend().platformName() == backend->platformName(),
           "factory: singleton matches factory kind");
 
-    NullNotifier notifier;
-    check(notifier.name() == QStringLiteral("null"), "notifier: null name");
-    Alert probe;
-    probe.title = QStringLiteral("t");
-    check(!notifier.send(probe), "notifier: null send is a no-op");
-
     check(portcatalog::serviceForPort(5432) == QStringLiteral("postgres"),
           "portcatalog: 5432 postgres");
     check(portcatalog::portIsDatabase(6379), "portcatalog: 6379 database");
@@ -195,6 +190,90 @@ int main(int argc, char *argv[]) {
     check(!root.value(QStringLiteral("processes")).toArray().isEmpty(),
           "dump: processes non-empty");
 #endif
+
+    // ---- M78 verbs through the real backend ----
+    {
+        const PlatformCapabilities caps = backend->capabilities();
+#if !defined(Q_OS_WIN)
+        check(caps.processSignals && caps.processRenice,
+              "actions: the backend advertises signals + renice");
+#endif
+#if defined(Q_OS_LINUX)
+        check(caps.processIonice && caps.processOomScore && caps.processPause,
+              "actions: linux advertises ioprio, oom_score_adj and pause");
+#elif defined(Q_OS_MACOS)
+        check(!caps.processIonice && !caps.processOomScore && caps.processPause,
+              "actions: macos claims no ioprio/oom, does claim pause");
+#else
+        check(!caps.processIonice && !caps.processOomScore
+                  && !caps.processPause,
+              "actions: windows claims terminate only");
+#endif
+
+        ProcessAction bad;
+        bad.pid = -1;
+        bad.kind = ProcessActionKind::Signal;
+        bad.signal = ProcessSignal::Term;
+        QString badError;
+        check(!backend->applyProcessAction(bad, &badError)
+                  && !badError.isEmpty(),
+              "actions: an invalid pid is refused with a reason");
+
+        NullBackend nullBackend;
+        ProcessAction nullAction;
+        nullAction.pid = GETPID();
+        nullAction.kind = ProcessActionKind::Signal;
+        nullAction.signal = ProcessSignal::Term;
+        QString nullError;
+        check(!nullBackend.applyProcessAction(nullAction, &nullError)
+                  && nullError.contains(QStringLiteral("not supported")),
+              "actions: the null backend reports the gate text");
+
+#if !defined(Q_OS_WIN)
+        QProcess child;
+        child.start(QStringLiteral("sleep"), {QStringLiteral("30")});
+        const bool spawned = child.waitForStarted(3000);
+        check(spawned, "actions: spawned a child to act on");
+        if (spawned) {
+            const int childPid = int(child.processId());
+            QString error;
+
+            ProcessAction renice;
+            renice.pid = childPid;
+            renice.kind = ProcessActionKind::Renice;
+            renice.niceValue = 5;
+            renice.relative = true;
+            check(backend->applyProcessAction(renice, &error),
+                  "actions: renice +5 is applied");
+
+            ProcessAction pause;
+            pause.pid = childPid;
+            pause.kind = ProcessActionKind::Signal;
+            pause.signal = ProcessSignal::Stop;
+            check(backend->applyProcessAction(pause, &error),
+                  "actions: SIGSTOP is applied");
+
+            ProcessAction resume = pause;
+            resume.signal = ProcessSignal::Cont;
+            check(backend->applyProcessAction(resume, &error),
+                  "actions: SIGCONT is applied");
+
+            ProcessAction term;
+            term.pid = childPid;
+            term.kind = ProcessActionKind::Signal;
+            term.signal = ProcessSignal::Term;
+            check(backend->applyProcessAction(term, &error),
+                  "actions: SIGTERM is applied");
+            child.waitForFinished(3000);
+            check(child.state() == QProcess::NotRunning,
+                  "actions: the child exits on SIGTERM");
+        }
+        if (child.state() != QProcess::NotRunning) {
+            child.kill();
+            child.waitForFinished(2000);
+        }
+#endif
+    }
 
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

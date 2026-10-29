@@ -1,15 +1,32 @@
 #include "DumpReport.h"
 
+#include "CloudProbe.h"
+#include "CloudStatus.h"
+#include "HistoryLog.h"
+#include "TickBudget.h"
+#include "MetricsEndpoint.h"
+#include "CloudFleetSource.h"
+#include "CloudPricing.h"
+
+#include "OverlayStatus.h"
+#include "ProcessDiskStatus.h"
+
 #include "DiskStatus.h"
+#include "ProcessActions.h"
 #include "ProcessNetStatus.h"
 #include "SbomStatus.h"
 #include "HostInfoStatus.h"
 #include "platform/PlatformFactory.h"
+#include "platform/linux/LinuxOverlay.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QList>
 #include <QThread>
 
@@ -21,6 +38,14 @@
 #endif
 
 namespace {
+
+int dumpPid() {
+#if defined(Q_OS_WIN)
+    return static_cast<int>(::_getpid());
+#else
+    return static_cast<int>(::getpid());
+#endif
+}
 
 constexpr int kSampleIntervalMs = 200;
 
@@ -314,6 +339,707 @@ QString dumpReportJson(int maxProcs) {
 #endif
         }
         root.insert(QStringLiteral("processNet"), processNet);
+    }
+
+    {
+        QJsonObject processDisk;
+        const bool supported = backend.capabilities().perProcessDisk;
+        processDisk.insert(QStringLiteral("available"), supported);
+        processDisk.insert(QStringLiteral("scan"),
+                           backend.capabilities().perProcessDiskScan);
+        if (supported) {
+            QHash<int, ProcessDiskCounters> counterSet;
+            const QList<int> diskPids = backend.allPids();
+            int readable = 0;
+            for (int pid : diskPids) {
+                long long readBytes = -1;
+                long long writeBytes = -1;
+                if (backend.processDiskCounters(pid, readBytes, writeBytes)) {
+                    counterSet.insert(
+                        pid, ProcessDiskCounters{readBytes, writeBytes});
+                    ++readable;
+                }
+            }
+            processDisk.insert(QStringLiteral("readable"), readable);
+            processDisk.insert(QStringLiteral("pids"), diskPids.size());
+            QHash<int, ProcessDiskCounters> prior;
+            processDiskRates(counterSet, 250, prior);
+            QThread::msleep(250);
+            QHash<int, ProcessDiskCounters> second;
+            for (int pid : diskPids) {
+                long long readBytes = -1;
+                long long writeBytes = -1;
+                if (backend.processDiskCounters(pid, readBytes, writeBytes)) {
+                    second.insert(pid, ProcessDiskCounters{readBytes, writeBytes});
+                }
+            }
+            const QHash<int, ProcessDiskRate> rates =
+                processDiskRates(second, 250, prior);
+            QList<ProcessDiskConsumer> top =
+                processDiskTopConsumers(rates, {}, 5);
+            QJsonArray rows;
+            for (ProcessDiskConsumer &consumer : top) {
+                QJsonObject row;
+                row.insert(QStringLiteral("pid"), consumer.pid);
+                QString name = backend.comm(consumer.pid);
+                if (name.isEmpty()) {
+                    name = QStringLiteral("pid %1").arg(consumer.pid);
+                }
+                row.insert(QStringLiteral("name"), name);
+                row.insert(QStringLiteral("readBps"), consumer.readPerSec);
+                row.insert(QStringLiteral("writeBps"), consumer.writePerSec);
+                rows.append(row);
+            }
+            processDisk.insert(QStringLiteral("top"), rows);
+            processDisk.insert(QStringLiteral("readBps"),
+                               processDiskTotal(rates, true));
+            processDisk.insert(QStringLiteral("writeBps"),
+                               processDiskTotal(rates, false));
+        }
+        root.insert(QStringLiteral("processDisk"), processDisk);
+    }
+
+    {
+        QJsonObject gpu;
+        const PlatformCapabilities caps = backend.capabilities();
+        gpu.insert(QStringLiteral("capable"), caps.gpu);
+        gpu.insert(QStringLiteral("clients"), caps.gpuClients);
+        gpu.insert(QStringLiteral("processData"), caps.gpuProcessData);
+        const GpuReading reading = backend.gpuInfo();
+        gpu.insert(QStringLiteral("ok"), reading.ok);
+        if (!reading.note.isEmpty()) {
+            gpu.insert(QStringLiteral("note"), reading.note);
+        }
+        QJsonArray devices;
+        for (const GpuDevice &device : reading.devices) {
+            QJsonObject row;
+            row.insert(QStringLiteral("index"), device.index);
+            row.insert(QStringLiteral("vendor"), device.vendor);
+            row.insert(QStringLiteral("name"), device.name);
+            row.insert(QStringLiteral("driver"), device.driver);
+            row.insert(QStringLiteral("pciId"), device.pciId);
+            if (device.utilPercent >= 0.0) {
+                row.insert(QStringLiteral("utilPercent"), device.utilPercent);
+            }
+            row.insert(QStringLiteral("utilFromClients"),
+                       device.utilFromClients);
+            row.insert(QStringLiteral("memUsed"), double(device.memUsed));
+            row.insert(QStringLiteral("memTotal"), double(device.memTotal));
+            if (device.tempC >= 0.0) {
+                row.insert(QStringLiteral("tempC"), device.tempC);
+            }
+            if (device.powerW >= 0.0) {
+                row.insert(QStringLiteral("powerW"), device.powerW);
+            }
+            if (device.clockMhz > 0) {
+                row.insert(QStringLiteral("clockMhz"), device.clockMhz);
+            }
+            devices.append(row);
+        }
+        gpu.insert(QStringLiteral("devices"), devices);
+
+        QJsonArray processes;
+        for (const GpuProcess &process : reading.processes) {
+            QJsonObject row;
+            row.insert(QStringLiteral("pid"), process.pid);
+            row.insert(QStringLiteral("name"), process.name);
+            if (process.busyPercent >= 0.0) {
+                row.insert(QStringLiteral("busyPercent"), process.busyPercent);
+            }
+            row.insert(QStringLiteral("memBytes"), double(process.memBytes));
+            if (!process.engines.isEmpty()) {
+                row.insert(QStringLiteral("engines"), process.engines);
+            }
+            processes.append(row);
+        }
+        if (caps.gpuClients) {
+            const QList<int> pids = backend.allPids();
+            QList<GpuEngineSample> clients;
+            backend.gpuClients(pids, clients);
+            gpu.insert(QStringLiteral("clientsFound"), clients.size());
+            QThread::msleep(250);
+            QList<GpuEngineSample> second;
+            backend.gpuClients(pids, second);
+            QHash<quint64, GpuClientPrior> prior;
+            gpuClientBusy(clients, 250, prior);
+            const QHash<quint64, GpuClientBusy> busy =
+                gpuClientBusy(second, 250, prior);
+            const QList<GpuProcess> merged = gpuMergeClients(second, busy, 5);
+            for (const GpuProcess &process : merged) {
+                QJsonObject row;
+                row.insert(QStringLiteral("pid"), process.pid);
+                row.insert(QStringLiteral("name"), process.name);
+                if (process.busyPercent >= 0.0) {
+                    row.insert(QStringLiteral("busyPercent"),
+                               process.busyPercent);
+                }
+                row.insert(QStringLiteral("memBytes"),
+                           double(process.memBytes));
+                processes.append(row);
+            }
+        }
+        gpu.insert(QStringLiteral("processes"), processes);
+        root.insert(QStringLiteral("gpu"), gpu);
+    }
+
+    {
+        QJsonObject sensors;
+        const PlatformCapabilities caps = backend.capabilities();
+        sensors.insert(QStringLiteral("thermalCapable"), caps.sensors);
+        sensors.insert(QStringLiteral("batteryCapable"), caps.battery);
+        const SensorsSnapshot reading = backend.sensors();
+        sensors.insert(QStringLiteral("available"), reading.available);
+        if (!reading.note.isEmpty()) {
+            sensors.insert(QStringLiteral("note"), reading.note);
+        }
+        QJsonArray chips;
+        int readings = 0;
+        for (const SensorChip &chip : reading.chips) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), chip.name);
+            row.insert(QStringLiteral("readings"), chip.readings.size());
+            chips.append(row);
+            readings += chip.readings.size();
+        }
+        sensors.insert(QStringLiteral("chips"), chips);
+        sensors.insert(QStringLiteral("readings"), readings);
+        if (reading.hottestCelsius >= 0.0) {
+            sensors.insert(QStringLiteral("hottestCelsius"),
+                           reading.hottestCelsius);
+            sensors.insert(QStringLiteral("hottestLabel"), reading.hottestLabel);
+            sensors.insert(QStringLiteral("hottestSeverity"),
+                           reading.hottestSeverity);
+        }
+        if (reading.maxFanRpm >= 0.0) {
+            sensors.insert(QStringLiteral("maxFanRpm"), reading.maxFanRpm);
+        }
+        sensors.insert(QStringLiteral("fans"), reading.fanCount);
+        if (reading.totalPowerW >= 0.0) {
+            sensors.insert(QStringLiteral("totalPowerW"), reading.totalPowerW);
+        }
+        QJsonArray batteries;
+        for (const BatteryReading &battery : reading.batteries) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), battery.name);
+            if (!battery.model.isEmpty()) {
+                row.insert(QStringLiteral("model"), battery.model);
+            }
+            if (!battery.manufacturer.isEmpty()) {
+                row.insert(QStringLiteral("manufacturer"),
+                           battery.manufacturer);
+            }
+            if (!battery.technology.isEmpty()) {
+                row.insert(QStringLiteral("technology"), battery.technology);
+            }
+            row.insert(QStringLiteral("state"), batteryStateText(battery.state));
+            if (battery.capacityPercent >= 0) {
+                row.insert(QStringLiteral("chargePercent"),
+                           battery.capacityPercent);
+            }
+            if (battery.energyNowWh >= 0.0) {
+                row.insert(QStringLiteral("energyNowWh"), battery.energyNowWh);
+            }
+            if (battery.energyFullWh >= 0.0) {
+                row.insert(QStringLiteral("energyFullWh"), battery.energyFullWh);
+            }
+            if (battery.energyDesignWh > 0.0) {
+                row.insert(QStringLiteral("energyDesignWh"),
+                           battery.energyDesignWh);
+            }
+            const int health = batteryHealthPercent(battery);
+            if (health >= 0) {
+                row.insert(QStringLiteral("healthPercent"), health);
+            }
+            if (battery.powerW >= 0.0) {
+                row.insert(QStringLiteral("powerW"), battery.powerW);
+            }
+            if (battery.voltageV > 0.0) {
+                row.insert(QStringLiteral("voltageV"), battery.voltageV);
+            }
+            if (battery.cycleCount >= 0) {
+                row.insert(QStringLiteral("cycleCount"), battery.cycleCount);
+            }
+            if (battery.timeToEmptyMin >= 0) {
+                row.insert(QStringLiteral("timeToEmptyMin"),
+                           battery.timeToEmptyMin);
+            }
+            if (battery.temperatureC >= 0.0) {
+                row.insert(QStringLiteral("temperatureC"), battery.temperatureC);
+            }
+            batteries.append(row);
+        }
+        sensors.insert(QStringLiteral("batteries"), batteries);
+        QJsonArray adapters;
+        for (const AdapterReading &adapter : reading.adapters) {
+            QJsonObject row;
+            row.insert(QStringLiteral("name"), adapter.name);
+            row.insert(QStringLiteral("online"), adapter.online);
+            if (adapter.wattsW >= 0.0) {
+                row.insert(QStringLiteral("watts"), adapter.wattsW);
+            }
+            adapters.append(row);
+        }
+        sensors.insert(QStringLiteral("adapters"), adapters);
+        root.insert(QStringLiteral("sensors"), sensors);
+    }
+
+    {
+        // M82: instance identity + accrued cost. CI runners are not cloud
+        // instances, so the block carries deterministic self-tests beside the
+        // probe result and both are asserted (a gated run must still prove the
+        // math, not just fail to find a metadata service).
+        QJsonObject cloud;
+        CloudProbeOptions options;
+        options.timeoutMs = 600;
+        const CloudProbeResult probe = probeCloudIdentity(options);
+        const bool available = probe.identity.provider != CloudProvider::None;
+        cloud.insert(QStringLiteral("available"), available);
+        cloud.insert(QStringLiteral("attempted"), probe.attempted);
+        cloud.insert(QStringLiteral("provider"),
+                     cloudProviderName(probe.identity.provider));
+        if (!available) {
+            cloud.insert(QStringLiteral("note"),
+                         probe.error.isEmpty() ? cloudUnreachableText()
+                                               : probe.error);
+        } else {
+            const CloudIdentity &id = probe.identity;
+            cloud.insert(QStringLiteral("instanceId"), id.instanceId);
+            cloud.insert(QStringLiteral("instanceType"), id.instanceType);
+            cloud.insert(QStringLiteral("region"), id.region);
+            cloud.insert(QStringLiteral("zone"), id.zone);
+            cloud.insert(QStringLiteral("spot"), id.spot);
+        }
+
+        const int vcpus = QThread::idealThreadCount();
+        const qint64 uptime = cloudHostUptimeSeconds();
+        cloud.insert(QStringLiteral("vcpus"), vcpus);
+        cloud.insert(QStringLiteral("uptimeSec"), double(uptime));
+
+        const QString ratesPath = defaultCloudRatePath();
+        CloudRateTable table;
+        QFile ratesFile(ratesPath);
+        if (ratesFile.open(QIODevice::ReadOnly)) {
+            table = parseCloudRateFile(QString::fromUtf8(ratesFile.readAll()),
+                                       ratesPath);
+            ratesFile.close();
+        }
+        cloud.insert(QStringLiteral("ratePath"), ratesPath);
+        cloud.insert(QStringLiteral("rates"), table.rates.size());
+        cloud.insert(QStringLiteral("importDate"), table.importDate);
+        cloud.insert(QStringLiteral("staleDays"),
+                     cloudRateStaleDays(table.importDate,
+                                        QDateTime::currentMSecsSinceEpoch()));
+
+        if (available) {
+            const double rate = cloudRateFor(table, probe.identity.provider,
+                                             probe.identity.instanceType);
+            cloud.insert(QStringLiteral("rateKey"),
+                         cloudRateKey(probe.identity.provider,
+                                      probe.identity.instanceType));
+            cloud.insert(QStringLiteral("ratePerHour"), rate);
+            const CloudCostMath math = computeCloudCost(rate, uptime);
+            cloud.insert(QStringLiteral("accruedUsd"), math.accruedUsd);
+            cloud.insert(QStringLiteral("projectedMonthlyUsd"),
+                         math.projectedMonthlyUsd);
+            cloud.insert(QStringLiteral("appCostPerHour"),
+                         cloudProcessCostPerHour(rate, 25.0, vcpus));
+        }
+
+        const CloudRateTable fixture = parseCloudRateFile(
+            QStringLiteral("# imported 2020-01-01\n"
+                           "aws/c7g.2xlarge = 0.2920\n"
+                           "azure/Standard_D2s_v3 = 0.0960\n"));
+        cloud.insert(QStringLiteral("rateLookupOk"),
+                     qAbs(cloudRateFor(fixture, CloudProvider::Aws,
+                                       QStringLiteral("C7G.2XLarge"))
+                          - 0.2920) < 1e-9
+                         && qAbs(cloudRateFor(fixture,
+                                              CloudProvider::Azure,
+                                              QStringLiteral("nope"))
+                                 + 1.0) < 1e-9);
+        const CloudCostMath hourMath = computeCloudCost(1.0, 3600);
+        cloud.insert(QStringLiteral("costMathOk"),
+                     qAbs(hourMath.accruedUsd - 1.0) < 1e-9
+                         && qAbs(hourMath.projectedMonthlyUsd - 730.0) < 1e-9);
+        cloud.insert(QStringLiteral("shareOk"),
+                     qAbs(cloudProcessCostPerHour(8.0, 800.0, 8) - 8.0) < 1e-9
+                         && cloudProcessCostPerHour(8.0, 100.0, 0) < 0.0);
+        const QList<CloudProcessSample> rows = {
+            {QStringLiteral("small"), 11, 10.0},
+            {QStringLiteral("big"), 22, 300.0},
+            {QStringLiteral("idle"), 33, 0.0},
+        };
+        const QList<CloudConsumer> top =
+            cloudTopConsumers(rows, 1.0, 4, 2);
+        cloud.insert(QStringLiteral("topOk"),
+                     top.size() == 2
+                         && top.constFirst().pid == 22
+                         && qAbs(cloudConsumerTotal(top)
+                                 - (0.75 + 0.025)) < 1e-9);
+        cloud.insert(QStringLiteral("staleOk"),
+                     cloudRateStaleDays(QStringLiteral("2020-01-01"),
+                                        QDateTime::currentMSecsSinceEpoch())
+                         > 100);
+
+        // M83: the account listing runs only when an instance was identified
+        // (with no metadata service there is no provider to ask), so the
+        // parsers, the age maths and the self-match carry deterministic
+        // self-tests that every runner can assert.
+        CloudFleetOptions fleetOptions;
+        fleetOptions.timeoutMs = 8000;
+        const CloudFleetStatus listing =
+            probeCloudFleet(probe.identity, fleetOptions);
+        QJsonObject fleet;
+        fleet.insert(QStringLiteral("attempted"), listing.attempted);
+        fleet.insert(QStringLiteral("available"), listing.available);
+        fleet.insert(QStringLiteral("cli"), listing.cliName);
+        fleet.insert(QStringLiteral("scope"), listing.scope);
+        fleet.insert(QStringLiteral("note"), fleetSummaryText(listing));
+        fleet.insert(QStringLiteral("rows"), listing.rows.size());
+        fleet.insert(QStringLiteral("running"), listing.running);
+        fleet.insert(QStringLiteral("selfIndex"), listing.selfIndex);
+
+        const qint64 fleetNow = 1'700'000'000'000LL;
+        const CloudFleetStatus awsFixture = parseAwsDescribeInstances(
+            QByteArrayLiteral(
+                "[{\"InstanceId\":\"i-0aaa\",\"InstanceType\":\"c7g.2xlarge\","
+                "\"State\":{\"Name\":\"running\"},"
+                "\"Placement\":{\"AvailabilityZone\":\"eu-west-1a\"},"
+                "\"LaunchTime\":\"2023-06-01T10:00:00Z\","
+                "\"Tags\":[{\"Key\":\"Name\",\"Value\":\"web-1\"}]},"
+                "{\"InstanceId\":\"i-0bbb\",\"InstanceType\":\"t4g.small\","
+                "\"State\":{\"Name\":\"stopped\"},"
+                "\"Placement\":{\"AvailabilityZone\":\"eu-west-1b\"}}]"));
+        const CloudFleetStatus azureFixture = parseAzureVmList(
+            QByteArrayLiteral(
+                "[{\"name\":\"vm-a\",\"location\":\"westus\","
+                "\"powerState\":\"VM deallocated\","
+                "\"hardwareProfile\":{\"vmSize\":\"Standard_D2s_v3\"}}]"));
+        fleet.insert(QStringLiteral("fleetParseOk"),
+                     awsFixture.rows.size() == 2
+                         && awsFixture.rows.at(0).name == QStringLiteral("web-1")
+                         && awsFixture.rows.at(0).state == QStringLiteral("running")
+                         && awsFixture.rows.at(1).state == QStringLiteral("stopped")
+                         && awsFixture.rows.at(0).zone == QStringLiteral("eu-west-1a")
+                         && awsFixture.rows.at(0).region == QStringLiteral("eu-west-1"));
+        fleet.insert(QStringLiteral("fleetAzureOk"),
+                     azureFixture.rows.size() == 1
+                         && azureFixture.rows.at(0).state == QStringLiteral("stopped")
+                         && azureFixture.rows.at(0).instanceType
+                                == QStringLiteral("Standard_D2s_v3")
+                         && azureFixture.rows.at(0).launchedAtMs < 0);
+        fleet.insert(QStringLiteral("fleetAgeOk"),
+                     fleetAgeSeconds(fleetNow - 3 * 86400LL * 1000LL,
+                                     fleetNow) == 3 * 86400LL
+                         && fleetAgeSeconds(fleetNow, fleetNow) == 0
+                         && fleetAgeSeconds(fleetNow + 1000, fleetNow) < 0);
+        CloudFleetStatus own = awsFixture;
+        CloudIdentity ownIdentity;
+        ownIdentity.provider = CloudProvider::Aws;
+        ownIdentity.instanceId = QStringLiteral("i-0bbb");
+        const int selfAfter = fleetMarkSelf(own, ownIdentity);
+        fleet.insert(QStringLiteral("fleetSelfOk"),
+                     selfAfter == 0 && own.rows.at(0).isSelf
+                         && own.rows.at(0).instanceId == QStringLiteral("i-0bbb")
+                         && !own.rows.at(1).isSelf);
+        CloudFleetStatus pricedFleet = awsFixture;
+        fleetApplyRates(pricedFleet, fixture, 730.0);
+        fleet.insert(QStringLiteral("fleetCostOk"),
+                     qAbs(pricedFleet.rows.at(0).monthlyUsd
+                          - 0.2920 * 730.0) < 1e-9
+                         && pricedFleet.rows.at(1).monthlyUsd < 0.0
+                         && pricedFleet.running == 1
+                         && pricedFleet.unpriced == 0
+                         && qAbs(pricedFleet.monthlyUsd - 0.2920 * 730.0) < 1e-9);
+        cloud.insert(QStringLiteral("fleet"), fleet);
+        root.insert(QStringLiteral("cloud"), cloud);
+    }
+
+    {
+        // M84: the sampler's self-cost model. No GUI is needed to prove it,
+        // and the same numbers drive the Settings rows, so a runner asserts
+        // the maths the page shows.
+        QList<TickSection> sections;
+        sections.append(TickSection{QStringLiteral("focus"), 3.5});
+        sections.append(TickSection{QStringLiteral("processes"), 41.2});
+        sections.append(TickSection{QStringLiteral("gpu"), 0.01});
+        const TickCost tickCost =
+            tickbudget::summarize(sections, 62.0,
+                                  QList<double>{40.0, 62.0, 84.0});
+        QJsonObject budget;
+        budget.insert(QStringLiteral("sections"), tickCost.sections.size());
+        budget.insert(QStringLiteral("slowest"),
+                      tickCost.sections.isEmpty()
+                          ? QString()
+                          : tickCost.sections.constFirst().name);
+        budget.insert(QStringLiteral("avgMs"), tickCost.avgMs);
+        budget.insert(QStringLiteral("worstMs"), tickCost.worstMs);
+        budget.insert(QStringLiteral("sortedOk"),
+                      tickCost.sections.size() == 3
+                          && tickCost.sections.constFirst().name
+                                 == QStringLiteral("processes")
+                          && tickCost.sections.constLast().name
+                                 == QStringLiteral("gpu"));
+        budget.insert(QStringLiteral("windowOk"),
+                      qAbs(tickCost.avgMs - 62.0) < 1e-9
+                          && qAbs(tickCost.worstMs - 84.0) < 1e-9);
+        budget.insert(QStringLiteral("unmeasuredOk"),
+                      tickbudget::tickCostText(TickCost{})
+                          == QStringLiteral("measuring"));
+        budget.insert(
+            QStringLiteral("selfTextOk"),
+            tickbudget::selfCostText(SelfCost{})
+                    == QStringLiteral("not measurable on this platform")
+                && !tickbudget::tickSectionText(tickCost).isEmpty());
+        root.insert(QStringLiteral("budget"), budget);
+    }
+
+    {
+        QJsonObject history;
+        const QString probePath =
+            QDir::tempPath()
+            + QStringLiteral("/syspeek-history-probe-%1.ring").arg(dumpPid());
+        HistoryLog log;
+        constexpr int kCap = 8;
+        const qint64 base = QDateTime::currentMSecsSinceEpoch();
+        bool appended = log.open(probePath, kCap);
+        history.insert(QStringLiteral("capacity"), kCap);
+        if (appended) {
+            for (int i = 0; i < 11; ++i) {
+                HistoryRecord record;
+                record.atMs = base + i * 1000;
+                record.appName = QStringLiteral("probe");
+                record.pid = 4242;
+                record.hostCpuPercent = 10.0 + i;
+                record.hostMemAvailableKb = 100000 + i;
+                record.load1 = 1.25;
+                if (!log.append(record)) {
+                    appended = false;
+                    break;
+                }
+            }
+        }
+        history.insert(QStringLiteral("ok"), appended && log.isOpen());
+        history.insert(QStringLiteral("count"), log.count());
+        history.insert(QStringLiteral("total"), double(log.totalWritten()));
+        history.insert(QStringLiteral("bytes"), double(log.fileBytes()));
+        history.insert(QStringLiteral("wrapped"), log.totalWritten() > kCap);
+        HistoryRecord oldest;
+        HistoryRecord newest;
+        if (log.oldest(oldest) && log.newest(newest)) {
+            history.insert(QStringLiteral("oldestAt"), double(oldest.atMs));
+            history.insert(QStringLiteral("newestAt"), double(newest.atMs));
+            history.insert(QStringLiteral("spanMs"), double(log.spanMs()));
+            history.insert(QStringLiteral("oldestCpu"), oldest.hostCpuPercent);
+            history.insert(QStringLiteral("newestCpu"), newest.hostCpuPercent);
+            history.insert(QStringLiteral("ordered"),
+                           oldest.atMs < newest.atMs);
+            history.insert(QStringLiteral("app"), oldest.appName);
+            history.insert(QStringLiteral("pid"), oldest.pid);
+        }
+        log.close();
+
+        HistoryLog reopened;
+        const bool resumed = reopened.open(probePath, kCap);
+        history.insert(QStringLiteral("reopened"), resumed);
+        history.insert(QStringLiteral("reopenedCount"), reopened.count());
+        HistoryRecord resumedOldest;
+        history.insert(QStringLiteral("resumedOrdered"),
+                       resumed && reopened.oldest(resumedOldest)
+                           && resumedOldest.atMs == oldest.atMs);
+        const bool differentCapacity = reopened.open(probePath, kCap + 4);
+        history.insert(QStringLiteral("capacityChangeResets"),
+                       differentCapacity && reopened.count() == 0);
+        reopened.close();
+        QFile::remove(probePath);
+        root.insert(QStringLiteral("history"), history);
+    }
+
+    {
+        // M78: exercise every verb against a child this process owns, so the
+        // dump proves the seam end to end (capability, syscall, refusal).
+        QJsonObject actions;
+        const PlatformCapabilities caps = systemBackend().capabilities();
+        actions.insert(QStringLiteral("signals"), caps.processSignals);
+        actions.insert(QStringLiteral("renice"), caps.processRenice);
+        actions.insert(QStringLiteral("ionice"), caps.processIonice);
+        actions.insert(QStringLiteral("oomScore"), caps.processOomScore);
+        actions.insert(QStringLiteral("pause"), caps.processPause);
+
+        QProcess child;
+#if defined(Q_OS_WIN)
+        child.start(QStringLiteral("ping"),
+                    {QStringLiteral("-n"), QStringLiteral("60"),
+                     QStringLiteral("127.0.0.1")});
+#else
+        child.start(QStringLiteral("sleep"), {QStringLiteral("60")});
+#endif
+        bool spawned = child.waitForStarted(3000);
+        const int childPid = spawned ? int(child.processId()) : 0;
+        actions.insert(QStringLiteral("childPid"), childPid);
+
+        bool reniceOk = false;
+        bool ioniceOk = false;
+        bool oomOk = false;
+        bool signalOk = false;
+        QString error;
+
+        ProcessAction action;
+        action.pid = childPid;
+        action.name = QStringLiteral("dump-probe");
+
+        if (childPid > 0 && caps.processRenice) {
+            action.kind = ProcessActionKind::Renice;
+            action.niceValue = 0;
+            action.relative = true;
+            reniceOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processIonice) {
+            action.kind = ProcessActionKind::Ionice;
+            action.ioClass = IoPriorityClass::Idle;
+            action.ioLevel = 0;
+            ioniceOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processOomScore) {
+            action.kind = ProcessActionKind::OomScore;
+            action.oomScoreAdj = 0;
+            action.relative = false;
+            oomOk = systemBackend().applyProcessAction(action, &error);
+        }
+        if (childPid > 0 && caps.processSignals) {
+            action.kind = ProcessActionKind::Signal;
+            action.signal = ProcessSignal::Term;
+            signalOk = systemBackend().applyProcessAction(action, &error);
+            if (signalOk) {
+                child.waitForFinished(3000);
+            }
+        }
+        if (child.state() != QProcess::NotRunning) {
+            child.kill();
+            child.waitForFinished(2000);
+        }
+        actions.insert(QStringLiteral("spawned"), spawned);
+        actions.insert(QStringLiteral("reniceOk"), reniceOk);
+        actions.insert(QStringLiteral("ioniceOk"), ioniceOk);
+        actions.insert(QStringLiteral("oomOk"), oomOk);
+        actions.insert(QStringLiteral("signalOk"), signalOk);
+        actions.insert(QStringLiteral("childExited"),
+                       spawned && child.state() == QProcess::NotRunning);
+        // A refused verb must state why, not fail silently.
+        ProcessAction bad;
+        bad.pid = -1;
+        bad.kind = ProcessActionKind::Signal;
+        bad.signal = ProcessSignal::Term;
+        QString refusedError;
+        const bool badOk = systemBackend().applyProcessAction(bad, &refusedError);
+        actions.insert(QStringLiteral("invalidPidRefused"), !badOk);
+        actions.insert(QStringLiteral("invalidPidError"), refusedError);
+        root.insert(QStringLiteral("actions"), actions);
+    }
+
+    {
+        // M80: the overlay's window-server contract. Nothing here needs a
+        // QApplication: the session comes from the environment and the X11
+        // facts from libX11 directly, so `--dump` stays headless.
+        QJsonObject overlay;
+        OverlaySession session = OverlaySession::Unknown;
+        QString wmName;
+        QRect workArea;
+        bool shapeAvailable = false;
+        bool stickySupported = false;
+        const QString platform = backend.platformName();
+        if (platform == QStringLiteral("linux")) {
+            const QString wayland =
+                QString::fromLocal8Bit(qgetenv("WAYLAND_DISPLAY"));
+            const QString x11 = QString::fromLocal8Bit(qgetenv("DISPLAY"));
+            // What the GUI will actually use wins over what the session
+            // claims: QT_QPA_PLATFORM=xcb on a Wayland desktop runs the X11
+            // path, and the dump has to describe that, not the session.
+            QString declared = QString::fromLocal8Bit(qgetenv("QT_QPA_PLATFORM"));
+            if (declared.isEmpty()) {
+                declared = QString::fromLocal8Bit(qgetenv("XDG_SESSION_TYPE"));
+            }
+            session = detectOverlaySession(
+                declared.isEmpty() ? (wayland.isEmpty() ? QString() : wayland)
+                                   : declared,
+                wayland, x11);
+            if (session == OverlaySession::X11) {
+                const linuxoverlay::X11Probe probe = linuxoverlay::probe();
+                wmName = probe.wmName;
+                workArea = probe.workArea;
+                shapeAvailable = probe.shapeAvailable;
+                stickySupported = probe.stickySupported;
+            }
+        } else {
+            session = detectOverlaySession(platform, QString(), QString());
+        }
+
+        overlay.insert(QStringLiteral("session"),
+                       overlaySessionName(session));
+        if (!wmName.isEmpty()) {
+            overlay.insert(QStringLiteral("wm"), wmName);
+        }
+        if (workArea.isValid()) {
+            overlay.insert(QStringLiteral("workArea"), overlayGeometryText(workArea));
+        }
+        overlay.insert(QStringLiteral("shapeAvailable"), shapeAvailable);
+        overlay.insert(QStringLiteral("stickySupported"), stickySupported);
+        overlay.insert(QStringLiteral("clickThroughCapable"),
+                       session == OverlaySession::X11 && shapeAvailable);
+        overlay.insert(QStringLiteral("note"),
+                       overlayClickThroughNote(
+                           session,
+                           session == OverlaySession::X11 && shapeAvailable));
+        root.insert(QStringLiteral("overlay"), overlay);
+    }
+
+    {
+        QJsonObject metrics;
+        const MetricsEndpoint endpoint =
+            resolveMetricsEndpoint(MetricsConfig{});
+        metrics.insert(QStringLiteral("bind"), endpoint.bindAddress);
+        metrics.insert(QStringLiteral("port"), endpoint.port);
+        metrics.insert(QStringLiteral("authRequired"), endpoint.authRequired);
+        metrics.insert(QStringLiteral("downgraded"), endpoint.bindDowngraded);
+
+        MetricsConfig exposed;
+        exposed.bindAddress = QStringLiteral("0.0.0.0");
+        const MetricsEndpoint refused = resolveMetricsEndpoint(exposed);
+        metrics.insert(QStringLiteral("refusedNonLoopback"),
+                       refused.bindDowngraded && !refused.authRequired
+                           && refused.bindAddress
+                                  == QStringLiteral("127.0.0.1"));
+
+        exposed.token = QStringLiteral("probe-token-0123456789");
+        const MetricsEndpoint guarded = resolveMetricsEndpoint(exposed);
+        metrics.insert(QStringLiteral("tokenGuarded"),
+                       guarded.authRequired && !guarded.bindDowngraded
+                           && guarded.bindAddress
+                                  == QStringLiteral("0.0.0.0"));
+
+        const QByteArray token = exposed.token.toUtf8();
+        metrics.insert(
+            QStringLiteral("headerAccepted"),
+            metricsRequestAuthorized(
+                QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                  "Host: 127.0.0.1\r\n"
+                                  "Authorization: Bearer probe-token-0123456789"
+                                  "\r\n\r\n"),
+                token));
+        metrics.insert(
+            QStringLiteral("headerRejected"),
+            !metricsRequestAuthorized(
+                QByteArrayLiteral("GET /metrics HTTP/1.1\r\n"
+                                  "Authorization: Bearer probe-token-0\r\n"
+                                  "\r\n"),
+                token)
+                && !metricsRequestAuthorized(
+                    QByteArrayLiteral("GET /metrics HTTP/1.1\r\n\r\n"),
+                    token));
+        metrics.insert(QStringLiteral("loopbackOnlyText"),
+                       metricsEndpointText(endpoint).contains(
+                           QStringLiteral("loopback only")));
+        root.insert(QStringLiteral("metrics"), metrics);
     }
 
     QJsonObject services;

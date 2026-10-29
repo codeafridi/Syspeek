@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "MetricsEndpoint.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -177,6 +178,147 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M75: [silences] — a rolling duration authored in the file and an
+        // absolute window the HUD wrote (survives a restart).
+        QTemporaryDir dirSilence;
+        const qint64 absoluteEnd = 4102444800000LL;
+        const QString path = writeConfig(dirSilence, QByteArrayLiteral(
+            "[silences]\n"
+            "host_cpu=30m\n"
+            "host_cpu_comment=disk rebuild\n"
+            "host_cpu_author=ops\n"
+            "app_cpu_until=4102444800000\n"
+            "app_cpu_comment=rollout\n"
+            "journal_errors=10x\n"
+            "bogus=0s\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.silences.rules.size() == 3,
+              "silences: rolling, absolute and zero-second windows all load");
+        const SilenceRule *rolling = nullptr;
+        const SilenceRule *absolute = nullptr;
+        for (const SilenceRule &rule : c.silences.rules) {
+            if (rule.matcher == QStringLiteral("host_cpu")) {
+                rolling = &rule;
+            } else if (rule.matcher == QStringLiteral("app_cpu")) {
+                absolute = &rule;
+            }
+        }
+        check(rolling != nullptr
+                  && rolling->endsAtMs - rolling->startsAtMs == 1800000,
+              "silences: a duration key becomes a milliseconds window");
+        check(rolling != nullptr
+                  && rolling->comment == QStringLiteral("disk rebuild")
+                  && rolling->author == QStringLiteral("ops"),
+              "silences: comment and author ride the matcher key");
+        check(absolute != nullptr && absolute->endsAtMs == absoluteEnd
+                  && absolute->comment == QStringLiteral("rollout"),
+              "silences: an _until key keeps its absolute expiry");
+    }
+    {
+        // saveSilences roundtrip (the HUD writes what the page authored).
+        QTemporaryDir dirSilenceSave;
+        const QString path = writeConfig(dirSilenceSave, QByteArrayLiteral(
+            "[silences]\n"
+            "host_cpu=30m\n"));
+        QList<SilenceRule> rules;
+        SilenceRule rule;
+        rule.matcher = QStringLiteral("host_cpu");
+        rule.startsAtMs = 1000;
+        rule.endsAtMs = 4102444800000LL;
+        rule.comment = QStringLiteral("snoozed from the alerts page");
+        rule.author = QStringLiteral("local");
+        rules.append(rule);
+        saveSilences(path, rules);
+        QString error;
+        const Config loaded = loadConfig(path, &error);
+        check(loaded.silences.rules.size() == 1
+                  && loaded.silences.rules.at(0).endsAtMs == 4102444800000LL
+                  && loaded.silences.rules.at(0).comment
+                         == QStringLiteral("snoozed from the alerts page"),
+              "silences: saveSilences replaces the group and keeps the window");
+        check(loaded.health.cpuWarnPercent == 70.0,
+              "silences: saving keeps the rest of the file");
+    }
+
+    {
+        // M78: [actions] enabled is the master switch for every verb; the
+        // group is optional and an explicit false must survive the load.
+        QTemporaryDir actionsDir;
+        const QString path = writeConfig(actionsDir, QByteArrayLiteral(
+            "[actions]\n"
+            "enabled=false\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.actions.enabled,
+              "actions: enabled=false disables the verbs");
+
+        QTemporaryDir actionsDefaultDir;
+        const QString defaults = writeConfig(actionsDefaultDir,
+                                            QByteArrayLiteral(
+            "[health]\n"
+            "cpu_warn_percent=65\n"));
+        const Config d = loadConfig(defaults, &error);
+        check(d.actions.enabled,
+              "actions: verbs are on by default");
+        check(d.health.cpuWarnPercent == 65.0,
+              "actions: the group does not disturb its neighbours");
+    }
+
+    {
+        // M76: [metrics] bind + token — the scrape endpoint can move off
+        // loopback only when a bearer token guards it.
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "enabled=true\n"
+            "port=9200\n"
+            "bind=0.0.0.0\n"
+            "token=  s3cret-token  \n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.enabled && c.metrics.port == 9200,
+              "metrics: enabled and port still load");
+        check(c.metrics.bindAddress == QStringLiteral("0.0.0.0"),
+              "metrics: the bind address loads");
+        check(c.metrics.token == QStringLiteral("s3cret-token"),
+              "metrics: the token loads trimmed");
+
+        const MetricsEndpoint endpoint = resolveMetricsEndpoint(c.metrics);
+        check(endpoint.bindAddress == QStringLiteral("0.0.0.0")
+                  && endpoint.authRequired && !endpoint.bindDowngraded,
+              "metrics: an authored LAN bind with a token is honoured");
+    }
+    {
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "bind=0.0.0.0\n"
+            "token=\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.bindAddress == QStringLiteral("0.0.0.0")
+                  && c.metrics.token.isEmpty(),
+              "metrics: an empty token stays empty");
+        const MetricsEndpoint endpoint = resolveMetricsEndpoint(c.metrics);
+        check(endpoint.bindAddress == QStringLiteral("127.0.0.1")
+                  && endpoint.bindDowngraded,
+              "metrics: a LAN bind without a token downgrades to loopback");
+    }
+    {
+        QTemporaryDir metricsDir;
+        const QString path = writeConfig(metricsDir, QByteArrayLiteral(
+            "[metrics]\n"
+            "port=99999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.metrics.port == 65535, "metrics: an out-of-range port clamps");
+        check(c.metrics.bindAddress == QStringLiteral("127.0.0.1")
+                  && c.metrics.token.isEmpty(),
+              "metrics: untouched keys keep the loopback default");
+    }
+
+    {
         QTemporaryDir dir4;
         const QString path = writeConfig(dir4, QByteArrayLiteral(
             "[fim]\n"
@@ -240,6 +382,168 @@ int main(int argc, char *argv[]) {
         check(c.webhook.format == QStringLiteral("generic"),
               "unknown webhook format ignored");
         check(c.webhook.timeoutMs == 60000, "webhook timeout clamped");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "click_through = true\n"
+            "x = 120\n"
+            "y = -40\n"
+            "width = 900\n"
+            "height = 640\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(error.isEmpty(), "overlay config -> no error");
+        check(c.overlay.clickThrough, "overlay click_through loaded");
+        check(c.overlay.x == 120 && c.overlay.y == -40,
+              "overlay position loaded, negative y kept");
+        check(c.overlay.width == 900 && c.overlay.height == 640,
+              "overlay size loaded");
+        check(c.overlay.sticky, "overlay sticky defaults on");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "focus_cache_ttl_ms = 900\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.overlay.clickThrough && c.overlay.x == -1
+                  && c.overlay.width == -1,
+              "overlay defaults: click-through off, no saved geometry");
+        check(c.focusCacheTtlMs == 900,
+              "overlay: the pre-existing ttl key still loads from the same "
+              "group");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[overlay]\n"
+            "sticky = false\n"
+            "x = not-a-number\n"
+            "width = 12x\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.overlay.x == -1 && c.overlay.width == -1,
+              "overlay: garbage geometry is ignored, not guessed");
+        check(!c.overlay.sticky, "overlay: sticky can be turned off");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[history]\n"
+            "samples = 600\n"
+            "[overlay]\n"
+            "click_through = true\n"));
+        OverlayConfig saved;
+        saved.clickThrough = false;
+        saved.x = 64;
+        saved.y = 32;
+        saved.width = 820;
+        saved.height = 560;
+        saved.sticky = false;
+        saveOverlayConfig(path, saved);
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.overlay.clickThrough && c.overlay.x == 64
+                  && c.overlay.y == 32 && c.overlay.width == 820
+                  && c.overlay.height == 560,
+              "overlay: a saved rectangle round-trips through the file");
+        check(!c.overlay.sticky,
+              "overlay: the sticky preference round-trips too");
+        check(c.history.samples == 600,
+              "overlay: saving the overlay keeps every other group");
+    }
+
+    {
+        // M82: [cloud] is on by default (link-local IMDS read only).
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(""));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.enabled, "cloud: the metadata probe defaults to on");
+        check(c.cloud.timeoutMs == 450, "cloud: the default timeout is 450 ms");
+        check(c.cloud.ratesPath.isEmpty(),
+              "cloud: no authored path means the default rate file");
+        check(c.cloud.inventory,
+              "cloud: the account inventory defaults to on");
+        check(c.cloud.inventoryTimeoutMs == 25000,
+              "cloud: the listing budget defaults to 25 s");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "enabled = false\n"
+            "rates = /tmp/owned-rates.txt\n"
+            "timeout_ms = 900\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.cloud.enabled, "cloud: enabled=false is honoured");
+        check(c.cloud.ratesPath == QStringLiteral("/tmp/owned-rates.txt")
+                  && c.cloud.timeoutMs == 900,
+              "cloud: the rate path and timeout load");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "timeout_ms = 90000\n"
+            "rates =   \n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.timeoutMs == 5000,
+              "cloud: an absurd timeout clamps to the ceiling");
+        check(c.cloud.ratesPath.isEmpty(),
+              "cloud: a whitespace path falls back to the default");
+        check(c.cloud.enabled, "cloud: untouched keys keep the default on");
+    }
+
+    {
+        // M83: the listing is a network call to the provider API, so it is
+        // switchable and separately budgeted from the link-local read.
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory = false\n"
+            "inventory_timeout_ms = 4000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.cloud.inventory,
+              "cloud: inventory=false stops every cloud CLI spawn");
+        check(c.cloud.inventoryTimeoutMs == 4000,
+              "cloud: the listing budget loads");
+        check(c.cloud.enabled && c.cloud.timeoutMs == 450,
+              "cloud: the metadata read keeps its own budget and switch");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory_timeout_ms = 500\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.inventoryTimeoutMs == 2000,
+              "cloud: a sub-second listing budget clamps to the floor");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "inventory_timeout_ms = 600000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.inventoryTimeoutMs == 120000,
+              "cloud: an absurd listing budget clamps to the ceiling");
     }
 
     std::printf("%d failure(s)\n", failures);

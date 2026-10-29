@@ -91,10 +91,20 @@ int main(int argc, char *argv[]) {
 
     thread->start();
 
-    check(waitFor(received, 1, 3000), "worker emits a snapshot after start");
+    QElapsedTimer firstTick;
+    firstTick.start();
+    const bool started = waitFor(received, 1, 3000);
+    std::printf("INFO first snapshot after %lld ms\n",
+                static_cast<long long>(firstTick.elapsed()));
+    check(started, "worker emits a snapshot after start");
 
     QMetaObject::invokeMethod(worker, "sampleNow", Qt::QueuedConnection);
-    check(waitFor(received, 2, 3000), "worker emits on demand");
+    QElapsedTimer secondTick;
+    secondTick.start();
+    const bool onDemand = waitFor(received, 2, 3000);
+    std::printf("INFO second snapshot after %lld ms\n",
+                static_cast<long long>(secondTick.elapsed()));
+    check(onDemand, "worker emits on demand");
     check(maxSeq >= 2, "sequence increases across snapshots");
 
 #ifdef Q_OS_LINUX

@@ -4,10 +4,14 @@
 
 #include "TcpStatus.h"
 
+#include "WindowsSensors.h"
+
 #include <QDateTime>
 #include <QHash>
 #include <QMutexLocker>
 #include <QSettings>
+
+#include <algorithm>
 
 #include <cstddef>
 #include <string>
@@ -291,6 +295,7 @@ WindowsBackend::WindowsBackend() {
 
 WindowsBackend::~WindowsBackend() {
     closePdhDiskQuery();
+    closePdhGpuQuery();
     if (m_wsaReady) {
         ::WSACleanup();
     }
@@ -349,6 +354,206 @@ bool WindowsBackend::ensurePdhDiskQuery() {
     return true;
 }
 
+bool WindowsBackend::ensurePdhGpuQuery() {
+    if (m_pdhGpuQuery != nullptr) {
+        return true;
+    }
+    PDH_HQUERY query = nullptr;
+    if (::PdhOpenQueryW(nullptr, 0, &query) != ERROR_SUCCESS) {
+        return false;
+    }
+    static const wchar_t *kPaths[] = {
+        L"\\GPU Engine(*)\\Utilization Percentage",
+        L"\\GPU Process Memory(*)\\Dedicated Usage",
+        L"\\GPU Adapter Memory(*)\\Dedicated Usage",
+    };
+    QList<void *> handles;
+    for (const wchar_t *path : kPaths) {
+        PDH_HCOUNTER handle = nullptr;
+        if (::PdhAddEnglishCounterW(query, path, 0, &handle)
+            != ERROR_SUCCESS) {
+            ::PdhCloseQuery(query);
+            return false;
+        }
+        handles.append(static_cast<void *>(handle));
+    }
+    ::PdhCollectQueryData(query);
+    m_pdhGpuQuery = static_cast<void *>(query);
+    m_pdhGpuHandles = handles;
+    return true;
+}
+
+void WindowsBackend::closePdhGpuQuery() {
+    if (m_pdhGpuQuery != nullptr) {
+        ::PdhCloseQuery(static_cast<PDH_HQUERY>(m_pdhGpuQuery));
+        m_pdhGpuQuery = nullptr;
+        m_pdhGpuHandles.clear();
+    }
+}
+
+GpuReading WindowsBackend::gpuInfo() {
+    QMutexLocker locker(&m_pdhGpuMutex);
+    GpuReading reading;
+    if (!ensurePdhGpuQuery()) {
+        reading.note = QStringLiteral(
+            "gpu: GPU performance counters are unavailable on this system");
+        return reading;
+    }
+    if (::PdhCollectQueryData(static_cast<PDH_HQUERY>(m_pdhGpuQuery))
+        != ERROR_SUCCESS) {
+        reading.note = QStringLiteral("gpu: GPU counter collection failed");
+        return reading;
+    }
+
+    constexpr DWORD kPdhMoreData = 0x800007d2;
+    struct Item {
+        QString name;
+        double value = 0.0;
+        long long large = 0;
+    };
+    auto fetch = [&](int leaf, DWORD format) -> QList<Item> {
+        QList<Item> items;
+        const PDH_HCOUNTER counter = static_cast<PDH_HCOUNTER>(
+            m_pdhGpuHandles.at(leaf));
+        DWORD bytes = 0;
+        DWORD count = 0;
+        if (::PdhGetFormattedCounterArrayW(counter, format, &bytes, &count,
+                                           nullptr)
+            != kPdhMoreData) {
+            return items;
+        }
+        std::vector<BYTE> buffer(bytes);
+        if (::PdhGetFormattedCounterArrayW(
+                counter, format, &bytes, &count,
+                reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(buffer.data()))
+            != ERROR_SUCCESS) {
+            return items;
+        }
+        auto *rows = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(
+            buffer.data());
+        for (DWORD i = 0; i < count; ++i) {
+            Item item;
+            item.name = QString::fromWCharArray(rows[i].szName).trimmed();
+            if (format == PDH_FMT_LARGE) {
+                item.large = rows[i].FmtValue.largeValue;
+                item.value = double(item.large);
+            } else {
+                item.value = rows[i].FmtValue.doubleValue;
+            }
+            items.append(item);
+        }
+        return items;
+    };
+
+    struct AdapterAgg {
+        double util = -1.0;
+        quint64 mem = 0;
+    };
+    struct ProcessAgg {
+        double util = -1.0;
+        quint64 mem = 0;
+    };
+    QHash<QString, AdapterAgg> adapters;
+    QHash<int, ProcessAgg> processes;
+
+    auto luidOf = [](const QString &instance) -> QString {
+        const int at = instance.indexOf(QStringLiteral("_luid_"));
+        if (at < 0) {
+            return QString();
+        }
+        const int phys = instance.indexOf(QStringLiteral("_phys_"),
+                                          at + 6);
+        return instance.mid(at + 6,
+                            (phys < 0 ? instance.size() : phys) - at - 6);
+    };
+
+    for (const Item &item : fetch(0, PDH_FMT_DOUBLE)) {
+        const int pid = gpuPidFromPdhInstance(item.name);
+        const QString luid = luidOf(item.name);
+        if (luid.isEmpty()) {
+            continue;
+        }
+        AdapterAgg &adapter = adapters[luid];
+        const double value = qBound(0.0, item.value, 100.0);
+        adapter.util = qMax(adapter.util, value);
+        if (pid > 0) {
+            ProcessAgg &process = processes[pid];
+            process.util = qMax(process.util, value);
+        }
+    }
+    for (const Item &item : fetch(1, PDH_FMT_LARGE)) {
+        const int pid = gpuPidFromPdhInstance(item.name);
+        const QString luid = luidOf(item.name);
+        if (pid <= 0) {
+            continue;
+        }
+        if (item.large > 0) {
+            processes[pid].mem += static_cast<quint64>(item.large);
+        }
+        if (!luid.isEmpty() && item.large > 0) {
+            adapters[luid].mem += static_cast<quint64>(item.large);
+        }
+    }
+    for (const Item &item : fetch(2, PDH_FMT_LARGE)) {
+        const QString luid = luidOf(item.name);
+        if (luid.isEmpty() || item.large <= 0) {
+            continue;
+        }
+        AdapterAgg &adapter = adapters[luid];
+        if (adapter.mem == 0) {
+            adapter.mem = static_cast<quint64>(item.large);
+        }
+    }
+
+    int index = 0;
+    for (auto it = adapters.constBegin(); it != adapters.constEnd(); ++it) {
+        GpuDevice device;
+        device.index = index++;
+        device.vendor = QStringLiteral("unknown");
+        device.driver = QStringLiteral("pdh");
+        device.name = QStringLiteral("adapter %1").arg(device.index);
+        device.utilPercent = it->util;
+        device.memUsed = it->mem;
+        reading.devices.append(device);
+    }
+    for (auto it = processes.constBegin(); it != processes.constEnd(); ++it) {
+        if (it->util < 0.0 && it->mem == 0) {
+            continue;
+        }
+        GpuProcess process;
+        process.pid = it.key();
+        process.name = comm(it.key());
+        if (process.name.isEmpty()) {
+            process.name = QStringLiteral("pid %1").arg(it.key());
+        }
+        process.busyPercent = it->util;
+        process.memBytes = it->mem;
+        reading.processes.append(process);
+    }
+    std::sort(reading.processes.begin(), reading.processes.end(),
+              [](const GpuProcess &a, const GpuProcess &b) {
+        const double busyA = a.busyPercent < 0.0 ? 0.0 : a.busyPercent;
+        const double busyB = b.busyPercent < 0.0 ? 0.0 : b.busyPercent;
+        if (busyA != busyB) {
+            return busyA > busyB;
+        }
+        return a.memBytes > b.memBytes;
+    });
+
+    reading.ok = !reading.devices.isEmpty();
+    if (!reading.ok) {
+        reading.note = QStringLiteral(
+            "gpu: no GPU adapter is exposing performance counters");
+    } else {
+        reading.vendor = QStringLiteral("unknown");
+    }
+    return reading;
+}
+
+SensorsSnapshot WindowsBackend::sensors() {
+    return winsensors::collect();
+}
+
 void WindowsBackend::closePdhDiskQuery() {
     // PDH counters are owned by the query; one close releases all of them.
     if (m_pdhQuery != nullptr) {
@@ -369,6 +574,11 @@ PlatformCapabilities WindowsBackend::capabilities() const {
     caps.journal = true;
     caps.tcpCounters = m_tcpCountersOk;
     caps.sbom = true;
+    caps.perProcessDisk = true;
+    caps.gpu = true;
+    caps.gpuProcessData = true;
+    caps.processSignals = true;
+    caps.battery = true;
     return caps;
 }
 
@@ -646,6 +856,24 @@ bool WindowsBackend::procMem(int pid, linuxproc::MemInfo &out) {
                           >> 10
                     : 0;
     return out.rssKb > 0;
+}
+
+bool WindowsBackend::processDiskCounters(int pid, long long &readBytes,
+                                         long long &writeBytes) {
+    HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                  static_cast<DWORD>(pid));
+    if (handle == nullptr) {
+        return false;
+    }
+    IO_COUNTERS io = {};
+    const bool ok = ::GetProcessIoCounters(handle, &io) != FALSE;
+    ::CloseHandle(handle);
+    if (!ok) {
+        return false;
+    }
+    readBytes = static_cast<long long>(io.ReadTransferCount);
+    writeBytes = static_cast<long long>(io.WriteTransferCount);
+    return true;
 }
 
 bool WindowsBackend::procSample(int pid, linuxproc::MemInfo &mem,
@@ -1416,4 +1644,94 @@ QString WindowsBackend::processCmdline(int pid) {
     return QString::fromWCharArray(
         reinterpret_cast<const wchar_t *>(cmdUtf16.constData()),
         int(got / sizeof(wchar_t)));
+}
+
+bool WindowsBackend::applyProcessAction(const ProcessAction &action,
+                                        QString *error) {
+    const auto fail = [error](const QString &what, DWORD code) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: win32 error %2").arg(what).arg(code);
+        }
+        return false;
+    };
+    if (action.pid <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("invalid pid");
+        }
+        return false;
+    }
+    if (action.kind != ProcessActionKind::Signal) {
+        if (error != nullptr) {
+            *error = QStringLiteral("only terminate is wired on windows");
+        }
+        return false;
+    }
+    if (action.signal != ProcessSignal::Term
+        && action.signal != ProcessSignal::Kill
+        && action.signal != ProcessSignal::Int) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1 is not supported on windows")
+                         .arg(processSignalName(action.signal));
+        }
+        return false;
+    }
+    HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE,
+                                static_cast<DWORD>(action.pid));
+    if (handle == nullptr) {
+        return fail(QStringLiteral("OpenProcess"), GetLastError());
+    }
+    const BOOL ok = TerminateProcess(handle, 1);
+    const DWORD code = ok ? 0 : GetLastError();
+    CloseHandle(handle);
+    if (!ok) {
+        return fail(processSignalName(action.signal), code);
+    }
+    return true;
+}
+
+bool WindowsBackend::restartService(const QString &name, QString *error) {
+    const auto fail = [error](const QString &what, DWORD code) {
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: win32 error %2").arg(what).arg(code);
+        }
+        return false;
+    };
+    if (name.trimmed().isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("empty service name");
+        }
+        return false;
+    }
+    const std::wstring wide = name.toStdWString();
+    SC_HANDLE mgr = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (mgr == nullptr) {
+        return fail(QStringLiteral("OpenSCManager"), GetLastError());
+    }
+    SC_HANDLE svc = ::OpenServiceW(mgr, wide.c_str(),
+                                   SERVICE_STOP | SERVICE_START
+                                       | SERVICE_QUERY_STATUS);
+    if (svc == nullptr) {
+        const DWORD code = GetLastError();
+        ::CloseServiceHandle(mgr);
+        return fail(QStringLiteral("OpenService"), code);
+    }
+
+    SERVICE_STATUS status {};
+    if (::ControlService(svc, SERVICE_CONTROL_STOP, &status) != FALSE) {
+        for (int i = 0; i < 50; ++i) {
+            if (::QueryServiceStatus(svc, &status) == FALSE
+                || status.dwCurrentState == SERVICE_STOPPED) {
+                break;
+            }
+            ::Sleep(100);
+        }
+    }
+    const BOOL started = ::StartServiceW(svc, 0, nullptr);
+    const DWORD code = started ? 0 : GetLastError();
+    ::CloseServiceHandle(svc);
+    ::CloseServiceHandle(mgr);
+    if (started == FALSE) {
+        return fail(QStringLiteral("StartService"), code);
+    }
+    return true;
 }

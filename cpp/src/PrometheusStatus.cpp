@@ -180,6 +180,207 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    if (!s.processDiskTop.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_process_disk_bytes_per_second Per-process block i/o "
+            "throughput."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_process_disk_bytes_per_second gauge"));
+        for (const ProcessDiskConsumer &consumer : s.processDiskTop) {
+            const QString labels =
+                QStringLiteral("process=\"%1\",pid=\"%2\"")
+                    .arg(escapeLabel(consumer.name))
+                    .arg(consumer.pid);
+            lines.append(
+                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                               "direction=\"read\"} %2")
+                    .arg(labels, num(consumer.readPerSec)));
+            lines.append(
+                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                               "direction=\"write\"} %2")
+                    .arg(labels, num(consumer.writePerSec)));
+        }
+    }
+
+    if (s.gpu.ok) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_gpu_utilization_percent GPU utilization."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_gpu_utilization_percent gauge"));
+        for (const GpuDevice &device : s.gpu.devices) {
+            const QString labels =
+                QStringLiteral("device=\"%1\",vendor=\"%2\",name=\"%3\"")
+                    .arg(device.index)
+                    .arg(escapeLabel(device.vendor))
+                    .arg(escapeLabel(device.name));
+            if (device.utilPercent >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_utilization_percent{%1} %2")
+                        .arg(labels, num(device.utilPercent)));
+            }
+            if (device.memUsed > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_memory_used_bytes{%1} %2")
+                        .arg(labels)
+                        .arg(device.memUsed));
+            }
+            if (device.memTotal > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_memory_total_bytes{%1} %2")
+                        .arg(labels)
+                        .arg(device.memTotal));
+            }
+            if (device.tempC >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_temperature_celsius{%1} %2")
+                        .arg(labels, num(device.tempC)));
+            }
+            if (device.powerW >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_power_watts{%1} %2")
+                        .arg(labels, num(device.powerW)));
+            }
+            if (device.clockMhz > 0) {
+                lines.append(
+                    QStringLiteral("syspeek_gpu_clock_mhz{%1} %2")
+                        .arg(labels)
+                        .arg(device.clockMhz));
+            }
+        }
+        if (!s.gpu.processes.isEmpty()) {
+            lines.append(QStringLiteral(
+                "# HELP syspeek_gpu_process_busy_percent Per-process gpu "
+                "engine utilization."));
+            lines.append(QStringLiteral(
+                "# TYPE syspeek_gpu_process_busy_percent gauge"));
+            for (const GpuProcess &process : s.gpu.processes) {
+                const QString labels =
+                    QStringLiteral("process=\"%1\",pid=\"%2\"")
+                        .arg(escapeLabel(process.name))
+                        .arg(process.pid);
+                if (process.busyPercent >= 0.0) {
+                    lines.append(
+                        QStringLiteral(
+                            "syspeek_gpu_process_busy_percent{%1} %2")
+                            .arg(labels, num(process.busyPercent)));
+                }
+                if (process.memBytes > 0) {
+                    lines.append(
+                        QStringLiteral(
+                            "syspeek_gpu_process_memory_bytes{%1} %2")
+                            .arg(labels)
+                            .arg(process.memBytes));
+                }
+            }
+        }
+    }
+
+    if (s.sensors.available && !s.sensors.chips.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_celsius hwmon temperature reading."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_celsius gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_fan_rpm hwmon fan speed."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_fan_rpm gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_power_watts hwmon power reading."));
+        lines.append(QStringLiteral("# TYPE syspeek_sensor_power_watts gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_sensor_limit_celsius Configured critical "
+            "temperature for the sensor."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_sensor_limit_celsius gauge"));
+        for (const SensorChip &chip : s.sensors.chips) {
+            for (const SensorReading &reading : chip.readings) {
+                const QString labels =
+                    QStringLiteral("chip=\"%1\",sensor=\"%2\",kind=\"%3\"")
+                        .arg(escapeLabel(chip.name),
+                             escapeLabel(reading.label),
+                             sensorKindName(reading.kind));
+                if (reading.kind == SensorKind::Temperature) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_celsius{%1} %2")
+                            .arg(labels, num(reading.value)));
+                    if (reading.hasCrit) {
+                        lines.append(
+                            QStringLiteral(
+                                "syspeek_sensor_limit_celsius{%1} %2")
+                                .arg(labels, num(reading.crit)));
+                    }
+                } else if (reading.kind == SensorKind::Fan) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_fan_rpm{%1} %2")
+                            .arg(labels, num(reading.value)));
+                } else if (reading.kind == SensorKind::Power) {
+                    lines.append(
+                        QStringLiteral("syspeek_sensor_power_watts{%1} %2")
+                            .arg(labels, num(reading.value)));
+                }
+            }
+        }
+    }
+
+    if (!s.sensors.batteries.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_charge_percent Battery charge."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_charge_percent gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_energy_watt_hours Battery energy "
+            "remaining and full capacity."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_energy_watt_hours gauge"));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_battery_power_watts Battery charge/discharge "
+            "power."));
+        lines.append(QStringLiteral(
+            "# TYPE syspeek_battery_power_watts gauge"));
+        for (const BatteryReading &battery : s.sensors.batteries) {
+            const QString labels = QStringLiteral("battery=\"%1\"")
+                                       .arg(escapeLabel(battery.name));
+            if (battery.capacityPercent >= 0) {
+                lines.append(
+                    QStringLiteral("syspeek_battery_charge_percent{%1} %2")
+                        .arg(labels)
+                        .arg(battery.capacityPercent));
+            }
+            if (battery.energyNowWh >= 0.0) {
+                lines.append(
+                    QStringLiteral(
+                        "syspeek_battery_energy_watt_hours{%1,state=\"now\"} "
+                        "%2")
+                        .arg(labels, num(battery.energyNowWh)));
+            }
+            if (battery.energyFullWh >= 0.0) {
+                lines.append(
+                    QStringLiteral(
+                        "syspeek_battery_energy_watt_hours{%1,state=\"full\"}"
+                        " %2")
+                        .arg(labels, num(battery.energyFullWh)));
+            }
+            if (battery.powerW >= 0.0) {
+                lines.append(
+                    QStringLiteral("syspeek_battery_power_watts{%1} %2")
+                        .arg(labels, num(battery.powerW)));
+            }
+        }
+    }
+
+    if (!s.sensors.adapters.isEmpty()) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_ac_online AC adapter online state."));
+        lines.append(QStringLiteral("# TYPE syspeek_ac_online gauge"));
+        for (const AdapterReading &adapter : s.sensors.adapters) {
+            lines.append(
+                QStringLiteral(
+                    "syspeek_ac_online{adapter=\"%1\",online=\"%2\"} %3")
+                    .arg(escapeLabel(adapter.name),
+                         adapter.online ? QStringLiteral("true")
+                                        : QStringLiteral("false"))
+                    .arg(adapter.online ? 1 : 0));
+        }
+    }
+
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
             "# HELP syspeek_net_rx_bytes_total Network receive bytes."));

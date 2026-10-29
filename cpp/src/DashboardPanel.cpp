@@ -3,6 +3,8 @@
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
+#include "CostModel.h"
+#include "HistoryLog.h"
 #include "LogParser.h"
 #include "MemoryFormat.h"
 #include "ProcessNetStatus.h"
@@ -11,10 +13,13 @@
 #include "TimeseriesChart.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QColor>
 #include <QDateTime>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -26,6 +31,8 @@
 #include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QSlider>
+#include <QTimer>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -34,6 +41,23 @@
 #include <algorithm>
 
 namespace {
+
+QList<ChartBand> chartBandsFrom(const QList<MonitorBand> &bands) {
+    QList<ChartBand> chartBands;
+    for (const MonitorBand &band : bands) {
+        ChartBand chartBand;
+        chartBand.value = band.value;
+        chartBand.above = band.above;
+        chartBand.label = bandLabelText(band);
+        chartBand.color = QColor(band.state == QStringLiteral("Error")
+                                     ? ui_theme::crit()
+                                     : band.state == QStringLiteral("Warning")
+                                           ? ui_theme::warn()
+                                           : ui_theme::ok());
+        chartBands.append(chartBand);
+    }
+    return chartBands;
+}
 
 QFont panelTitleFont() {
     QFont font;
@@ -220,6 +244,7 @@ QString DashboardPanel::unsupportedOsText() const {
 DashboardPanel::DashboardPanel(QWidget *parent)
     : QWidget(parent) {
     setObjectName(QStringLiteral("ddRoot"));
+    qRegisterMetaType<ProcessAction>("ProcessAction");
 
     const PlatformCapabilities osCaps = systemBackend().capabilities();
     m_osTcpCounters = osCaps.tcpCounters;
@@ -230,6 +255,18 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_osFim = osCaps.fim;
     m_osSecurity = osCaps.namespaces;
     m_osProcessNet = osCaps.perProcessNet;
+    m_osProcessDisk = osCaps.perProcessDisk;
+    m_osProcessDiskScan = osCaps.perProcessDiskScan;
+    m_osGpu = osCaps.gpu;
+    m_osGpuClients = osCaps.gpuClients;
+    m_osGpuProcess = osCaps.gpuProcessData;
+    m_osSensors = osCaps.sensors;
+    m_osBattery = osCaps.battery;
+    m_osProcessSignals = osCaps.processSignals;
+    m_osProcessRenice = osCaps.processRenice;
+    m_osProcessIonice = osCaps.processIonice;
+    m_osProcessOomScore = osCaps.processOomScore;
+    m_osProcessPause = osCaps.processPause;
     m_osName = systemBackend().platformName();
 
     auto *root = new QVBoxLayout(this);
@@ -314,6 +351,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Alerts"), QStringLiteral("Incidents"), QStringLiteral("SLO"),
                       QStringLiteral("Processes"), QStringLiteral("Memory"),
                       QStringLiteral("Disks"),
+                      QStringLiteral("GPU"),
+                      QStringLiteral("Sensors"),
                       QStringLiteral("Host"),
                       QStringLiteral("Network"),
                       QStringLiteral("Network Path"),
@@ -326,7 +365,9 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Instrumentation"),
                       QStringLiteral("Traces"), QStringLiteral("Profiles"),
                       QStringLiteral("Databases"), QStringLiteral("Security"),
-                      QStringLiteral("Cost"), QStringLiteral("Settings")});
+                      QStringLiteral("History"), QStringLiteral("Cost"),
+                      QStringLiteral("Cloud"),
+                      QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
 
     m_views = new QStackedWidget(body);
@@ -339,6 +380,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildProcessesView());
     m_views->addWidget(buildMemoryView());
     m_views->addWidget(buildDisksView());
+    m_views->addWidget(buildGpuView());
+    m_views->addWidget(buildSensorsView());
     m_views->addWidget(buildHostView());
     m_views->addWidget(buildNetworkView());
     m_views->addWidget(buildNetworkPathView());
@@ -355,7 +398,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildTracesView());
     m_views->addWidget(buildProfilesView());
     m_views->addWidget(buildDatabasesView());
-    m_views->addWidget(buildSecurityView());    m_views->addWidget(buildCostView());
+    m_views->addWidget(buildSecurityView());
+    m_views->addWidget(buildHistoryView());
+    m_views->addWidget(buildCostView());
+    m_views->addWidget(buildCloudView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
@@ -427,7 +473,10 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCgroup { color: %DIM%; }"
         "#ddDocker { color: %DIM%; }"
         "#ddListen, #ddStates, #ddIfaces { color: %DIM%; }"
-        "#ddProcNetNote, #ddTalkers { color: %MUTED%; }"
+        "#ddProcNetNote, #ddProcDiskNote, #ddProcFilterNote, #ddTalkers,"
+        " #ddDiskTopNote,"
+        " #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,"
+        " #ddHistDetail, #ddSilenceSummary, #ddSilenceList { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
@@ -462,7 +511,12 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddKubeTileDeploys, #ddKubeTileCost { color: %TEXT%; }"
         "#ddMemTileTotal, #ddMemTileUsed, #ddMemTileAvail, #ddMemTileRss"
         " { color: %TEXT%; }"
-        "#ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
+        "#ddGpuTileUtil, #ddGpuTileMem, #ddGpuTileTemp, #ddGpuTileProcs,"
+        " #ddSensorTileHot, #ddSensorTileFans, #ddSensorTilePower,"
+        " #ddSensorTileBattery,"
+        " #ddHistTileSamples, #ddHistTileSpan, #ddHistTileDisk,"
+        " #ddHistTileInterval,"
+        " #ddDiskTileRead, #ddDiskTileWrite, #ddDiskTileUtil, #ddDiskTilePsi,"
         " #ddHostTileCpu, #ddHostTileLoad, #ddHostTileAvail, #ddHostTileDisk,"
         " #ddNetTileConns, #ddNetTileEstab, #ddNetTileTx,"
         " #ddPathTileTargets, #ddPathTileHops, #ddPathTileLoss,"
@@ -482,6 +536,15 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddDbTileCommits, #ddDbTileRollbacks, #ddDbTileDeadlocks,"
         " #ddSecTileExposure, #ddSecTileFindings, #ddSecTileThreats,"
         " #ddSecTileFim { color: %TEXT%; }"
+        "#ddCostTileMonthly, #ddCostTileHourly, #ddCostTileCpuEff,"
+        " #ddCostTileMemEff, #ddSettingsTileVersion, #ddSettingsTileRefresh,"
+        " #ddSettingsTileMonitors, #ddSettingsTileSilenced { color: %TEXT%; }"
+        "#ddCloudTileProvider, #ddCloudTileAge, #ddCloudTileAccrued,"
+        " #ddCloudTileMonthly { color: %TEXT%; }"
+        "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
+        " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint"
+        " { color: %MUTED%; }"
+        "#ddCloudShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -492,12 +555,51 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddSynthetic, #ddSyntheticSummary { color: %DIM%; }"
         "#ddKubeSummary, #ddKubeEvents { color: %DIM%; }"
         "#ddKubeDiagnosis, #ddKubeTimeline { color: %DIM%; }"
-        "#ddSettingsInfo { color: %DIM%; }"
+        "#ddSettingsLabel { color: %DIM%; }"
         "#ddSettingsPath { color: %MUTED%; font-size: 9px; }"
-        "#ddCopy { color: %DIM%; background-color: transparent;"
+        "#ddCopy, #ddSilenceAdd, #ddSilenceExpire { color: %DIM%;"
+        "  background-color: transparent;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
         "  padding: 2px 10px; font-size: 9px; }"
-        "#ddCopy:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddCopy:hover, #ddSilenceAdd:hover, #ddSilenceExpire:hover {"
+        "  color: %TEXT%; border-color: %MUTED%; }"
+        "#ddSilenceAdd { color: %ACCENT%; }"
+        "QComboBox, QSpinBox, QDoubleSpinBox { color: %TEXT%;"
+        "  background-color: %SURFACE%; border: 1px solid %BORDER%;"
+        "  border-radius: 2px; padding: 2px 5px; font-size: 10px; }"
+        "QComboBox::drop-down { border: 0px; width: 14px; }"
+        "QComboBox QAbstractItemView { background-color: %SURFACE%;"
+        "  color: %TEXT%; selection-background-color: %HOVER%;"
+        "  border: 1px solid %BORDER%; }"
+        "QCheckBox { color: %DIM%; font-size: 9px; }"
+        "QCheckBox::indicator { width: 11px; height: 11px;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  background-color: %SURFACE%; }"
+        "QCheckBox::indicator:checked { background-color: %ACCENT%;"
+        "  border-color: %ACCENT%; }"
+        "#ddHistFirst, #ddHistPrev, #ddHistNext, #ddHistLast {"
+        "  color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  padding: 3px 12px; font-size: 9px; }"
+        "#ddHistFirst:hover, #ddHistPrev:hover, #ddHistNext:hover,"
+        " #ddHistLast:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddActionBtn { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px;"
+        "  padding: 3px 10px; font-size: 9px; }"
+        "#ddActionBtn:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddActionBtn:disabled { color: %MUTED%; border-color: %BORDER%; }"
+        "#ddProcActionsNote, #ddContainerActionsNote, #ddServiceActionsNote"
+        " { color: %MUTED%; }"
+        "#ddActionStatus, #ddContainerStatus, #ddServiceStatus"
+        " { color: %DIM%; }"
+        "#ddHistFirst:disabled, #ddHistPrev:disabled, #ddHistNext:disabled,"
+        " #ddHistLast:disabled { color: %MUTED%; }"
+        "#ddHistSlider::groove:horizontal { background-color: %BORDER%;"
+        "  height: 4px; border-radius: 2px; }"
+        "#ddHistSlider::handle:horizontal { background-color: %ACCENT%;"
+        "  width: 10px; margin: -4px 0; border-radius: 2px; }"
+        "#ddHistSlider::sub-page:horizontal { background-color: %ACCENT%;"
+        "  height: 4px; border-radius: 2px; }"
         "QTreeWidget { background-color: transparent; border: none;"
         "  color: %DIM%; font-size: 11px; }"
         "QTreeWidget::item { padding: 2px 0px; }"
@@ -1076,6 +1178,59 @@ QWidget *DashboardPanel::buildAlertsView() {
     layout->addWidget(makeCard(QStringLiteral("EVENT HISTORY"),
                                m_alertTimeline, view), 1);
 
+    // --- Silences (M75, Alertmanager model): mute one monitor for a while
+    // without disabling it. The rule keeps evaluating and the ACTIVE ALERTS
+    // card keeps showing the breach, but no webhook or incident is raised
+    // while the window is live.
+    m_silenceTarget = new QComboBox(view);
+    m_silenceTarget->setObjectName(QStringLiteral("ddSilenceTarget"));
+    m_silenceTarget->setMinimumWidth(1);
+    m_silenceMinutes = new QSpinBox(view);
+    m_silenceMinutes->setObjectName(QStringLiteral("ddSilenceMinutes"));
+    m_silenceMinutes->setRange(1, 24 * 60);
+    m_silenceMinutes->setValue(30);
+    m_silenceMinutes->setSuffix(QStringLiteral(" min"));
+    m_silenceAdd = new QPushButton(QStringLiteral("SNOOZE"), view);
+    m_silenceAdd->setObjectName(QStringLiteral("ddSilenceAdd"));
+    m_silenceAdd->setCursor(Qt::PointingHandCursor);
+    m_silenceExpire = new QPushButton(QStringLiteral("EXPIRE"), view);
+    m_silenceExpire->setObjectName(QStringLiteral("ddSilenceExpire"));
+    m_silenceExpire->setCursor(Qt::PointingHandCursor);
+    connect(m_silenceAdd, &QPushButton::clicked, this,
+            &DashboardPanel::requestSilence);
+    connect(m_silenceExpire, &QPushButton::clicked, this,
+            &DashboardPanel::expireSelectedSilence);
+
+    m_silenceSummary = new QLabel(QStringLiteral("--"), view);
+    m_silenceSummary->setObjectName(QStringLiteral("ddSilenceSummary"));
+    m_silenceSummary->setFont(monoFont(10));
+    m_silenceSummary->setMinimumWidth(1);
+    m_silenceSummary->setWordWrap(false);
+    m_silenceList = new QLabel(QStringLiteral("--"), view);
+    m_silenceList->setObjectName(QStringLiteral("ddSilenceList"));
+    m_silenceList->setFont(monoFont(10));
+    m_silenceList->setMinimumWidth(1);
+    m_silenceList->setWordWrap(false);
+
+    auto *silenceBox = new QWidget(view);
+    auto *silenceLayout = new QVBoxLayout(silenceBox);
+    silenceLayout->setContentsMargins(0, 0, 0, 0);
+    silenceLayout->setSpacing(5);
+    auto *silenceRow = new QHBoxLayout();
+    silenceRow->setSpacing(6);
+    silenceRow->addWidget(m_silenceTarget, 2);
+    silenceRow->addWidget(m_silenceMinutes, 1);
+    silenceRow->addWidget(m_silenceAdd);
+    silenceRow->addWidget(m_silenceExpire);
+    silenceLayout->addLayout(silenceRow);
+    silenceLayout->addWidget(m_silenceSummary);
+    silenceLayout->addWidget(m_silenceList);
+
+    layout->addWidget(makeBanner(QStringLiteral("SILENCES"),
+        ui_theme::ok(), view));
+    layout->addWidget(makeCard(QStringLiteral("QUIET WINDOWS"),
+                               silenceBox, view), 1);
+
     // Fit the viewport width: width-only clamps (heights stay natural).
     m_alerts->setMinimumWidth(1);
     m_alertTimeline->setMinimumWidth(1);
@@ -1310,17 +1465,19 @@ QWidget *DashboardPanel::buildProcessesView() {
 
     m_procs = new QTreeWidget(view);
     m_procs->setObjectName(QStringLiteral("ddProcs"));
-    m_procs->setColumnCount(9);
+    m_procs->setColumnCount(11);
     m_procs->setHeaderLabels({QStringLiteral("Process"), QStringLiteral("PID"),
                               QStringLiteral("CPU%"), QStringLiteral("NET ↓"),
-                              QStringLiteral("NET ↑"), QStringLiteral("Threads"),
+                              QStringLiteral("NET ↑"), QStringLiteral("DISK ↓"),
+                              QStringLiteral("DISK ↑"), QStringLiteral("Threads"),
                               QStringLiteral("FDs"), QStringLiteral("RSS"),
                               QStringLiteral("PORTS")});
     m_procs->setRootIsDecorated(true);
-    m_procs->setSelectionMode(QAbstractItemView::NoSelection);
-    m_procs->setFocusPolicy(Qt::NoFocus);
+    m_procs->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_procs->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_procs->setFocusPolicy(Qt::ClickFocus);
     m_procs->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 9; ++i) {
+    for (int i = 1; i < 11; ++i) {
         m_procs->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
     connect(m_procs, &QTreeWidget::itemExpanded, this,
@@ -1346,9 +1503,119 @@ QWidget *DashboardPanel::buildProcessesView() {
     m_procNetNote->setObjectName(QStringLiteral("ddProcNetNote"));
     m_procNetNote->setFont(monoFont(10));
     m_procNetNote->setMinimumWidth(1);
+    m_procDiskNote = new QLabel(QStringLiteral("--"), procBox);
+    m_procDiskNote->setObjectName(QStringLiteral("ddProcDiskNote"));
+    m_procDiskNote->setFont(monoFont(10));
+    m_procDiskNote->setMinimumWidth(1);
+    m_procHealthyOnly = new QCheckBox(QStringLiteral("HEALTHY ONLY"), procBox);
+    m_procHealthyOnly->setObjectName(QStringLiteral("ddProcHealthy"));
+    m_procHealthyOnly->setToolTip(QStringLiteral(
+        "hide rows below the focused-app CPU / RSS monitor lines"));
+    m_procFilterNote = new QLabel(QString(), procBox);
+    m_procFilterNote->setObjectName(QStringLiteral("ddProcFilterNote"));
+    m_procFilterNote->setFont(monoFont(10));
+    m_procFilterNote->setMinimumWidth(1);
+    connect(m_procHealthyOnly, &QCheckBox::toggled, this,
+            [this](bool checked) {
+                m_procFilterActive = checked;
+                populateProcessTree(m_lastProcessRows);
+            });
     procBoxLayout->addWidget(m_procs, 1);
     procBoxLayout->addWidget(m_procNetNote);
+    procBoxLayout->addWidget(m_procDiskNote);
+    procBoxLayout->addWidget(m_procHealthyOnly);
+    procBoxLayout->addWidget(m_procFilterNote);
     layout->addWidget(makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
+
+    // --- M78 verbs. htop's model: the row is the target, the panel offers
+    // the verbs ("Send signal:", "set IO priority", "Nice value"). Every
+    // button states its refusal honestly when the OS or the permissions say
+    // no instead of silently doing nothing.
+    m_procActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_procActionsNote->setObjectName(QStringLiteral("ddProcActionsNote"));
+    m_procActionsNote->setFont(monoFont(10));
+    m_procActionsNote->setWordWrap(true);
+    m_procActionsNote->setMinimumWidth(1);
+
+    auto *signalRow = new QHBoxLayout();
+    signalRow->setSpacing(6);
+    auto *niceRow = new QHBoxLayout();
+    niceRow->setSpacing(6);
+
+    const auto addButton = [&](QHBoxLayout *row, const QString &text,
+                               const QString &id, bool enabled) {
+        QPushButton *button = makeActionButton(text, id, view);
+        button->setEnabled(enabled);
+        row->addWidget(button);
+        return button;
+    };
+
+    addButton(signalRow, QStringLiteral("TERM"), QStringLiteral("term"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("KILL"), QStringLiteral("kill"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("HUP"), QStringLiteral("hup"),
+              m_osProcessSignals);
+    addButton(signalRow, QStringLiteral("PAUSE"), QStringLiteral("pause"),
+              m_osProcessSignals && m_osProcessPause);
+    addButton(signalRow, QStringLiteral("RESUME"), QStringLiteral("resume"),
+              m_osProcessSignals && m_osProcessPause);
+    signalRow->addStretch(1);
+
+    addButton(niceRow, QStringLiteral("NICE +5"), QStringLiteral("nice-up"),
+              m_osProcessRenice);
+    addButton(niceRow, QStringLiteral("NICE -5"), QStringLiteral("nice-down"),
+              m_osProcessRenice);
+    addButton(niceRow, QStringLiteral("I/O IDLE"), QStringLiteral("io-idle"),
+              m_osProcessIonice);
+    addButton(niceRow, QStringLiteral("I/O BE"), QStringLiteral("io-be"),
+              m_osProcessIonice);
+    addButton(niceRow, QStringLiteral("OOM +500"), QStringLiteral("oom-up"),
+              m_osProcessOomScore);
+    addButton(niceRow, QStringLiteral("OOM -500"), QStringLiteral("oom-down"),
+              m_osProcessOomScore);
+    niceRow->addStretch(1);
+
+    m_actionStatus = new QLabel(QStringLiteral("--"), view);
+    m_actionStatus->setObjectName(QStringLiteral("ddActionStatus"));
+    m_actionStatus->setFont(monoFont(10));
+    m_actionStatus->setWordWrap(true);
+    m_actionStatus->setMinimumWidth(1);
+
+    auto *actionBox = new QWidget(view);
+    auto *actionLayout = new QVBoxLayout(actionBox);
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(6);
+    actionLayout->addWidget(m_procActionsNote);
+    actionLayout->addLayout(signalRow);
+    actionLayout->addLayout(niceRow);
+    actionLayout->addWidget(m_actionStatus);
+    layout->addWidget(makeBanner(QStringLiteral("ACTIONS"),
+                                 ui_theme::crit(), view));
+    layout->addWidget(makeCard(QStringLiteral("SIGNALS / PRIORITY"),
+                               actionBox, view));
+
+    if (!m_osProcessSignals) {
+        m_procActionsNote->setText(unsupportedOsText());
+    } else {
+        QStringList missing;
+        if (!m_osProcessIonice) {
+            missing.append(QStringLiteral("i/o priority"));
+        }
+        if (!m_osProcessOomScore) {
+            missing.append(QStringLiteral("oom_score_adj"));
+        }
+        if (!m_osProcessPause) {
+            missing.append(QStringLiteral("pause/resume"));
+        }
+        m_procActionsNote->setText(
+            missing.isEmpty()
+                ? QStringLiteral("select a row, then a verb; TERM/KILL ask "
+                                 "for a second press")
+                : QStringLiteral("select a row, then a verb - not available "
+                                 "on %1: %2")
+                      .arg(m_osName, missing.join(QStringLiteral(", "))));
+    }
 
     // --- CPU / load history (Syspeek-own fleet counters).
     m_chartProcTotals = new TimeseriesChart(view);
@@ -1787,6 +2054,76 @@ QWidget *DashboardPanel::buildContainersView() {
     layout->addWidget(
         makeCard(QStringLiteral("CONTAINERS"), m_dockerTable, view), 2);
 
+    // --- M78 lifecycle verbs, same Engine API the shipped docker CLI uses.
+    m_containerPick = new QComboBox(view);
+    m_containerPick->setObjectName(QStringLiteral("ddContainerPick"));
+    m_containerPick->setFont(monoFont(10));
+    m_containerPick->setMinimumWidth(1);
+
+    m_containerStart = new QPushButton(QStringLiteral("START"), view);
+    m_containerStart->setObjectName(QStringLiteral("ddActionBtn"));
+    m_containerStop = new QPushButton(QStringLiteral("STOP"), view);
+    m_containerStop->setObjectName(QStringLiteral("ddActionBtn"));
+    m_containerRestart = new QPushButton(QStringLiteral("RESTART"), view);
+    m_containerRestart->setObjectName(QStringLiteral("ddActionBtn"));
+    for (QPushButton *button :
+         {m_containerStart, m_containerStop, m_containerRestart}) {
+        button->setFont(monoFont(10));
+        button->setCursor(Qt::PointingHandCursor);
+        button->setEnabled(false);
+    }
+
+    const auto emitContainer = [this](const QString &verb) {
+        if (m_containerPick == nullptr) {
+            return;
+        }
+        const QString id = m_containerPick->currentData().toString();
+        if (id.isEmpty()) {
+            return;
+        }
+        emit containerActionRequested(id, verb);
+    };
+    connect(m_containerStart, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("start")); });
+    connect(m_containerStop, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("stop")); });
+    connect(m_containerRestart, &QPushButton::clicked, this,
+            [emitContainer]() { emitContainer(QStringLiteral("restart")); });
+
+    m_containerStatus = new QLabel(QStringLiteral("--"), view);
+    m_containerStatus->setObjectName(QStringLiteral("ddContainerStatus"));
+    m_containerStatus->setFont(monoFont(10));
+    m_containerStatus->setWordWrap(true);
+    m_containerStatus->setMinimumWidth(1);
+    m_containerActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_containerActionsNote->setObjectName(QStringLiteral("ddContainerActionsNote"));
+    m_containerActionsNote->setFont(monoFont(10));
+    m_containerActionsNote->setWordWrap(true);
+    m_containerActionsNote->setMinimumWidth(1);
+    m_containerActionsNote->setText(QStringLiteral(
+        "start/stop/restart go through the local Docker Engine API; the "
+        "next poll shows the new state"));
+
+    auto *containerPickRow = new QHBoxLayout();
+    containerPickRow->setSpacing(6);
+    containerPickRow->addWidget(m_containerPick, 1);
+    containerPickRow->addWidget(m_containerStart);
+    containerPickRow->addWidget(m_containerStop);
+    containerPickRow->addWidget(m_containerRestart);
+
+    auto *containerActionBox = new QWidget(view);
+    auto *containerActionLayout = new QVBoxLayout(containerActionBox);
+    containerActionLayout->setContentsMargins(0, 0, 0, 0);
+    containerActionLayout->setSpacing(6);
+    containerActionLayout->addLayout(containerPickRow);
+    containerActionLayout->addWidget(m_containerActionsNote);
+    containerActionLayout->addWidget(m_containerStatus);
+
+    layout->addWidget(makeBanner(QStringLiteral("LIFECYCLE"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("CONTAINER ACTIONS"),
+                               containerActionBox, view));
+
     // --- Running-count history (Syspeek-own counter).
     m_chartDocker = new TimeseriesChart(view);
     m_chartDocker->setUnit(QStringLiteral("Count"));
@@ -2037,6 +2374,65 @@ QWidget *DashboardPanel::buildServicesView() {
         makeCard(QStringLiteral("SYSTEMD"), m_servicesSummary, view));
     layout->addWidget(
         makeCard(QStringLiteral("SERVICES"), m_services, view), 2);
+
+    // --- M78 restart verb: the supervisor's own restart path, not a fresh
+    // install of the unit (systemctl restart / launchctl kickstart -k / SCM).
+    m_servicePick = new QComboBox(view);
+    m_servicePick->setObjectName(QStringLiteral("ddServicePick"));
+    m_servicePick->setFont(monoFont(10));
+    m_servicePick->setMinimumWidth(1);
+    m_serviceRestart = new QPushButton(QStringLiteral("RESTART"), view);
+    m_serviceRestart->setObjectName(QStringLiteral("ddActionBtn"));
+    m_serviceRestart->setFont(monoFont(10));
+    m_serviceRestart->setCursor(Qt::PointingHandCursor);
+    m_serviceRestart->setEnabled(false);
+    connect(m_serviceRestart, &QPushButton::clicked, this, [this]() {
+        if (m_servicePick == nullptr) {
+            return;
+        }
+        const QString unit = m_servicePick->currentText();
+        if (!unit.isEmpty()) {
+            emit serviceRestartRequested(unit);
+        }
+    });
+
+    m_serviceStatus = new QLabel(QStringLiteral("--"), view);
+    m_serviceStatus->setObjectName(QStringLiteral("ddServiceStatus"));
+    m_serviceStatus->setFont(monoFont(10));
+    m_serviceStatus->setWordWrap(true);
+    m_serviceStatus->setMinimumWidth(1);
+    m_serviceActionsNote = new QLabel(QStringLiteral("--"), view);
+    m_serviceActionsNote->setObjectName(QStringLiteral("ddServiceActionsNote"));
+    m_serviceActionsNote->setFont(monoFont(10));
+    m_serviceActionsNote->setWordWrap(true);
+    m_serviceActionsNote->setMinimumWidth(1);
+    m_serviceActionsNote->setText(
+        m_osName == QStringLiteral("windows")
+            ? QStringLiteral("restart stops and starts the service through "
+                             "the Windows service manager")
+            : m_osName == QStringLiteral("macos")
+                  ? QStringLiteral("restart uses launchctl kickstart -k for "
+                                   "the selected label")
+                  : QStringLiteral("restart uses systemctl restart for the "
+                                   "selected unit"));
+
+    auto *servicePickRow = new QHBoxLayout();
+    servicePickRow->setSpacing(6);
+    servicePickRow->addWidget(m_servicePick, 1);
+    servicePickRow->addWidget(m_serviceRestart);
+
+    auto *serviceActionBox = new QWidget(view);
+    auto *serviceActionLayout = new QVBoxLayout(serviceActionBox);
+    serviceActionLayout->setContentsMargins(0, 0, 0, 0);
+    serviceActionLayout->setSpacing(6);
+    serviceActionLayout->addLayout(servicePickRow);
+    serviceActionLayout->addWidget(m_serviceActionsNote);
+    serviceActionLayout->addWidget(m_serviceStatus);
+
+    layout->addWidget(makeBanner(QStringLiteral("UNIT ACTIONS"),
+                                 ui_theme::crit(), view));
+    layout->addWidget(makeCard(QStringLiteral("RESTART UNIT"),
+                               serviceActionBox, view));
 
     layout->addWidget(makeBanner(QStringLiteral("CHANGE TIMELINE"),
         ui_theme::warn(), view));
@@ -2566,19 +2962,69 @@ QWidget *DashboardPanel::buildSettingsView() {
     content->setObjectName(QStringLiteral("ddScrollContent"));
     auto *layout = new QVBoxLayout(content);
     layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(12);
+    layout->setSpacing(10);
 
+    // --- Configuration tiles: the shell facts in Datadog agent-status
+    // terms (version / refresh cadence / monitor rules / live silences).
+    m_settingsTileVersion = new QLabel(QStringLiteral("--"), view);
+    m_settingsTileVersion->setObjectName(
+        QStringLiteral("ddSettingsTileVersion"));
+    m_settingsTileRefresh = new QLabel(QStringLiteral("--"), view);
+    m_settingsTileRefresh->setObjectName(
+        QStringLiteral("ddSettingsTileRefresh"));
+    m_settingsTileMonitors = new QLabel(QStringLiteral("--"), view);
+    m_settingsTileMonitors->setObjectName(
+        QStringLiteral("ddSettingsTileMonitors"));
+    m_settingsTileSilenced = new QLabel(QStringLiteral("--"), view);
+    m_settingsTileSilenced->setObjectName(
+        QStringLiteral("ddSettingsTileSilenced"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("VERSION"),
+                              m_settingsTileVersion, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("REFRESH"),
+                              m_settingsTileRefresh, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("MONITORS"),
+                              m_settingsTileMonitors, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SILENCED"),
+                              m_settingsTileSilenced, nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Software + runtime identity (agent "Host Info" block analog).
     m_settingsSoftware = new QLabel(QStringLiteral("--"), view);
     m_settingsSoftware->setObjectName(QStringLiteral("ddSettingsInfo"));
     m_settingsSoftware->setFont(monoFont(10));
     m_settingsSoftware->setTextFormat(Qt::RichText);
-    layout->addWidget(makeCard(QStringLiteral("SOFTWARE"), m_settingsSoftware, view));
+    // Settings values (paths, endpoints, verb lines) are the point of the
+    // page, so they wrap instead of clipping past the card edge.
+    m_settingsSoftware->setWordWrap(true);
 
+    layout->addWidget(makeBanner(QStringLiteral("SOFTWARE & RUNTIME"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("SOFTWARE"),
+                               m_settingsSoftware, view));
+
+    // --- Collection settings (agent config-group analog: what is collected
+    // and how often, plus the local-only scope guarantee).
     m_settingsGeneral = new QLabel(QStringLiteral("--"), view);
     m_settingsGeneral->setObjectName(QStringLiteral("ddSettingsInfo"));
     m_settingsGeneral->setFont(monoFont(10));
     m_settingsGeneral->setTextFormat(Qt::RichText);
-    layout->addWidget(makeCard(QStringLiteral("GENERAL"), m_settingsGeneral, view));
+    m_settingsGeneral->setWordWrap(true);
+
+    m_settingsScope = new QLabel(QStringLiteral("--"), view);
+    m_settingsScope->setObjectName(QStringLiteral("ddSettingsScope"));
+    m_settingsScope->setFont(monoFont(10));
+    m_settingsScope->setTextFormat(Qt::RichText);
+    m_settingsScope->setWordWrap(false);
+
+    layout->addWidget(makeBanner(QStringLiteral("COLLECTION"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("GENERAL"),
+                               m_settingsGeneral, view));
+    layout->addWidget(makeCard(QStringLiteral("COLLECTION SCOPE"),
+                               m_settingsScope, view));
 
     // M66: editable monitors — runtime threshold/cycles reconfiguration
     // grounded on shipped monit 5.34.2 strings ("Monit reloaded",
@@ -2610,6 +3056,8 @@ QWidget *DashboardPanel::buildSettingsView() {
         {"watchdog_forecast", 0.0, 120.0, 0},
         {"kernel_fd", 0.0, 100.0, 0},
         {"host_steal", 0.0, 100.0, 1},
+        {"host_temp", 0.0, 150.0, 1},
+        {"battery_low", 0.0, 100.0, 0},
     };
     auto boundsFor = [](const QString &id) {
         for (const MonitorBounds &b : monitorBounds) {
@@ -2626,7 +3074,7 @@ QWidget *DashboardPanel::buildSettingsView() {
         row->setSpacing(8);
 
         auto *title = new QLabel(rule.title, monitorsCard);
-        title->setObjectName(QStringLiteral("ddSettingsInfo"));
+        title->setObjectName(QStringLiteral("ddSettingsLabel"));
         title->setFont(monoFont(10));
         auto *sev = new QLabel(rule.severity.toUpper(), monitorsCard);
         sev->setFont(monoFont(9, true));
@@ -2694,7 +3142,9 @@ QWidget *DashboardPanel::buildSettingsView() {
     resetRow->addWidget(monitorReset);
     monLayout->addLayout(resetRow);
 
-    layout->addWidget(makeCard(QStringLiteral("MONITORS"), monitorsCard, view));
+    layout->addWidget(makeBanner(QStringLiteral("MONITORS"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("alert rules"), monitorsCard, view));
 
     // Diagnostics: command rows with copy buttons. Mirrors the shipped
     // Datadog agent's local surface (status/configcheck/flare per its
@@ -2706,7 +3156,6 @@ QWidget *DashboardPanel::buildSettingsView() {
     auto *diagLayout = new QVBoxLayout(diagCard);
     diagLayout->setContentsMargins(14, 12, 14, 14);
     diagLayout->setSpacing(10);
-    diagLayout->addWidget(makeTitle(QStringLiteral("DIAGNOSTICS"), diagCard));
 
     m_settingsDiagnostics = new QLabel(QStringLiteral("--"), view);
     m_settingsDiagnostics->setObjectName(QStringLiteral("ddSettingsPath"));
@@ -2735,7 +3184,7 @@ QWidget *DashboardPanel::buildSettingsView() {
         auto *row = new QHBoxLayout();
         row->setSpacing(8);
         auto *what = new QLabel(pair.first, diagCard);
-        what->setObjectName(QStringLiteral("ddSettingsInfo"));
+        what->setObjectName(QStringLiteral("ddSettingsLabel"));
         what->setFont(monoFont(10));
         auto *cmd = new QLabel(pair.second, diagCard);
         cmd->setObjectName(QStringLiteral("ddSettingsPath"));
@@ -2757,7 +3206,7 @@ QWidget *DashboardPanel::buildSettingsView() {
     exportRow->setSpacing(8);
     auto *exportWhat = new QLabel(
         QStringLiteral("export this session's history"), diagCard);
-    exportWhat->setObjectName(QStringLiteral("ddSettingsInfo"));
+    exportWhat->setObjectName(QStringLiteral("ddSettingsLabel"));
     exportWhat->setFont(monoFont(10));
     auto *exportCsv = new QPushButton(QStringLiteral("EXPORT CSV"), diagCard);
     exportCsv->setObjectName(QStringLiteral("ddCopy"));
@@ -2782,8 +3231,34 @@ QWidget *DashboardPanel::buildSettingsView() {
     exportRow->addWidget(exportJson);
     diagLayout->addLayout(exportRow);
 
+    auto *reportRow = new QHBoxLayout();
+    reportRow->setSpacing(8);
+    auto *reportWhat = new QLabel(
+        QStringLiteral("copy the diagnostic report (agent flare analog)"),
+        diagCard);
+    reportWhat->setObjectName(QStringLiteral("ddSettingsLabel"));
+    reportWhat->setFont(monoFont(10));
+    auto *copyReport = new QPushButton(QStringLiteral("COPY REPORT"), diagCard);
+    copyReport->setObjectName(QStringLiteral("ddCopy"));
+    copyReport->setCursor(Qt::PointingHandCursor);
+    copyReport->setFocusPolicy(Qt::NoFocus);
+    copyReport->setToolTip(QStringLiteral(
+        "copy version, paths, collection settings and monitor counts"));
+    connect(copyReport, &QPushButton::clicked, this,
+            &DashboardPanel::copyDiagnosticsReport);
+    reportRow->addWidget(reportWhat, 1);
+    reportRow->addWidget(copyReport);
+    diagLayout->addLayout(reportRow);
+
+    layout->addWidget(makeBanner(QStringLiteral("DIAGNOSTICS & SUPPORT"),
+        ui_theme::warn(), view));
     layout->addWidget(diagCard);
     layout->addStretch(1);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_settingsSoftware->setMinimumWidth(1);
+    m_settingsGeneral->setMinimumWidth(1);
+    m_settingsScope->setMinimumWidth(1);
 
     auto *scroll = new QScrollArea(view);
     scroll->setObjectName(QStringLiteral("ddScroll"));
@@ -2808,70 +3283,438 @@ void DashboardPanel::applySettingsInfo() {
     if (m_settingsSoftware == nullptr) {
         return;
     }
+    auto span = [](const QString &color, const QString &text) {
+        return QStringLiteral("<span style=\"color:%1;\">%2</span>")
+            .arg(color, text);
+    };
+    auto dim = [&span](const QString &text) {
+        return span(ui_theme::dim(), text);
+    };
+    auto muted = [&span](const QString &text) {
+        return span(ui_theme::muted(), text);
+    };
+    auto strong = [&span](const QString &text) {
+        return span(ui_theme::text(), text);
+    };
+    // One row per setting: &nbsp; padding lines the value column up, and
+    // the hanging indent means a wrapped value continues under the value
+    // column instead of running back to the card edge.
+    const int valueIndent =
+        QFontMetrics(m_settingsGeneral->font()).horizontalAdvance(
+            QLatin1Char('M')) * 11;
+    // Wrapped values break at a space and continue under the value column
+    // (Qt rich text has no hanging indent, so the padding is repeated).
+    auto wrapValue = [](const QString &text, int width) {
+        QString out;
+        int column = 0;
+        for (int i = 0; i < text.size(); ++i) {
+            const QChar ch = text.at(i);
+            if (ch == QLatin1Char('\n')) {
+                out += QStringLiteral("<br/>");
+                out += QStringLiteral("&nbsp;").repeated(11);
+                column = 0;
+                continue;
+            }
+            if (column >= width && ch == QLatin1Char(' ')) {
+                out += QStringLiteral("<br/>");
+                out += QStringLiteral("&nbsp;").repeated(11);
+                column = 0;
+                continue;
+            }
+            out += ch;
+            ++column;
+        }
+        return out;
+    };
+    auto row = [&, valueIndent](const QString &label, const QString &value) {
+        QString padded = label;
+        while (padded.size() < 11) {
+            padded += QLatin1Char(' ');
+        }
+        padded.replace(QLatin1Char(' '), QStringLiteral("&nbsp;"));
+        return QStringLiteral(
+                   "<div style=\"margin-left:%1px; text-indent:-%1px;\">%2 %3</div>")
+            .arg(valueIndent)
+            .arg(dim(padded), value);
+    };
+
     const QString version = m_settings.version.isEmpty()
         ? QStringLiteral("--")
         : m_settings.version;
-    const QString verbatimPlatform = m_osName;
-    const QString configStatus = m_settings.configError.isEmpty()
-        ? QStringLiteral("ok")
-        : QStringLiteral("error: %1").arg(m_settings.configError);
+    const QString platform = m_osName;
+    const bool configOk = m_settings.configError.isEmpty();
+    const QString configStatus =
+        configOk ? span(ui_theme::ok(), QStringLiteral("ok"))
+                 : span(ui_theme::crit(),
+                        QStringLiteral("error: %1")
+                            .arg(m_settings.configError));
+    const QString configPath = m_settings.configPath.isEmpty()
+        ? QStringLiteral("--")
+        : m_settings.configPath;
+    const QString logPath = m_settings.logPath.isEmpty()
+        ? QStringLiteral("--")
+        : m_settings.logPath;
+
+    // Agent \"Host Info\" analog: the runtime identity the console is
+    // reporting as, then where its config and log actually live.
     QString software;
-    software += QStringLiteral("<span style=\"color:%1;\">")
-        .arg(ui_theme::text());
-    software += QStringLiteral("version %1 on %2<br/>")
-        .arg(version, verbatimPlatform);
-    software += QStringLiteral("</span>");
-    software += QStringLiteral("config&nbsp;&nbsp;%1&nbsp;&nbsp;%2<br/>")
-        .arg(m_settings.configPath.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.configPath,
-             configStatus);
-    software += QStringLiteral("log&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%1")
-        .arg(m_settings.logPath.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.logPath);
+    software += row(QStringLiteral("version"),
+                    strong(version) + dim(QStringLiteral(" on ")) + strong(platform));
+    software += row(QStringLiteral("health"),
+                                              configOk ? span(ui_theme::ok(), QStringLiteral("config loaded"))
+                                                       : span(ui_theme::crit(), QStringLiteral("config error")));
+    software += row(QStringLiteral("config"),
+                    configPath + QStringLiteral("  ") + configStatus);
+    software += row(QStringLiteral("log"), logPath);
+    software += row(QStringLiteral("build"),
+                      muted(QStringLiteral("local collection only - no telemetry, "
+                                           "no outbound traffic unless you configure it")));
     m_settingsSoftware->setText(software);
 
     QString general;
-    general += QStringLiteral("refresh&nbsp;&nbsp;&nbsp;%1 ms<br/>")
-        .arg(m_settings.sampleIntervalMs);
-    general += QStringLiteral(
-        "alerts&nbsp;&nbsp;&nbsp;&nbsp;"
-        "cpu warn %1% - high %2% - rss %3 GB<br/>")
-        .arg(QString::number(m_settings.cpuWarnPercent, 'f', 0),
-             QString::number(m_settings.cpuHighPercent, 'f', 0),
-             QString::number(m_settings.rssWarnGb, 'f', 1));
-    general += QStringLiteral("autostart&nbsp;%1<br/>")
-        .arg(m_settings.autostartLine.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.autostartLine);
-    general += QStringLiteral("prometheus&nbsp;%1<br/>")
-        .arg(m_settings.metricsLine.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.metricsLine);
-    general += QStringLiteral("webhook&nbsp;&nbsp;&nbsp;%1<br/>")
-        .arg(m_settings.webhookLine.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.webhookLine);
-    general += QStringLiteral("export&nbsp;&nbsp;&nbsp;&nbsp;%1<br/>")
-        .arg(m_settings.exportLine.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.exportLine);
-    general += QStringLiteral("collector&nbsp;local only - reads this "
-                              "machine's own %1 interfaces; no telemetry")
-        .arg(verbatimPlatform);
+    general += row(QStringLiteral("refresh"),
+                   strong(QStringLiteral("%1 ms").arg(m_settings.sampleIntervalMs)));
+    general += row(
+        QStringLiteral("alerts"),
+        strong(QStringLiteral("cpu warn %1% - high %2% - rss %3 GB")
+                   .arg(QString::number(m_settings.cpuWarnPercent, 'f', 0),
+                        QString::number(m_settings.cpuHighPercent, 'f', 0),
+                        QString::number(m_settings.rssWarnGb, 'f', 1))));
+    general += row(
+        QStringLiteral("autostart"),
+        m_settings.autostartLine.isEmpty() ? muted(QStringLiteral("--"))
+                                           : muted(m_settings.autostartLine));
+    general += row(
+        QStringLiteral("prometheus"),
+        m_settings.metricsLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.metricsLine, 88)));
+    general += row(
+        QStringLiteral("webhook"),
+        m_settings.webhookLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.webhookLine, 88)));
+    general += row(
+        QStringLiteral("export"),
+        m_settings.exportLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.exportLine, 88)));
+    general += row(
+        QStringLiteral("history"),
+        m_settings.historyLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(m_settings.historyLine));
+    general += row(
+        QStringLiteral("overlay"),
+        m_settings.overlayLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.overlayLine, 88)));
+    general += row(
+        QStringLiteral("cloud"),
+        m_settings.cloudLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(wrapValue(m_settings.cloudLine, 88)));
+    general += row(
+        QStringLiteral("self cost"),
+        strong(tickbudget::selfCostText(m_liveSelf)));
+    general += row(
+        QStringLiteral("tick"),
+        muted(wrapValue(tickbudget::tickCostText(m_liveTick), 88)));
+    general += row(
+        QStringLiteral("sections"),
+        muted(wrapValue(tickbudget::tickSectionText(m_liveTick), 88)));
     m_settingsGeneral->setText(general);
 
+    // Collection scope: every surface the backend can reach on this OS.
+    // Unsupported surfaces are named rather than silently missing (the
+    // capability-gate rule every page follows).
+    const PlatformCapabilities caps = backendCapabilities();
+    struct ScopeRow {
+        QString name;
+        bool live;
+    };
+    const QList<ScopeRow> scope = {
+        {QStringLiteral("host cpu / mem / load / net"), true},
+        {QStringLiteral("per-process cpu / mem / fds"), true},
+        {QStringLiteral("network sockets + listeners"), true},
+        {QStringLiteral("per-process net throughput"), caps.perProcessNet},
+        {QStringLiteral("per-process block i/o"), caps.perProcessDisk},
+        {QStringLiteral("machine-wide disk scan"), caps.perProcessDiskScan},
+        {QStringLiteral("tcp health counters"), caps.tcpCounters},
+        {QStringLiteral("cgroup memory + oom"), caps.cgroups},
+        {QStringLiteral("psi pressure"), caps.psi},
+        {QStringLiteral("namespaces"), caps.namespaces},
+        {QStringLiteral("gpu devices"), caps.gpu},
+        {QStringLiteral("gpu per-process usage"), caps.gpuProcessData},
+        {QStringLiteral("thermal / fan / power"), caps.sensors},
+        {QStringLiteral("battery + ac"), caps.battery},
+        {QStringLiteral("system services"), caps.systemServices},
+        {QStringLiteral("journal / event log"), caps.journal},
+        {QStringLiteral("file integrity (fim)"), caps.fim},
+        {QStringLiteral("software inventory (sbom)"), caps.sbom},
+        {QStringLiteral("instance metadata (cloud)"), true},
+        {QStringLiteral("process signals"), caps.processSignals},
+        {QStringLiteral("renice"), caps.processRenice},
+        {QStringLiteral("i/o priority"), caps.processIonice},
+        {QStringLiteral("oom score adjustment"), caps.processOomScore},
+        {QStringLiteral("pause / resume"), caps.processPause},
+    };
+    int liveCount = 0;
+    QStringList scopeLines;
+    QString line;
+    for (int i = 0; i < scope.size(); ++i) {
+        const ScopeRow &entry = scope.at(i);
+        if (entry.live) {
+            ++liveCount;
+        }
+        QString cell = entry.live
+            ? span(ui_theme::ok(), QStringLiteral("+ "))
+                  + span(ui_theme::dim(), entry.name)
+            : muted(QStringLiteral("- ") + entry.name);
+        if (line.isEmpty()) {
+            line = cell;
+        } else {
+            scopeLines << line + QStringLiteral("   ") + cell;
+            line.clear();
+        }
+    }
+    if (!line.isEmpty()) {
+        scopeLines << line;
+    }
+    scopeLines << QString()
+               << muted(QStringLiteral("%1 of %2 collection surfaces live on %3")
+                            .arg(liveCount)
+                            .arg(scope.size())
+                            .arg(platform))
+               << muted(QStringLiteral("unsupported surfaces state the OS gate "
+                                       "where they would appear"));
+    m_settingsScope->setText(scopeLines.join(QStringLiteral("<br/>")));
+
     QString diagnostics;
-    diagnostics += QStringLiteral("log file&nbsp;&nbsp;%1<br/>")
-        .arg(m_settings.logPath.isEmpty()
-                 ? QStringLiteral("--")
-                 : m_settings.logPath);
-    diagnostics += QStringLiteral("verbs&nbsp;&nbsp;&nbsp;&nbsp;%1")
-        .arg(m_settings.verbsLine.isEmpty()
-                 ? QStringLiteral("start stop restart status uninstall")
-                 : m_settings.verbsLine);
+    diagnostics += QStringLiteral("log file  %1<br/>")
+        .arg(logPath);
+    diagnostics += QStringLiteral("verbs     %1<br/>")
+        .arg((m_settings.verbsLine.isEmpty()
+                  ? QStringLiteral("start stop restart status uninstall")
+                  : m_settings.verbsLine));
+    diagnostics += muted(QStringLiteral(
+        "copy report bundles the version, paths, collection settings and "
+        "monitor counts - the analog of the agent's flare bundle"));
     m_settingsDiagnostics->setText(diagnostics);
+
+    refreshSettingsTiles();
+}
+
+void DashboardPanel::refreshSettingsTiles() {
+    if (m_settingsTileVersion == nullptr) {
+        return;
+    }
+    m_settingsTileVersion->setText(
+        m_settings.version.isEmpty() ? QStringLiteral("--") : m_settings.version);
+    if (m_settings.sampleIntervalMs >= 1000) {
+        const int decimals = (m_settings.sampleIntervalMs % 1000) == 0 ? 0 : 1;
+        m_settingsTileRefresh->setText(
+            QStringLiteral("%1s").arg(
+                m_settings.sampleIntervalMs / 1000.0, 0, 'f', decimals));
+    } else {
+        m_settingsTileRefresh->setText(
+            QStringLiteral("%1ms").arg(m_settings.sampleIntervalMs));
+    }
+    const int monitors = m_monitorThreshold.isEmpty()
+        ? int(defaultAlertRules().size())
+        : int(m_monitorThreshold.size());
+    m_settingsTileMonitors->setText(QString::number(monitors));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    int silenced = 0;
+    for (const SilenceRule &rule : m_silences) {
+        if (silenceLive(rule, now)) {
+            ++silenced;
+        }
+    }
+    m_settingsTileSilenced->setText(QString::number(silenced));
+    m_settingsTileSilenced->setStyleSheet(
+        silenced > 0 ? QStringLiteral("color: %1;").arg(ui_theme::warn())
+                     : QStringLiteral("color: %1;").arg(ui_theme::text()));
+}
+
+void DashboardPanel::copyDiagnosticsReport() {
+    const QString version = m_settings.version.isEmpty()
+        ? QStringLiteral("--")
+        : m_settings.version;
+    const QString configState = m_settings.configError.isEmpty()
+        ? QStringLiteral("ok")
+        : QStringLiteral("error: %1").arg(m_settings.configError);
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    int silenced = 0;
+    for (const SilenceRule &rule : m_silences) {
+        if (silenceLive(rule, now)) {
+            ++silenced;
+        }
+    }
+    const int monitors = m_monitorThreshold.isEmpty()
+        ? int(defaultAlertRules().size())
+        : int(m_monitorThreshold.size());
+
+    QStringList lines;
+    lines << QStringLiteral("syspeek %1 (%2)").arg(version, m_osName);
+    lines << QStringLiteral("config     %1  %2")
+                 .arg(m_settings.configPath.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.configPath,
+                      configState);
+    lines << QStringLiteral("log        %1")
+                 .arg(m_settings.logPath.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.logPath);
+    lines << QStringLiteral("refresh    %1 ms").arg(m_settings.sampleIntervalMs);
+    lines << QStringLiteral("monitors   %1 rule(s), %2 silenced")
+                 .arg(monitors)
+                 .arg(silenced);
+    lines << QStringLiteral("autostart  %1")
+                 .arg(m_settings.autostartLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.autostartLine);
+    lines << QStringLiteral("prometheus %1")
+                 .arg(m_settings.metricsLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.metricsLine);
+    lines << QStringLiteral("webhook    %1")
+                 .arg(m_settings.webhookLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.webhookLine);
+    lines << QStringLiteral("export     %1")
+                 .arg(m_settings.exportLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.exportLine);
+    lines << QStringLiteral("history    %1")
+                 .arg(m_settings.historyLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.historyLine);
+    lines << QStringLiteral("overlay    %1")
+                 .arg(m_settings.overlayLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.overlayLine);
+    lines << QStringLiteral("cloud      %1")
+                 .arg(m_settings.cloudLine.isEmpty()
+                          ? QStringLiteral("--")
+                          : m_settings.cloudLine);
+    lines << QStringLiteral("verbs      %1")
+                 .arg(m_settings.verbsLine.isEmpty()
+                          ? QStringLiteral("start stop restart status uninstall")
+                          : m_settings.verbsLine);
+    QGuiApplication::clipboard()->setText(lines.join(QLatin1Char('\n')));
+    qInfo("[settings] diagnostics report copied (%d line(s))",
+          int(lines.size()));
+
+    if (auto *button = qobject_cast<QPushButton *>(sender())) {
+        button->setText(QStringLiteral("COPIED"));
+        QTimer::singleShot(1200, button, [button]() {
+            button->setText(QStringLiteral("COPY REPORT"));
+        });
+    }
+}
+
+void DashboardPanel::setHistoryView(const HistoryViewInfo &view) {
+    m_historyView = view;
+    if (m_histSummary == nullptr) {
+        return;
+    }
+    m_histSummary->setText(
+        view.enabled
+            ? historySummaryText(view.count, view.capacity, view.spanMs,
+                                 view.bytes, view.intervalMs)
+            : QStringLiteral("history: disabled ([history] enabled=false)"));
+    m_histTileSamples->setText(
+        view.enabled
+            ? QStringLiteral("%1<span style=\"font-size:15px;color:%2;\">"
+                             "/%3</span>")
+                  .arg(view.count)
+                  .arg(ui_theme::muted())
+                  .arg(view.capacity)
+            : QStringLiteral("--"));
+    const qint64 seconds = view.spanMs / 1000;
+    m_histTileSpan->setText(
+        !view.enabled || view.count <= 1
+            ? QStringLiteral("--")
+            : (seconds < 90
+                   ? QStringLiteral("%1 s").arg(seconds)
+                   : (seconds < 5400
+                          ? QStringLiteral("%1 min").arg(seconds / 60)
+                          : QStringLiteral("%1 h").arg(seconds / 3600))));
+    m_histTileDisk->setText(
+        view.enabled && view.bytes > 0
+            ? formatBytesCompact(quint64(view.bytes))
+            : QStringLiteral("--"));
+    m_histTileInterval->setText(
+        view.enabled && view.intervalMs > 0
+            ? QStringLiteral("%1 s").arg(view.intervalMs / 1000)
+            : QStringLiteral("--"));
+
+    if (m_histSlider != nullptr) {
+        const int last = qMax(0, view.count - 1);
+        const bool atEnd = m_histSlider->value() >= m_histSlider->maximum();
+        const QSignalBlocker blocker(m_histSlider);
+        m_histSlider->setRange(0, last);
+        m_histSlider->setValue(atEnd ? last
+                                     : qMin(m_histSlider->value(), last));
+        m_histSlider->setEnabled(view.enabled && view.count > 1);
+    }
+
+    const qint64 step = qMax<qint64>(1000, view.intervalMs);
+    const bool rebuild = m_histWindowNewest == 0
+        || view.newestMs < m_histWindowNewest
+        || view.newestMs - m_histWindowNewest >= step * 5
+        || view.count <= 1;
+    if (!rebuild) {
+        return;
+    }
+    m_histWindowNewest = view.newestMs;
+    QList<double> cpu;
+    QList<double> mem;
+    cpu.reserve(view.window.size());
+    mem.reserve(view.window.size());
+    for (const ExportRow &row : view.window) {
+        if (row.hostCpuPercent >= 0.0) {
+            cpu.append(row.hostCpuPercent);
+        }
+        if (row.hostMemAvailableKb >= 0) {
+            mem.append(double(row.hostMemAvailableKb) / (1024.0 * 1024.0));
+        }
+    }
+    if (m_chartHistCpu != nullptr) {
+        m_chartHistCpu->setValues(cpu);
+    }
+    if (m_chartHistMem != nullptr) {
+        m_chartHistMem->setValues(mem);
+    }
+}
+
+void DashboardPanel::setHistorySelection(const QString &position,
+                                         const QString &detail) {
+    if (m_histPos != nullptr) {
+        m_histPos->setText(position);
+    }
+    if (m_histDetail != nullptr) {
+        // One column group per line: the record text separates the app /
+        // host / disk / net / tcp groups with " | " for logs, which reads
+        // as a wall in a narrow card.
+        const QStringList groups = detail.split(QStringLiteral(" | "));
+        const QString joined = detail;
+        QStringList lines;
+        if (groups.size() >= 5) {
+            lines << groups.at(0) + QStringLiteral(" | ") + groups.at(1)
+                  << groups.at(2) + QStringLiteral(" | ") + groups.at(3)
+                  << groups.mid(4).join(QStringLiteral(" | "));
+        } else if (!joined.isEmpty()) {
+            lines << joined;
+        }
+        for (int i = 0; i < m_histDetailLines.size(); ++i) {
+            m_histDetailLines.at(i)->setText(
+                i < lines.size() ? lines.at(i) : QString());
+            m_histDetailLines.at(i)->setVisible(i < lines.size());
+        }
+    }
 }
 
 void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
@@ -2889,6 +3732,11 @@ void DashboardPanel::setExportLine(const QString &line) {
     applySettingsInfo();
 }
 
+void DashboardPanel::setOverlayLine(const QString &line) {
+    m_settings.overlayLine = line;
+    applySettingsInfo();
+}
+
 void DashboardPanel::setMonitors(const QList<AlertRule> &rules) {
     for (const AlertRule &rule : rules) {
         if (auto *spin = m_monitorThreshold.value(rule.id)) {
@@ -2900,6 +3748,90 @@ void DashboardPanel::setMonitors(const QList<AlertRule> &rules) {
             spin->setValue(rule.sustained);
         }
     }
+
+    // M75: the chart bands are the SAME editable monitors the alert engine
+    // evaluates, so dragging a threshold moves the line on the chart instead
+    // of letting the chart and the alert drift apart.
+    if (m_chartCpu != nullptr) {
+        m_chartCpu->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("app_cpu")})));
+    }
+    if (m_chartHostCpu != nullptr) {
+        m_chartHostCpu->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("host_cpu")})));
+    }
+    if (m_chartSensorTemp != nullptr) {
+        m_chartSensorTemp->setBands(chartBandsFrom(monitorBandsFor(
+            rules, {QStringLiteral("host_temp")})));
+    }
+
+    if (m_silenceTarget != nullptr) {
+        const QString previous = m_silenceTarget->currentText();
+        const QSignalBlocker blocker(m_silenceTarget);
+        m_silenceTarget->clear();
+        for (const AlertRule &rule : rules) {
+            m_silenceTarget->addItem(rule.id, rule.id);
+        }
+        const int restored = m_silenceTarget->findText(previous);
+        if (restored >= 0) {
+            m_silenceTarget->setCurrentIndex(restored);
+        }
+    }
+    refreshSettingsTiles();
+}
+
+void DashboardPanel::setSilences(const QList<SilenceRule> &rules) {
+    m_silences = rules;
+    updateSilencesPanel();
+    refreshSettingsTiles();
+}
+
+void DashboardPanel::updateSilencesPanel() {
+    if (m_silenceSummary == nullptr || m_silenceList == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    m_silenceSummary->setText(silenceSummaryText(m_silences, now));
+    QString text;
+    QStringList rows;
+    for (const SilenceRule &rule : m_silences) {
+        rows.append(silenceRowText(rule, now).toHtmlEscaped());
+    }
+    if (rows.isEmpty()) {
+        text = QStringLiteral("no silence windows");
+    } else {
+        text = rows.mid(0, 6).join(QStringLiteral("<br/>"));
+    }
+    m_silenceList->setTextFormat(Qt::RichText);
+    m_silenceList->setText(text);
+}
+
+void DashboardPanel::requestSilence() {
+    if (m_silenceTarget == nullptr || m_silenceMinutes == nullptr) {
+        return;
+    }
+    QString matcher = m_silenceTarget->currentData().toString();
+    if (matcher.isEmpty()) {
+        matcher = m_silenceTarget->currentText().trimmed();
+    }
+    if (matcher.isEmpty()) {
+        return;
+    }
+    emit silenceRequested(matcher, m_silenceMinutes->value());
+}
+
+void DashboardPanel::expireSelectedSilence() {
+    if (m_silenceTarget == nullptr) {
+        return;
+    }
+    QString matcher = m_silenceTarget->currentData().toString();
+    if (matcher.isEmpty()) {
+        matcher = m_silenceTarget->currentText().trimmed();
+    }
+    if (matcher.isEmpty()) {
+        return;
+    }
+    emit silenceExpireRequested(matcher);
 }
 
 void DashboardPanel::copySettingCommand() {
@@ -2913,57 +3845,489 @@ void DashboardPanel::copySettingCommand() {
     }
 }
 
+QWidget *DashboardPanel::buildHistoryView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_histTileSamples = new QLabel(QStringLiteral("--"), view);
+    m_histTileSamples->setObjectName(QStringLiteral("ddHistTileSamples"));
+    m_histTileSpan = new QLabel(QStringLiteral("--"), view);
+    m_histTileSpan->setObjectName(QStringLiteral("ddHistTileSpan"));
+    m_histTileDisk = new QLabel(QStringLiteral("--"), view);
+    m_histTileDisk->setObjectName(QStringLiteral("ddHistTileDisk"));
+    m_histTileInterval = new QLabel(QStringLiteral("--"), view);
+    m_histTileInterval->setObjectName(QStringLiteral("ddHistTileInterval"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("SAMPLES"), m_histTileSamples,
+                              nullptr, view), 1);
+    m_histTileSamples->setTextFormat(Qt::RichText);
+    tiles->addWidget(makeTile(QStringLiteral("SPAN"), m_histTileSpan,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ON DISK"), m_histTileDisk,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("INTERVAL"), m_histTileInterval,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_histSummary = new QLabel(QStringLiteral("--"), view);
+    m_histSummary->setObjectName(QStringLiteral("ddHistSummary"));
+    m_histSummary->setFont(monoFont(10));
+    m_histSummary->setMinimumWidth(1);
+    layout->addWidget(makeBanner(QStringLiteral("HISTORY"), ui_theme::accent(),
+                                 view));
+    layout->addWidget(makeCard(QStringLiteral("HISTORY"), m_histSummary, view));
+
+    m_histPos = new QLabel(QStringLiteral("--"), view);
+    m_histPos->setObjectName(QStringLiteral("ddHistPos"));
+    m_histPos->setFont(monoFont(12, true));
+    m_histPos->setMinimumWidth(1);
+    // The record text carries five column groups; one QLabel per screen
+    // line keeps every line at its natural single-line height instead of
+    // relying on a multi-line size hint the layout does not reserve.
+    m_histDetailLines.clear();
+    for (int i = 0; i < 3; ++i) {
+        auto *line = new QLabel(QStringLiteral("--"), view);
+        line->setObjectName(i == 0
+                                ? QStringLiteral("ddHistDetail")
+                                : QStringLiteral("ddHistDetail%1").arg(i + 1));
+        line->setFont(monoFont(9));
+        line->setMinimumWidth(1);
+        m_histDetailLines.append(line);
+        if (i == 0) {
+            m_histDetail = line;
+        }
+    }
+
+    m_histSlider = new QSlider(Qt::Horizontal, view);
+    m_histSlider->setObjectName(QStringLiteral("ddHistSlider"));
+    m_histSlider->setRange(0, 0);
+    m_histSlider->setSingleStep(1);
+    m_histSlider->setPageStep(10);
+    connect(m_histSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_historyView.enabled || m_historyView.count <= 0) {
+            return;
+        }
+        emit historySeekRequested(value);
+    });
+
+    m_histFirst = new QPushButton(QStringLiteral("|< FIRST"), view);
+    m_histFirst->setObjectName(QStringLiteral("ddHistFirst"));
+    m_histPrev = new QPushButton(QStringLiteral("< PREV"), view);
+    m_histPrev->setObjectName(QStringLiteral("ddHistPrev"));
+    m_histNext = new QPushButton(QStringLiteral("NEXT >"), view);
+    m_histNext->setObjectName(QStringLiteral("ddHistNext"));
+    m_histLast = new QPushButton(QStringLiteral("LATEST >|"), view);
+    m_histLast->setObjectName(QStringLiteral("ddHistLast"));
+    connect(m_histFirst, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(0);
+        }
+    });
+    connect(m_histPrev, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(qMax(0, m_histSlider->value() - 1));
+        }
+    });
+    connect(m_histNext, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(
+                qMin(m_histSlider->maximum(), m_histSlider->value() + 1));
+        }
+    });
+    connect(m_histLast, &QPushButton::clicked, this, [this]() {
+        if (m_histSlider != nullptr) {
+            m_histSlider->setValue(m_histSlider->maximum());
+        }
+    });
+
+    auto *controls = new QHBoxLayout();
+    controls->setSpacing(6);
+    controls->addWidget(m_histFirst);
+    controls->addWidget(m_histPrev);
+    controls->addWidget(m_histNext);
+    controls->addWidget(m_histLast);
+
+    auto *rewindBox = new QWidget(view);
+    auto *rewindLayout = new QVBoxLayout(rewindBox);
+    rewindLayout->setContentsMargins(0, 0, 0, 0);
+    rewindLayout->setSpacing(6);
+    rewindLayout->addWidget(m_histPos);
+    rewindLayout->addWidget(m_histSlider);
+    rewindLayout->addLayout(controls);
+    for (QLabel *line : m_histDetailLines) {
+        rewindLayout->addWidget(line);
+    }
+    layout->addWidget(makeBanner(QStringLiteral("REWIND"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("REWIND"), rewindBox, view));
+
+    m_chartHistCpu = new TimeseriesChart(view);
+    m_chartHistCpu->setUnit(QStringLiteral("Percent"));
+    m_chartHistCpu->setSeriesName(QStringLiteral("syspeek.history.cpu"));
+    m_chartHistMem = new TimeseriesChart(view);
+    m_chartHistMem->setUnit(QStringLiteral("GB"));
+    m_chartHistMem->setSeriesName(QStringLiteral("syspeek.history.mem"));
+    m_chartHistMem->setSeriesColors(QColor(60, 202, 170), QColor(127, 92, 255));
+
+    auto *charts = new QHBoxLayout();
+    charts->setSpacing(10);
+    charts->addWidget(makeChartCard(QStringLiteral("stored host cpu"),
+                                    m_chartHistCpu, view), 1);
+    charts->addWidget(makeChartCard(QStringLiteral("stored mem available"),
+                                    m_chartHistMem, view), 1);
+    layout->addWidget(makeBanner(QStringLiteral("STORED WINDOW"),
+                                 ui_theme::warn(), view));
+    layout->addLayout(charts);
+    layout->addStretch(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+QWidget *DashboardPanel::buildCloudView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Instance tiles. ACCRUED is explicitly "this boot": a reboot resets
+    // host uptime, so the figure is the cost of the current boot. AGE is the
+    // provider's launch time (the fleet listing, M83); the local host cannot
+    // know it, so it reads "--" until the listing answers.
+    m_cloudTileProvider = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileProvider->setObjectName(QStringLiteral("ddCloudTileProvider"));
+    m_cloudTileAge = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileAge->setObjectName(QStringLiteral("ddCloudTileAge"));
+    m_cloudTileAccrued = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileAccrued->setObjectName(QStringLiteral("ddCloudTileAccrued"));
+    m_cloudTileMonthly = new QLabel(QStringLiteral("--"), view);
+    m_cloudTileMonthly->setObjectName(QStringLiteral("ddCloudTileMonthly"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PROVIDER"), m_cloudTileProvider,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("AGE"), m_cloudTileAge, nullptr,
+                              view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ACCRUED (BOOT)"),
+                              m_cloudTileAccrued, nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("$/MONTH"), m_cloudTileMonthly,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Identity from the instance metadata service (the same document the
+    // Datadog agent's cloud-provider client reads).
+    m_cloudSummary = new QLabel(QStringLiteral("--"), view);
+    m_cloudSummary->setObjectName(QStringLiteral("ddCloudSummary"));
+    m_cloudSummary->setFont(monoFont(11));
+    m_cloudSummary->setWordWrap(true);
+    m_cloudSummary->setMinimumWidth(1);
+
+    m_cloudDetail = new QLabel(QStringLiteral("--"), view);
+    m_cloudDetail->setObjectName(QStringLiteral("ddCloudDetail"));
+    m_cloudDetail->setFont(monoFont(10));
+    m_cloudDetail->setWordWrap(false);
+    m_cloudDetail->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("INSTANCE IDENTITY"),
+                                 ui_theme::accent(), view));
+    auto *identity = new QHBoxLayout;
+    identity->setSpacing(10);
+    identity->addWidget(
+        makeCard(QStringLiteral("metadata"), m_cloudSummary, view), 1);
+    identity->addWidget(
+        makeCard(QStringLiteral("detail"), m_cloudDetail, view), 1);
+    layout->addLayout(identity, 2);
+
+    // --- Account inventory from the provider's own CLI. This is the only
+    // place the launch time (and therefore the instance age) exists.
+    m_chartCloudFleet = new TimeseriesChart(view);
+    m_chartCloudFleet->setObjectName(QStringLiteral("ddCloudFleetChart"));
+    m_chartCloudFleet->setUnit(QStringLiteral("inst"));
+    m_chartCloudFleet->setSeriesName(
+        QStringLiteral("syspeek.cloud.fleet_running"));
+
+    m_cloudFleetSummary = new QLabel(QStringLiteral("--"), view);
+    m_cloudFleetSummary->setObjectName(
+        QStringLiteral("ddCloudFleetSummary"));
+    m_cloudFleetSummary->setFont(monoFont(10));
+    m_cloudFleetSummary->setWordWrap(true);
+    m_cloudFleetSummary->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("FLEET INVENTORY"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(
+        QStringLiteral("running instances"), m_chartCloudFleet, view));
+    layout->addWidget(
+        makeCard(QStringLiteral("inventory"), m_cloudFleetSummary, view));
+
+    m_cloudFleet = new QTreeWidget(view);
+    m_cloudFleet->setObjectName(QStringLiteral("ddCloudFleet"));
+    m_cloudFleet->setColumnCount(5);
+    m_cloudFleet->setHeaderLabels({QStringLiteral("NAME"),
+                                   QStringLiteral("TYPE"),
+                                   QStringLiteral("STATE"),
+                                   QStringLiteral("AGE"),
+                                   QStringLiteral("$/MO")});
+    m_cloudFleet->setRootIsDecorated(false);
+    m_cloudFleet->setSelectionMode(QAbstractItemView::NoSelection);
+    m_cloudFleet->setFocusPolicy(Qt::NoFocus);
+    m_cloudFleet->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < 5; ++column) {
+        m_cloudFleet->header()->setSectionResizeMode(
+            column, QHeaderView::ResizeToContents);
+    }
+    layout->addWidget(
+        makeCard(QStringLiteral("instances"), m_cloudFleet, view));
+    m_cloudFleetNote = new QLabel(fleetTableNote(), view);
+    m_cloudFleetNote->setObjectName(QStringLiteral("ddCloudFleetNote"));
+    m_cloudFleetNote->setFont(monoFont(9));
+    m_cloudFleetNote->setWordWrap(true);
+    m_cloudFleetNote->setMinimumWidth(1);
+    layout->addWidget(m_cloudFleetNote);
+
+
+    // --- Rate / accrual / projection, with the import date that decides how
+    // much the number is worth.
+    m_cloudCost = new QLabel(QStringLiteral("--"), view);
+    m_cloudCost->setObjectName(QStringLiteral("ddCloudCost"));
+    m_cloudCost->setFont(monoFont(10));
+    m_cloudCost->setWordWrap(false);
+    m_cloudCost->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("INSTANCE COST"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeCard(QStringLiteral("rate · accrual · projection"),
+                               m_cloudCost, view));
+
+    // --- Focused-app share: the instance rate split by the CPU the app
+    // actually used, charged against this box's vCPU count.
+    m_chartCloudApp = new TimeseriesChart(view);
+    m_chartCloudApp->setObjectName(QStringLiteral("ddCloudChart"));
+    m_chartCloudApp->setUnit(QStringLiteral("$/hr"));
+    m_chartCloudApp->setSeriesName(QStringLiteral("syspeek.cloud.app_cost"));
+
+    m_cloudApp = new QLabel(QStringLiteral("--"), view);
+    m_cloudApp->setObjectName(QStringLiteral("ddCloudApp"));
+    m_cloudApp->setFont(monoFont(10));
+    m_cloudApp->setWordWrap(false);
+    m_cloudApp->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("APP COST SHARE"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(
+        makeChartCard(QStringLiteral("focused app $/hour"), m_chartCloudApp,
+                      view));
+    layout->addWidget(makeCard(QStringLiteral("focused app"), m_cloudApp, view));
+
+    m_cloudConsumers = new QTreeWidget(view);
+    m_cloudConsumers->setObjectName(QStringLiteral("ddCloudConsumers"));
+    m_cloudConsumers->setColumnCount(4);
+    m_cloudConsumers->setHeaderLabels({QStringLiteral("Process"),
+                                       QStringLiteral("PID"),
+                                       QStringLiteral("CPU %"),
+                                       QStringLiteral("$/hr")});
+    m_cloudConsumers->setRootIsDecorated(false);
+    m_cloudConsumers->setSelectionMode(QAbstractItemView::NoSelection);
+    m_cloudConsumers->setFocusPolicy(Qt::NoFocus);
+    m_cloudConsumers->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < 4; ++column) {
+        m_cloudConsumers->header()->setSectionResizeMode(
+            column, QHeaderView::ResizeToContents);
+    }
+    layout->addWidget(makeCard(
+        QStringLiteral("TOP PROCESSES IN THE FOCUSED APP"), m_cloudConsumers,
+        view));
+
+    // --- M84: the outbound footprint. Every network action Syspeek takes on
+    // its own, its cadence and the measured cost of the last sweep, plus the
+    // two guarantees (no credentials, read-only). Stated on the page, not
+    // buried in docs.
+    m_cloudFootprint = new QLabel(QStringLiteral("--"), view);
+    m_cloudFootprint->setObjectName(QStringLiteral("ddCloudFootprint"));
+    m_cloudFootprint->setFont(monoFont(9));
+    m_cloudFootprint->setWordWrap(true);
+    m_cloudFootprint->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("CLOUD FOOTPRINT"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("what leaves this host"), m_cloudFootprint,
+                 view));
+
+    m_cloudShare = new QLabel(cloudShareNote(), view);
+    m_cloudShare->setObjectName(QStringLiteral("ddCloudShare"));
+    m_cloudShare->setFont(monoFont(9));
+    m_cloudShare->setWordWrap(true);
+    m_cloudShare->setMinimumWidth(1);
+    layout->addWidget(m_cloudShare);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
 QWidget *DashboardPanel::buildCostView() {
     auto *view = new QWidget(this);
-    auto *layout = new QVBoxLayout(view);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(10);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
 
+    // --- Estimate tiles; the efficiency pair is OpenCost's TotalEfficiency
+    // (usage/request) and reads "--" until metrics.k8s.io reports usage.
+    m_costTileMonthly = new QLabel(QStringLiteral("--"), view);
+    m_costTileMonthly->setObjectName(QStringLiteral("ddCostTileMonthly"));
+    m_costTileHourly = new QLabel(QStringLiteral("--"), view);
+    m_costTileHourly->setObjectName(QStringLiteral("ddCostTileHourly"));
+    m_costTileCpuEff = new QLabel(QStringLiteral("--"), view);
+    m_costTileCpuEff->setObjectName(QStringLiteral("ddCostTileCpuEff"));
+    m_costTileMemEff = new QLabel(QStringLiteral("--"), view);
+    m_costTileMemEff->setObjectName(QStringLiteral("ddCostTileMemEff"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("MONTHLY"), m_costTileMonthly,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("HOURLY"), m_costTileHourly,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("CPU EFF"), m_costTileCpuEff,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("MEM EFF"), m_costTileMemEff,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    // --- Allocation card: estimate + the exact rates applied + request
+    // coverage warnings (OpenCost CPUHourlyCost / RAMGBHourlyCost model).
     m_costSummary = new QLabel(QStringLiteral("--"), view);
     m_costSummary->setObjectName(QStringLiteral("ddCostSummary"));
-    m_costSummary->setFont(monoFont(14, true));
-    layout->addWidget(
-        makeCard(QStringLiteral("MONTHLY ESTIMATE"), m_costSummary, view));
+    m_costSummary->setFont(monoFont(10));
+    m_costSummary->setTextFormat(Qt::RichText);
+    m_costSummary->setWordWrap(false);
 
+    layout->addWidget(makeBanner(QStringLiteral("COST ALLOCATION"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("requests-based allocation"),
+                               m_costSummary, view));
+
+    // --- Right-sizing card: usage vs requests and the priced headroom.
     m_costWarnings = new QLabel(QStringLiteral("--"), view);
     m_costWarnings->setObjectName(QStringLiteral("ddCostWarnings"));
     m_costWarnings->setFont(monoFont(10));
+    m_costWarnings->setTextFormat(Qt::RichText);
     m_costWarnings->setWordWrap(false);
-    layout->addWidget(
-        makeCard(QStringLiteral("RIGHT-SIZING"), m_costWarnings, view));
 
+    layout->addWidget(makeBanner(QStringLiteral("RIGHT-SIZING"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("usage vs requests"),
+                               m_costWarnings, view));
+
+    // --- Estimate history (Syspeek-own: OpenCost's monthlyCost recomputed
+    // per poll from the live request set).
+    m_chartCost = new TimeseriesChart(view);
+    m_chartCost->setObjectName(QStringLiteral("ddCostChart"));
+    m_chartCost->setUnit(QStringLiteral("$/month"));
+    m_chartCost->setSeriesName(QStringLiteral("syspeek.cost.monthly"));
+
+    layout->addWidget(makeBanner(QStringLiteral("COST OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("estimated monthly cost"),
+                                    m_chartCost, view));
+
+    // --- Allocation breakdown tables, with each row's share of the total.
     auto *tables = new QHBoxLayout;
     tables->setSpacing(10);
 
     m_costNamespaces = new QTreeWidget(view);
     m_costNamespaces->setObjectName(QStringLiteral("ddCostNamespaces"));
-    m_costNamespaces->setColumnCount(2);
-    m_costNamespaces->setHeaderLabels(
-        {QStringLiteral("Namespace"), QStringLiteral("$/month")});
+    m_costNamespaces->setColumnCount(3);
+    m_costNamespaces->setHeaderLabels({QStringLiteral("Namespace"),
+                                       QStringLiteral("$/month"),
+                                       QStringLiteral("share")});
     m_costNamespaces->setRootIsDecorated(false);
     m_costNamespaces->setSelectionMode(QAbstractItemView::NoSelection);
     m_costNamespaces->setFocusPolicy(Qt::NoFocus);
     m_costNamespaces->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_costNamespaces->header()->setSectionResizeMode(1,
-                                                      QHeaderView::ResizeToContents);
+    m_costNamespaces->header()->setSectionResizeMode(
+        1, QHeaderView::ResizeToContents);
+    m_costNamespaces->header()->setSectionResizeMode(
+        2, QHeaderView::ResizeToContents);
     tables->addWidget(
         makeCard(QStringLiteral("BY NAMESPACE"), m_costNamespaces, view), 1);
 
     m_costWorkloads = new QTreeWidget(view);
     m_costWorkloads->setObjectName(QStringLiteral("ddCostWorkloads"));
-    m_costWorkloads->setColumnCount(2);
-    m_costWorkloads->setHeaderLabels(
-        {QStringLiteral("Workload"), QStringLiteral("$/month")});
+    m_costWorkloads->setColumnCount(3);
+    m_costWorkloads->setHeaderLabels({QStringLiteral("Workload"),
+                                      QStringLiteral("$/month"),
+                                      QStringLiteral("share")});
     m_costWorkloads->setRootIsDecorated(false);
     m_costWorkloads->setSelectionMode(QAbstractItemView::NoSelection);
     m_costWorkloads->setFocusPolicy(Qt::NoFocus);
     m_costWorkloads->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_costWorkloads->header()->setSectionResizeMode(1,
-                                                    QHeaderView::ResizeToContents);
+    m_costWorkloads->header()->setSectionResizeMode(
+        1, QHeaderView::ResizeToContents);
+    m_costWorkloads->header()->setSectionResizeMode(
+        2, QHeaderView::ResizeToContents);
     tables->addWidget(
         makeCard(QStringLiteral("TOP WORKLOADS"), m_costWorkloads, view), 1);
 
-    layout->addLayout(tables, 1);
+    layout->addWidget(makeBanner(QStringLiteral("WORKLOAD BREAKDOWN"),
+        ui_theme::warn(), view));
+    layout->addLayout(tables, 2);
+
+    // Fit the viewport width: width-only clamps (heights stay natural).
+    m_costSummary->setMinimumWidth(1);
+    m_costWarnings->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3002,6 +4366,26 @@ QWidget *DashboardPanel::buildDisksView() {
     m_diskSummary->setFont(monoFont(10));
     layout->addWidget(
         makeCard(QStringLiteral("DISK I/O"), m_diskSummary, view));
+
+    m_diskTopNote = new QLabel(QStringLiteral("--"), view);
+    m_diskTopNote->setObjectName(QStringLiteral("ddDiskTopNote"));
+    m_diskTopNote->setFont(monoFont(10));
+    m_diskTopNote->setMinimumWidth(1);
+    m_diskTop = new QLabel(QStringLiteral("--"), view);
+    m_diskTop->setObjectName(QStringLiteral("ddDiskTop"));
+    m_diskTop->setFont(monoFont(10));
+    m_diskTop->setMinimumWidth(1);
+    auto *diskTopBox = new QWidget(view);
+    auto *diskTopLayout = new QVBoxLayout(diskTopBox);
+    diskTopLayout->setContentsMargins(0, 0, 0, 0);
+    diskTopLayout->setSpacing(4);
+    diskTopLayout->addWidget(m_diskTopNote);
+    diskTopLayout->addWidget(m_diskTop);
+
+    layout->addWidget(makeBanner(QStringLiteral("TOP DISK"),
+        ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("processes by block i/o"),
+                               diskTopBox, view), 1);
 
     m_disks = new QTreeWidget(view);
     m_disks->setObjectName(QStringLiteral("ddDisks"));
@@ -3052,6 +4436,238 @@ QWidget *DashboardPanel::buildDisksView() {
         makeCard(QStringLiteral("I/O PRESSURE (PSI)"), m_diskPressure, view), 1);
 
     m_diskPressure->setMinimumWidth(1);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+QWidget *DashboardPanel::buildGpuView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_gpuTileUtil = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileUtil->setObjectName(QStringLiteral("ddGpuTileUtil"));
+    m_gpuTileMem = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileMem->setObjectName(QStringLiteral("ddGpuTileMem"));
+    m_gpuTileTemp = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileTemp->setObjectName(QStringLiteral("ddGpuTileTemp"));
+    m_gpuTileProcs = new QLabel(QStringLiteral("--"), view);
+    m_gpuTileProcs->setObjectName(QStringLiteral("ddGpuTileProcs"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("GPU UTIL"), m_gpuTileUtil,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("VRAM USED"), m_gpuTileMem,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("TEMP"), m_gpuTileTemp,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("PROCESSES"), m_gpuTileProcs,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_gpuSummary = new QLabel(QStringLiteral("--"), view);
+    m_gpuSummary->setObjectName(QStringLiteral("ddGpuSummary"));
+    m_gpuSummary->setFont(monoFont(12, true));
+    layout->addWidget(makeBanner(QStringLiteral("GPU"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("GPU"), m_gpuSummary, view));
+
+    m_chartGpu = new TimeseriesChart(view);
+    m_chartGpu->setUnit(QStringLiteral("Percent"));
+    m_chartGpu->setSeriesName(QStringLiteral("syspeek.gpu.util"));
+    layout->addWidget(makeBanner(QStringLiteral("UTILIZATION OVER TIME"),
+        ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("busiest gpu"), m_chartGpu,
+                                    view));
+
+    m_gpuDevices = new QLabel(QStringLiteral("--"), view);
+    m_gpuDevices->setObjectName(QStringLiteral("ddGpuDevices"));
+    m_gpuDevices->setFont(monoFont(10));
+    m_gpuDevices->setMinimumWidth(1);
+    layout->addWidget(makeBanner(QStringLiteral("DEVICES"),
+        ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("DEVICES"), m_gpuDevices, view), 1);
+
+    m_gpuProcessNote = new QLabel(QStringLiteral("--"), view);
+    m_gpuProcessNote->setObjectName(QStringLiteral("ddGpuProcessNote"));
+    m_gpuProcessNote->setFont(monoFont(10));
+    m_gpuProcessNote->setMinimumWidth(1);
+
+    m_gpuTable = new QTreeWidget(view);
+    m_gpuTable->setObjectName(QStringLiteral("ddGpuTable"));
+    m_gpuTable->setColumnCount(5);
+    m_gpuTable->setHeaderLabels({QStringLiteral("Process"),
+                                 QStringLiteral("PID"),
+                                 QStringLiteral("GPU %"),
+                                 QStringLiteral("MEM"),
+                                 QStringLiteral("ENGINES")});
+    m_gpuTable->setRootIsDecorated(false);
+    m_gpuTable->setSelectionMode(QAbstractItemView::NoSelection);
+    m_gpuTable->setFocusPolicy(Qt::NoFocus);
+    m_gpuTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int i = 1; i < 5; ++i) {
+        m_gpuTable->header()->setSectionResizeMode(i,
+                                                   QHeaderView::ResizeToContents);
+    }
+
+    auto *procBox = new QWidget(view);
+    auto *procLayout = new QVBoxLayout(procBox);
+    procLayout->setContentsMargins(0, 0, 0, 0);
+    procLayout->setSpacing(4);
+    procLayout->addWidget(m_gpuProcessNote);
+    procLayout->addWidget(m_gpuTable);
+
+    layout->addWidget(makeBanner(QStringLiteral("PROCESSES"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("PROCESSES"), procBox, view), 2);
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+QWidget *DashboardPanel::buildSensorsView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    m_sensorTileHot = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileHot->setObjectName(QStringLiteral("ddSensorTileHot"));
+    m_sensorTileFans = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileFans->setObjectName(QStringLiteral("ddSensorTileFans"));
+    m_sensorTilePower = new QLabel(QStringLiteral("--"), view);
+    m_sensorTilePower->setObjectName(QStringLiteral("ddSensorTilePower"));
+    m_sensorTileBattery = new QLabel(QStringLiteral("--"), view);
+    m_sensorTileBattery->setObjectName(QStringLiteral("ddSensorTileBattery"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("HOTTEST"), m_sensorTileHot,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("FANS"), m_sensorTileFans,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("POWER"), m_sensorTilePower,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("BATTERY"), m_sensorTileBattery,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_sensorSummary = new QLabel(QStringLiteral("--"), view);
+    m_sensorSummary->setObjectName(QStringLiteral("ddSensorSummary"));
+    m_sensorSummary->setFont(monoFont(11));
+    m_sensorSummary->setWordWrap(true);
+    m_sensorSummary->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("THERMAL & POWER"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("SENSORS"), m_sensorSummary, view), 1);
+
+    m_sensorTree = new QTreeWidget(view);
+    m_sensorTree->setObjectName(QStringLiteral("ddSensorTree"));
+    m_sensorTree->setColumnCount(4);
+    m_sensorTree->setHeaderLabels({QStringLiteral("CHIP"),
+                                  QStringLiteral("SENSOR"),
+                                  QStringLiteral("VALUE"),
+                                  QStringLiteral("LIMIT")});
+    m_sensorTree->setRootIsDecorated(false);
+    m_sensorTree->setSelectionMode(QAbstractItemView::NoSelection);
+    m_sensorTree->setFocusPolicy(Qt::NoFocus);
+    m_sensorTree->header()->setSectionResizeMode(0,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_sensorTree->header()->setSectionResizeMode(2,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->header()->setSectionResizeMode(3,
+                                                QHeaderView::ResizeToContents);
+    m_sensorTree->setMinimumHeight(150);
+
+    layout->addWidget(makeBanner(QStringLiteral("HWMON READINGS"),
+        ui_theme::banner(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("READINGS"), m_sensorTree, view), 2);
+
+    m_chartSensorTemp = new TimeseriesChart(view);
+    m_chartSensorTemp->setUnit(QStringLiteral("Celsius"));
+    m_chartSensorTemp->setSeriesName(QStringLiteral("syspeek.sensor.temp"));
+    m_chartSensorPower = new TimeseriesChart(view);
+    m_chartSensorPower->setUnit(QStringLiteral("Watts"));
+    m_chartSensorPower->setSeriesName(QStringLiteral("syspeek.sensor.power"));
+
+    auto *charts = new QHBoxLayout();
+    charts->setSpacing(10);
+    charts->addWidget(makeChartCard(QStringLiteral("hottest sensor"),
+                                    m_chartSensorTemp, view), 1);
+    charts->addWidget(makeChartCard(QStringLiteral("sensor power"),
+                                    m_chartSensorPower, view), 1);
+    layout->addLayout(charts, 1);
+
+    m_batterySummary = new QLabel(QStringLiteral("--"), view);
+    m_batterySummary->setObjectName(QStringLiteral("ddBatterySummary"));
+    m_batterySummary->setFont(monoFont(11));
+    m_batterySummary->setWordWrap(true);
+    m_batterySummary->setMinimumWidth(1);
+    m_batteryDetail = new QLabel(QStringLiteral("--"), view);
+    m_batteryDetail->setObjectName(QStringLiteral("ddBatteryDetail"));
+    m_batteryDetail->setFont(monoFont(10));
+    m_batteryDetail->setWordWrap(false);
+    m_batteryDetail->setMinimumWidth(1);
+    m_adapters = new QLabel(QStringLiteral("--"), view);
+    m_adapters->setObjectName(QStringLiteral("ddAdapters"));
+    m_adapters->setFont(monoFont(10));
+    m_adapters->setMinimumWidth(1);
+
+    auto *battTop = new QWidget(view);
+    auto *battTopLayout = new QVBoxLayout(battTop);
+    battTopLayout->setContentsMargins(0, 0, 0, 0);
+    battTopLayout->setSpacing(4);
+    battTopLayout->addWidget(m_batterySummary);
+    battTopLayout->addWidget(m_adapters);
+
+    layout->addWidget(makeBanner(QStringLiteral("BATTERY"),
+        ui_theme::warn(), view));
+    auto *battRow = new QHBoxLayout();
+    battRow->setSpacing(10);
+    battRow->addWidget(
+        makeCard(QStringLiteral("BATTERY"), battTop, view), 1);
+    battRow->addWidget(
+        makeCard(QStringLiteral("DETAIL"), m_batteryDetail, view), 1);
+    layout->addLayout(battRow, 1);
 
     auto *scroll = new QScrollArea(view);
     scroll->setObjectName(QStringLiteral("ddScroll"));
@@ -3438,6 +5054,14 @@ QWidget *DashboardPanel::buildSoftwareView() {
 }
 
 void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
+    // M84: the console reports its own footprint. This is a two-line string
+    // rebuild on a label that is usually hidden, so it costs nothing next to
+    // the process tree above.
+    m_liveSelf = snapshot.self;
+    m_liveTick = snapshot.tick;
+    if (m_settingsGeneral != nullptr) {
+        applySettingsInfo();
+    }
     m_appValue->setText(snapshot.appName);
     m_pidValue->setText(QStringLiteral("pid %1").arg(snapshot.pid));
     m_cpuValue->setText(snapshot.cpu);
@@ -3478,6 +5102,151 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                     .arg(processNetSummaryText(snapshot.processNetTracked,
                                                snapshot.processNetUnattributed)));
         }
+    }
+
+    if (m_procDiskNote != nullptr) {
+        if (!m_osProcessDisk) {
+            m_procDiskNote->setText(
+                QStringLiteral("disk: %1").arg(unsupportedOsText()));
+        } else if (snapshot.processes.isEmpty()) {
+            m_procDiskNote->setText(
+                QStringLiteral("disk: no focused process group"));
+        } else {
+            bool warming = false;
+            for (const ProcessRow &row : snapshot.processes) {
+                if (row.diskReadPerSec < 0.0 && row.diskWritePerSec < 0.0) {
+                    warming = true;
+                } else {
+                    warming = false;
+                    break;
+                }
+            }
+            m_procDiskNote->setText(
+                warming ? QStringLiteral("disk: warming up (block i/o)")
+                        : QStringLiteral(
+                              "disk: block i/o per process "
+                              "(physical bytes; iotop semantics)"));
+        }
+    }
+    if (m_diskTopNote != nullptr && m_diskTop != nullptr) {
+        if (!m_osProcessDiskScan) {
+            m_diskTopNote->setText(
+                QStringLiteral("block i/o per process: %1")
+                    .arg(unsupportedOsText()));
+            m_diskTop->setText(QStringLiteral("--"));
+        } else {
+            m_diskTopNote->setText(processDiskSummaryText(
+                snapshot.processDiskTracked, snapshot.processDiskUnreadable,
+                snapshot.processDiskReadPerSec, snapshot.processDiskWritePerSec));
+            m_diskTop->setText(processDiskConsumerText(snapshot.processDiskTop));
+        }
+    }
+
+    if (m_gpuSummary != nullptr) {
+        const GpuReading &gpu = snapshot.gpu;
+        m_gpuTable->clear();
+        if (!m_osGpu) {
+            m_gpuSummary->setText(
+                QStringLiteral("gpu: %1").arg(unsupportedOsText()));
+            m_gpuTileUtil->setText(QStringLiteral("--"));
+            m_gpuTileMem->setText(QStringLiteral("--"));
+            m_gpuTileTemp->setText(QStringLiteral("--"));
+            m_gpuTileProcs->setText(QStringLiteral("--"));
+            m_gpuDevices->setText(QStringLiteral("--"));
+            m_gpuProcessNote->setText(
+                QStringLiteral("per-process gpu: %1").arg(unsupportedOsText()));
+        } else if (!gpu.ok) {
+            m_gpuSummary->setText(
+                gpuSummaryText(gpu, false, false, 0));
+            m_gpuTileUtil->setText(QStringLiteral("--"));
+            m_gpuTileMem->setText(QStringLiteral("--"));
+            m_gpuTileTemp->setText(QStringLiteral("--"));
+            m_gpuTileProcs->setText(QStringLiteral("--"));
+            m_gpuDevices->setText(QStringLiteral("--"));
+            m_gpuProcessNote->setText(QStringLiteral("--"));
+        } else {
+            double bestUtil = -1.0;
+            quint64 memUsed = 0;
+            quint64 memTotal = 0;
+            double bestTemp = -1.0;
+            for (const GpuDevice &device : gpu.devices) {
+                bestUtil = qMax(bestUtil, device.utilPercent);
+                bestTemp = qMax(bestTemp, device.tempC);
+                if (device.memUsed > memUsed || memUsed == 0) {
+                    memUsed = device.memUsed;
+                }
+                if (device.memTotal > memTotal) {
+                    memTotal = device.memTotal;
+                }
+            }
+            m_gpuSummary->setText(
+                gpuSummaryText(gpu, snapshot.gpuWarming,
+                               snapshot.gpuClientsAvailable,
+                               gpu.processes.size()));
+            m_gpuTileUtil->setText(
+                bestUtil < 0.0
+                    ? QStringLiteral("--")
+                    : QStringLiteral("%1%").arg(bestUtil, 0, 'f', 1));
+            m_gpuTileMem->setText(
+                memTotal > 0
+                    ? QStringLiteral("%1 / %2")
+                          .arg(formatGpuBytes(memUsed),
+                               formatGpuBytes(memTotal))
+                    : formatGpuBytes(memUsed));
+            m_gpuTileTemp->setText(
+                bestTemp < 0.0
+                    ? QStringLiteral("--")
+                    : QStringLiteral("%1 C").arg(bestTemp, 0, 'f', 0));
+            m_gpuTileProcs->setText(
+                QString::number(gpu.processes.size()));
+            m_gpuDevices->setText(gpuDeviceText(gpu));
+            if (!m_osGpuProcess) {
+                m_gpuProcessNote->setText(
+                    QStringLiteral("per-process gpu: %1 reports device "
+                                   "usage only").arg(m_osName));
+            } else if (m_osGpuClients) {
+                m_gpuProcessNote->setText(
+                    snapshot.gpuWarming
+                        ? QStringLiteral("gpu clients: warming up "
+                                         "(engine deltas)")
+                        : QStringLiteral("gpu clients: per-process engine "
+                                         "time from /proc/<pid>/fdinfo"));
+            } else {
+                m_gpuProcessNote->setText(
+                    QStringLiteral("gpu processes: per-process engine time "
+                                   "from the system gpu counters"));
+            }
+            for (const GpuProcess &process : gpu.processes) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, process.name);
+                item->setText(1, QString::number(process.pid));
+                item->setText(2, process.busyPercent < 0.0
+                                      ? QStringLiteral("warming")
+                                      : QStringLiteral("%1")
+                                            .arg(process.busyPercent, 0, 'f', 1));
+                item->setText(3, formatGpuBytes(process.memBytes));
+                item->setText(4, process.engines);
+                item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+                if (process.busyPercent >= 80.0) {
+                    item->setForeground(0, QColor(QStringLiteral("#d1685f")));
+                } else if (process.busyPercent >= 40.0) {
+                    item->setForeground(0, QColor(QStringLiteral("#d8b25f")));
+                }
+                m_gpuTable->addTopLevelItem(item);
+            }
+            if (m_chartGpu != nullptr && bestUtil >= 0.0) {
+                m_chartGpu->push(bestUtil);
+            }
+        }
+    }
+
+    if (m_sensorSummary != nullptr) {
+        updateSensorsPanel(snapshot);
+    }
+
+    if (m_cloudTileProvider != nullptr) {
+        updateCloudPanel(snapshot);
     }
 
     m_statusValue->setText(snapshot.status);
@@ -4249,12 +6018,57 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_depTileRatio->setText(QStringLiteral("--"));
     }
 
+    m_lastProcessRows = snapshot.processes;
+    populateProcessTree(m_lastProcessRows);
+}
+
+void DashboardPanel::populateProcessTree(const QList<ProcessRow> &rows) {
+    if (m_procs == nullptr) {
+        return;
+    }
+    // The tree is rebuilt every tick; a selected row must survive it or the
+    // action buttons would lose their target once per second.
+    const int previousPid = selectedProcessPid();
     m_populating = true;
     m_procs->clear();
     QList<QTreeWidgetItem *> byDepth;
     QList<QTreeWidgetItem *> allItems;
     QSet<int> present;
-    for (const ProcessRow &row : snapshot.processes) {
+
+    // "healthy only" (M75): keep breaching rows plus their ancestors so the
+    // tree still reads as a tree, and say so instead of showing an empty box
+    // when everything is quiet.
+    QVector<bool> keep(rows.size(), false);
+    if (m_procFilterActive) {
+        QVector<int> parent(rows.size(), -1);
+        QVector<int> stack;
+        for (int i = 0; i < rows.size(); ++i) {
+            while (!stack.isEmpty()
+                   && rows.at(stack.last()).depth >= rows.at(i).depth) {
+                stack.removeLast();
+            }
+            parent[i] = stack.isEmpty() ? -1 : stack.last();
+            stack.append(i);
+        }
+        for (int i = 0; i < rows.size(); ++i) {
+            const double rssGb = rows.at(i).rssKb / (1024.0 * 1024.0);
+            if (!processRowBreaches(rows.at(i).cpuPercent, rssGb,
+                                    m_settings.cpuHighPercent,
+                                    m_settings.rssWarnGb)) {
+                continue;
+            }
+            for (int j = i; j >= 0; j = parent.at(j)) {
+                keep[j] = true;
+            }
+        }
+    }
+    int hiddenRows = 0;
+    for (int index = 0; index < rows.size(); ++index) {
+        const ProcessRow &row = rows.at(index);
+        if (m_procFilterActive && !keep.at(index)) {
+            ++hiddenRows;
+            continue;
+        }
         auto *item = new QTreeWidgetItem();
         item->setData(0, Qt::UserRole, row.pid);
         item->setText(0, row.name.isEmpty() ? QStringLiteral("pid %1").arg(row.pid)
@@ -4265,13 +6079,15 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                              : QStringLiteral("--"));
         item->setText(3, formatNetRate(row.netRxPerSec));
         item->setText(4, formatNetRate(row.netTxPerSec));
-        item->setText(5, row.threads > 0 ? QString::number(row.threads)
+        item->setText(5, formatNetRate(row.diskReadPerSec));
+        item->setText(6, formatNetRate(row.diskWritePerSec));
+        item->setText(7, row.threads > 0 ? QString::number(row.threads)
                                          : QStringLiteral("--"));
-        item->setText(6, row.fds < 0 ? QStringLiteral("--")
+        item->setText(8, row.fds < 0 ? QStringLiteral("--")
                                      : QString::number(row.fds));
-        item->setText(7, row.memory);
-        item->setText(8, formatListenPorts(row.listenPorts));
-        for (int c = 1; c < 9; ++c) {
+        item->setText(9, row.memory);
+        item->setText(10, formatListenPorts(row.listenPorts));
+        for (int c = 1; c < 11; ++c) {
             item->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
         }
 
@@ -4293,8 +6109,24 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     for (QTreeWidgetItem *item : allItems) {
         item->setExpanded(
             !m_collapsedPids.contains(item->data(0, Qt::UserRole).toInt()));
+        if (previousPid > 0
+            && item->data(0, Qt::UserRole).toInt() == previousPid) {
+            m_procs->setCurrentItem(item);
+        }
     }
     m_populating = false;
+
+    if (m_procFilterNote != nullptr) {
+        m_procFilterNote->setText(
+            m_procFilterActive
+                ? QStringLiteral("%1 of %2 rows hidden by HEALTHY ONLY "
+                                 "(cpu < %3%, rss < %4 GB)")
+                      .arg(hiddenRows)
+                      .arg(rows.size())
+                      .arg(m_settings.cpuHighPercent, 0, 'f', 0)
+                      .arg(m_settings.rssWarnGb, 0, 'f', 1)
+                : QString());
+    }
 }
 
 void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
@@ -4311,6 +6143,7 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
     m_dockerTable->clear();
     for (const DockerContainer &container : snapshot.containers) {
         auto *item = new QTreeWidgetItem(m_dockerTable);
+        item->setData(0, Qt::UserRole, container.id);
         item->setText(0, container.name.isEmpty() ? container.id
                                                   : container.name);
         item->setText(1, container.image);
@@ -4362,6 +6195,49 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
             || snapshot.state == DockerState::Stale)) {
         m_chartDocker->push(static_cast<double>(snapshot.runningCount));
     }
+
+    // Lifecycle picker: an id can vanish between polls (container removed),
+    // so the previous choice is restored by id and the verbs disable
+    // themselves when nothing is left to act on.
+    if (m_containerPick != nullptr) {
+        const QString previous = m_containerPick->currentData().toString();
+        QSignalBlocker blocker(m_containerPick);
+        m_containerPick->clear();
+        int restore = -1;
+        for (const DockerContainer &container : snapshot.containers) {
+            const QString label =
+                QStringLiteral("%1 (%2)")
+                    .arg(container.name.isEmpty() ? container.id
+                                                  : container.name,
+                         container.id.left(12));
+            m_containerPick->addItem(label, container.id);
+            if (!previous.isEmpty() && container.id == previous) {
+                restore = m_containerPick->count() - 1;
+            }
+        }
+        if (restore >= 0) {
+            m_containerPick->setCurrentIndex(restore);
+        }
+        const bool usable =
+            m_containerPick->count() > 0
+            && (snapshot.state == DockerState::Ok
+                || snapshot.state == DockerState::Stale);
+        for (QPushButton *button :
+             {m_containerStart, m_containerStop, m_containerRestart}) {
+            if (button != nullptr) {
+                button->setEnabled(usable);
+            }
+        }
+        if (m_containerActionsNote != nullptr) {
+            m_containerActionsNote->setText(
+                usable
+                    ? QStringLiteral("start/stop/restart go through the local "
+                                     "Docker Engine API; the next poll shows "
+                                     "the new state")
+                    : QStringLiteral("no container to act on - %1")
+                          .arg(dockerSummaryText(snapshot)));
+        }
+    }
 }
 
 void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
@@ -4377,8 +6253,7 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
             : QStringLiteral("color: %1;").arg(ui_theme::text()));
     m_kubeTileDeploys->setText(QString::number(snapshot.deployments.size()));
     if (snapshot.costPods > 0) {
-        m_kubeTileCost->setText(
-            QStringLiteral("$%1").arg(snapshot.costMonthly, 0, 'f', 1));
+        m_kubeTileCost->setText(formatCostMoney(snapshot.costMonthly));
     } else {
         m_kubeTileCost->setText(QStringLiteral("--"));
     }
@@ -4445,37 +6320,168 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
     m_nodes->setText(haveData ? kubeNodesText(snapshot.nodes)
                               : QStringLiteral("--"));
 
-    if (haveData) {
-        m_costSummary->setText(
-            QStringLiteral("$%1/month  (%2 pods)")
-                .arg(snapshot.costMonthly, 0, 'f', 2)
-                .arg(snapshot.costPods));
-        m_costWarnings->setText(
-            snapshot.costMissingRequests > 0
-                ? QStringLiteral("warn: %1 container(s) without cpu/memory request")
-                      .arg(snapshot.costMissingRequests)
-                : QStringLiteral("all containers declare requests"));
-        m_costNamespaces->clear();
-        for (const QPair<QString, double> &entry : snapshot.costByNamespace) {
-            auto *item = new QTreeWidgetItem();
-            item->setText(0, entry.first);
-            item->setText(1, QStringLiteral("$%1").arg(entry.second, 0, 'f', 2));
-            item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-            m_costNamespaces->addTopLevelItem(item);
-        }
-        m_costWorkloads->clear();
-        for (const QPair<QString, double> &entry : snapshot.costTopWorkloads) {
-            auto *item = new QTreeWidgetItem();
-            item->setText(0, entry.first);
-            item->setText(1, QStringLiteral("$%1").arg(entry.second, 0, 'f', 2));
-            item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-            m_costWorkloads->addTopLevelItem(item);
-        }
+    // --- Cost page (M81): OpenCost-style requests pricing. The estimate is
+    // recomputed from the live request set each poll, so the tiles, the
+    // split and the history line always describe the same cluster state.
+    const bool priced = haveData && snapshot.costPods > 0;
+    if (priced) {
+        m_costTileMonthly->setText(formatCostMoney(snapshot.costMonthly));
+        m_costTileHourly->setText(
+            formatCostMoney(snapshot.costMonthly / kCostHoursPerMonth));
     } else {
-        m_costSummary->setText(QStringLiteral("--"));
-        m_costWarnings->setText(QStringLiteral("--"));
+        m_costTileMonthly->setText(QStringLiteral("--"));
+        m_costTileHourly->setText(QStringLiteral("--"));
+    }
+    m_costTileCpuEff->setText(snapshot.costCpuEfficiency < 0.0
+                                  ? QStringLiteral("--")
+                                  : formatCostShare(snapshot.costCpuEfficiency));
+    m_costTileCpuEff->setStyleSheet(
+        QStringLiteral("color: %1;")
+            .arg(snapshot.costCpuEfficiency < 0.0
+                     ? ui_theme::muted()
+                     : snapshot.costCpuEfficiency < 0.30 ? ui_theme::crit()
+                     : snapshot.costCpuEfficiency < 0.60 ? ui_theme::warn()
+                                                        : ui_theme::ok()));
+    m_costTileMemEff->setText(snapshot.costMemEfficiency < 0.0
+                                  ? QStringLiteral("--")
+                                  : formatCostShare(snapshot.costMemEfficiency));
+    m_costTileMemEff->setStyleSheet(
+        QStringLiteral("color: %1;")
+            .arg(snapshot.costMemEfficiency < 0.0
+                     ? ui_theme::muted()
+                     : snapshot.costMemEfficiency < 0.30 ? ui_theme::crit()
+                     : snapshot.costMemEfficiency < 0.60 ? ui_theme::warn()
+                                                        : ui_theme::ok()));
+
+    auto line = [](const QString &label, const QString &value) {
+        return QStringLiteral("<span style=\"color:%1;\">%2</span> %3")
+            .arg(ui_theme::dim(),
+                 label.leftJustified(10, QLatin1Char(' ')), value);
+    };
+    auto dimText = [](const QString &text) {
+        return QStringLiteral("<span style=\"color:%1;\">%2</span>")
+            .arg(ui_theme::dim(), text);
+    };
+    auto valueText = [](const QString &text) {
+        return QStringLiteral("<span style=\"color:%1;\">%2</span>")
+            .arg(ui_theme::text(), text);
+    };
+
+    if (priced) {
+        const QString cpuShare =
+            snapshot.costMonthly > 0.0
+                ? formatCostShare(snapshot.costCpuMonthly
+                                  / snapshot.costMonthly)
+                : QStringLiteral("--");
+        const QString memShare =
+            snapshot.costMonthly > 0.0
+                ? formatCostShare(snapshot.costMemMonthly
+                                  / snapshot.costMonthly)
+                : QStringLiteral("--");
+        QString allocation;
+        allocation += line(
+            QStringLiteral("estimate"),
+            valueText(formatCostMoney(snapshot.costMonthly))
+                + dimText(QStringLiteral(" /month  (")
+                          + formatCostMoney(snapshot.costMonthly
+                                            / kCostHoursPerMonth)
+                          + QStringLiteral(" /hr)  from declared requests")));
+        allocation += QStringLiteral("<br/>")
+                      + line(QStringLiteral("cpu"),
+                             valueText(formatCostMoney(snapshot.costCpuMonthly))
+                                 + dimText(QStringLiteral("  ")
+                                           + cpuShare
+                                           + QStringLiteral(" of estimate  @ $")
+                                           + QString::number(
+                                               snapshot.costCpuPerCoreHour, 'f',
+                                               6)
+                                           + QStringLiteral("/core-hr")));
+        allocation += QStringLiteral("<br/>")
+                      + line(QStringLiteral("ram"),
+                             valueText(formatCostMoney(snapshot.costMemMonthly))
+                                 + dimText(QStringLiteral("  ")
+                                           + memShare
+                                           + QStringLiteral(" of estimate  @ $")
+                                           + QString::number(
+                                               snapshot.costMemPerGbHour, 'f',
+                                               6)
+                                           + QStringLiteral("/GB-hr")));
+        allocation += QStringLiteral("<br/>")
+                      + line(QStringLiteral("priced"),
+                             valueText(QStringLiteral("%1 pod(s)")
+                                           .arg(snapshot.costPods))
+                                 + dimText(QStringLiteral(" across %1 namespace(s)")
+                                               .arg(snapshot.costByNamespace
+                                                        .size())));
+        if (snapshot.costMissingRequests > 0) {
+            allocation += QStringLiteral("<br/>")
+                          + line(QStringLiteral("requests"),
+                                 QStringLiteral(
+                                     "<span style=\"color:%1;\">%2 container(s) "
+                                     "declare no cpu/memory request - their "
+                                     "requests price as 0</span>")
+                                     .arg(ui_theme::warn())
+                                     .arg(snapshot.costMissingRequests));
+        } else {
+            allocation += QStringLiteral("<br/>")
+                          + line(QStringLiteral("requests"),
+                                 QStringLiteral(
+                                     "<span style=\"color:%1;\">every container "
+                                     "declares cpu and memory requests</span>")
+                                     .arg(ui_theme::ok()));
+        }
+        m_costSummary->setText(allocation);
+        m_costWarnings->setText(costEfficiencyTextFromRatios(
+            snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
+            snapshot.costEfficiencyPods, snapshot.costWastedMonthly));
+
+        auto fillTable = [&snapshot](QTreeWidget *tree,
+                                     const QList<QPair<QString, double>> &rows) {
+            tree->clear();
+            if (rows.isEmpty()) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, QStringLiteral("no priced workloads"));
+                item->setText(1, QStringLiteral("--"));
+                item->setText(2, QStringLiteral("--"));
+                tree->addTopLevelItem(item);
+                return;
+            }
+            for (const QPair<QString, double> &entry : rows) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, entry.first);
+                item->setText(1, formatCostMoney(entry.second));
+                item->setText(
+                    2, formatCostShare(snapshot.costMonthly > 0.0
+                                           ? entry.second / snapshot.costMonthly
+                                           : -1.0));
+                item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+                item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                tree->addTopLevelItem(item);
+            }
+        };
+        fillTable(m_costNamespaces, snapshot.costByNamespace);
+        fillTable(m_costWorkloads, snapshot.costTopWorkloads);
+    } else {
+        m_costSummary->setText(
+            dimText(haveData
+                        ? QStringLiteral(
+                              "no priced workloads - the cluster returned no pod "
+                              "requests to allocate")
+                        : (summary.isEmpty()
+                               ? QStringLiteral("cost pricing needs a reachable "
+                                                "cluster")
+                               : summary)));
+        m_costWarnings->setText(dimText(
+            snapshot.costEfficiencyPods > 0
+                ? QStringLiteral("efficiency  -- no priced requests to compare "
+                                 "against usage")
+                : QStringLiteral("efficiency  -- needs pod usage (metrics API) "
+                                 "and declared requests")));
         m_costNamespaces->clear();
         m_costWorkloads->clear();
+    }
+    if (priced && m_chartCost != nullptr) {
+        m_chartCost->push(snapshot.costMonthly);
     }
 }
 
@@ -4527,6 +6533,51 @@ void DashboardPanel::setServicesSnapshot(const ServicesSnapshot &snapshot) {
     m_servicesChanges->setText(snapshot.available
                                    ? servicesChangesText(snapshot.changes)
                                    : QStringLiteral("--"));
+
+    // M78 restart picker: fill from every unit the sampler knows about,
+    // restore the previous choice by name, disable when there is nothing
+    // to restart.
+    if (m_servicePick != nullptr) {
+        const QString previous = m_servicePick->currentText();
+        QSignalBlocker blocker(m_servicePick);
+        m_servicePick->clear();
+        for (const UnitRow &row : snapshot.units) {
+            m_servicePick->addItem(row.name);
+        }
+        if (!previous.isEmpty()) {
+            const int restore = m_servicePick->findText(previous);
+            if (restore >= 0) {
+                m_servicePick->setCurrentIndex(restore);
+            }
+        }
+        const bool usable = snapshot.available && m_servicePick->count() > 0;
+        if (m_serviceRestart != nullptr) {
+            m_serviceRestart->setEnabled(usable);
+        }
+        if (m_serviceActionsNote != nullptr) {
+            m_serviceActionsNote->setText(
+                usable
+                    ? (m_osName == QStringLiteral("windows")
+                           ? QStringLiteral("restart stops and starts the "
+                                            "service through the Windows "
+                                            "service manager")
+                           : m_osName == QStringLiteral("macos")
+                                 ? QStringLiteral("restart uses launchctl "
+                                                  "kickstart -k for the "
+                                                  "selected label")
+                                 : QStringLiteral("restart uses systemctl "
+                                                  "restart for the selected "
+                                                  "unit"))
+                    : QStringLiteral("no unit list from %1 (%2)")
+                          .arg(m_osName == QStringLiteral("windows")
+                                   ? QStringLiteral("the service manager")
+                                   : QStringLiteral("the supervisor"),
+                               snapshot.errorMessage.isEmpty()
+                                   ? QStringLiteral("waiting for the first "
+                                                    "sample")
+                                   : snapshot.errorMessage));
+        }
+    }
 }
 
 void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
@@ -4640,6 +6691,11 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
 }
 
 void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
+    // Silence windows age every tick, so refresh their remaining times here
+    // as well as on setSilences.
+    updateSilencesPanel();
+    const qint64 silenceNow = QDateTime::currentMSecsSinceEpoch();
+
     // Monitor-status tile counts (gridded per DD status vocabulary:
     // status:critical / status:warning / status:ok live in the agent).
     int crit = 0;
@@ -4762,10 +6818,257 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
             ? QStringLiteral("<span style=\"color:%1;\">[%2]</span>")
                 .arg(ui_theme::statusColor(severity), severity)
             : QStringLiteral("[%1]").arg(severity);
-        text += QStringLiteral("%1 %2&nbsp;&nbsp;%3<br/>")
-                    .arg(marker, alert.title, alert.detail);
+        // A live silence mutes the outbound paths but the breach is
+        // still real, so the row keeps its severity and gains the window.
+        const SilenceRule *silence =
+            activeSilenceFor(m_silences, alert.id, silenceNow);
+        const QString quiet = silence == nullptr
+            ? QString()
+            : QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                             "[silenced %2]</span>")
+                  .arg(ui_theme::muted(),
+                       formatSilenceRemaining(silence->endsAtMs - silenceNow));
+        text += QStringLiteral("%1 %2&nbsp;&nbsp;%3%4<br/>")
+                    .arg(marker, alert.title, alert.detail, quiet);
     }
     m_alerts->setText(text);
+}
+
+void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
+    const CloudSnapshot &cloud = snapshot.cloud;
+    const bool priced = cloud.available && cloud.ratePerHour >= 0.0;
+
+    m_cloudTileProvider->setText(
+        cloud.available ? cloudProviderLabel(cloud.identity.provider)
+                        : QStringLiteral("--"));
+    m_cloudTileAccrued->setText(
+        priced && cloud.accruedUsd >= 0.0 ? formatCostMoney(cloud.accruedUsd)
+                                          : QStringLiteral("--"));
+    m_cloudTileMonthly->setText(
+        priced && cloud.projectedMonthlyUsd >= 0.0
+            ? formatCostMoney(cloud.projectedMonthlyUsd)
+            : QStringLiteral("--"));
+    m_cloudTileAge->setText(
+        cloud.instanceAgeSec >= 0 ? cloudUptimeText(cloud.instanceAgeSec)
+                                  : QStringLiteral("--"));
+
+    m_cloudSummary->setText(cloudSummaryText(cloud));
+    if (m_cloudFootprint != nullptr) {
+        m_cloudFootprint->setText(cloudFootprintText(cloud.footprint));
+    }
+    m_cloudDetail->setText(cloudDetailText(cloud));
+    m_cloudCost->setText(cloudCostText(cloud));
+    m_cloudApp->setText(cloudAppText(cloud));
+
+    const CloudFleetStatus &fleet = cloud.fleet;
+    // Off a cloud instance there is no provider to list, so the card states
+    // the gate instead of "0 instances", which would read as an empty account.
+    const QString fleetText =
+        cloud.available ? fleetSummaryText(fleet) : fleetNoProviderText();
+    m_cloudFleetSummary->setText(fleetText);
+    if (m_cloudFleet != nullptr) {
+        m_cloudFleet->clear();
+        for (const CloudFleetInstance &row : fleet.rows) {
+            auto *item = new QTreeWidgetItem(m_cloudFleet);
+            item->setText(0, row.isSelf
+                                 ? QStringLiteral("* %1").arg(row.name)
+                                 : row.name);
+            item->setText(
+                1, row.instanceType.isEmpty() ? QStringLiteral("--")
+                                              : row.instanceType);
+            QString state = row.state;
+            if (row.spot && state == QLatin1String("running")) {
+                state = QStringLiteral("running (spot)");
+            }
+            item->setText(2, state);
+            item->setText(
+                3, row.ageSec >= 0 ? cloudUptimeText(row.ageSec)
+                                   : QStringLiteral("--"));
+            item->setText(
+                4, row.monthlyUsd >= 0.0 ? formatCostMoney(row.monthlyUsd)
+                                         : QStringLiteral("--"));
+            item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
+            if (row.isSelf) {
+                item->setForeground(0, QColor(ui_theme::accent()));
+            }
+            QColor stateColor(ui_theme::text());
+            if (row.state == QLatin1String("running")) {
+                stateColor = QColor(ui_theme::ok());
+            } else if (row.state == QLatin1String("pending")) {
+                stateColor = QColor(ui_theme::warn());
+            } else if (row.state == QLatin1String("terminated")) {
+                stateColor = QColor(ui_theme::crit());
+            } else if (row.state == QLatin1String("stopped") ||
+                       row.state == QLatin1String("suspended")) {
+                stateColor = QColor(ui_theme::dim());
+            }
+            item->setForeground(2, stateColor);
+        }
+        if (fleet.rows.isEmpty()) {
+            auto *item = new QTreeWidgetItem(m_cloudFleet);
+            item->setText(0, fleetText);
+            item->setForeground(0, QColor(ui_theme::dim()));
+            m_cloudFleet->setFirstColumnSpanned(0, QModelIndex(), true);
+        }
+    }
+    if (m_chartCloudFleet != nullptr && fleet.available) {
+        m_chartCloudFleet->push(fleet.running);
+    }
+
+    if (m_cloudConsumers != nullptr) {
+        m_cloudConsumers->clear();
+        for (const CloudConsumer &consumer : cloud.consumers) {
+            auto *item = new QTreeWidgetItem(m_cloudConsumers);
+            item->setText(0, consumer.name);
+            item->setText(1, QString::number(consumer.pid));
+            item->setText(2, QStringLiteral("%1%").arg(consumer.cpuPercent, 0, 'f', 1));
+            item->setText(3, formatCostMoney(consumer.usdPerHour));
+            for (int column = 1; column < 4; ++column) {
+                item->setTextAlignment(column, Qt::AlignRight | Qt::AlignVCenter);
+            }
+        }
+        if (cloud.consumers.isEmpty()) {
+            auto *item = new QTreeWidgetItem(m_cloudConsumers);
+            item->setText(0, cloud.available
+                                 ? QStringLiteral("no priced processes in the "
+                                                  "focused app")
+                                 : QStringLiteral("cloud: unavailable"));
+            item->setForeground(0, QColor(ui_theme::dim()));
+        }
+    }
+
+    if (m_chartCloudApp != nullptr && cloud.appCostPerHour >= 0.0) {
+        m_chartCloudApp->push(cloud.appCostPerHour);
+    }
+}
+
+void DashboardPanel::updateSensorsPanel(const DisplaySnapshot &snapshot) {
+    const SensorsSnapshot &sensors = snapshot.sensors;
+    m_sensorTree->clear();
+
+    const auto tint = [](QLabel *label, int severity) {
+        const QColor color = severity >= 2 ? QColor(ui_theme::crit())
+                            : severity == 1 ? QColor(ui_theme::warn())
+                                            : QColor(ui_theme::text());
+        label->setStyleSheet(QStringLiteral("color: %1;").arg(color.name()));
+    };
+
+    if (!m_osSensors && !m_osBattery) {
+        const QString gate = QStringLiteral("sensors: %1").arg(unsupportedOsText());
+        m_sensorSummary->setText(gate);
+        m_sensorTileHot->setText(QStringLiteral("--"));
+        m_sensorTileFans->setText(QStringLiteral("--"));
+        m_sensorTilePower->setText(QStringLiteral("--"));
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(gate);
+        m_batteryDetail->setText(QStringLiteral("--"));
+        m_adapters->setText(QStringLiteral("--"));
+        return;
+    }
+
+    if (!sensors.available) {
+        const QString note = sensors.note.isEmpty()
+                                 ? QStringLiteral("sensors: no readings")
+                                 : sensors.note;
+        m_sensorSummary->setText(note);
+        m_sensorTileHot->setText(QStringLiteral("--"));
+        m_sensorTileFans->setText(QStringLiteral("--"));
+        m_sensorTilePower->setText(QStringLiteral("--"));
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(note);
+        m_batteryDetail->setText(QStringLiteral("--"));
+        m_adapters->setText(adaptersText(sensors));
+        return;
+    }
+
+    m_sensorSummary->setText(sensorsSummaryText(sensors));
+
+    if (sensors.hottestCelsius >= 0.0) {
+        m_sensorTileHot->setText(
+            QStringLiteral("%1 \u00b0C").arg(sensors.hottestCelsius, 0, 'f', 1));
+    } else {
+        m_sensorTileHot->setText(QStringLiteral("--"));
+    }
+    tint(m_sensorTileHot, sensors.hottestSeverity);
+
+    m_sensorTileFans->setText(
+        sensors.maxFanRpm < 0.0
+            ? QStringLiteral("--")
+            : QStringLiteral("%1 rpm").arg(sensors.maxFanRpm, 0, 'f', 0));
+    tint(m_sensorTileFans, 0);
+
+    m_sensorTilePower->setText(
+        sensors.totalPowerW < 0.0
+            ? QStringLiteral("--")
+            : QStringLiteral("%1 W").arg(sensors.totalPowerW, 0, 'f', 1));
+    tint(m_sensorTilePower, 0);
+
+    if (sensors.batteries.isEmpty()) {
+        m_sensorTileBattery->setText(QStringLiteral("--"));
+        m_batterySummary->setText(
+            m_osBattery
+                ? QStringLiteral("battery: no battery reported (desktop or VM)")
+                : QStringLiteral("battery: %1").arg(unsupportedOsText()));
+        m_batteryDetail->setText(QStringLiteral("--"));
+    } else {
+        const BatteryReading &first = sensors.batteries.constFirst();
+        m_sensorTileBattery->setText(
+            first.capacityPercent >= 0
+                ? QStringLiteral("%1%").arg(first.capacityPercent)
+                : batteryStateText(first.state));
+        tint(m_sensorTileBattery,
+             first.capacityPercent >= 0 && first.capacityPercent <= 10 ? 2
+             : first.capacityPercent >= 0 && first.capacityPercent <= 20 ? 1
+                                                                        : 0);
+        QStringList summary;
+        for (const BatteryReading &battery : sensors.batteries) {
+            summary.append(batterySummaryText(battery));
+        }
+        m_batterySummary->setText(summary.join(QLatin1String("\n")));
+        m_batteryDetail->setText(
+            batteryDetailText(sensors.batteries.constFirst()));
+    }
+    m_adapters->setText(adaptersText(sensors));
+
+    for (const SensorChip &chip : sensors.chips) {
+        for (const SensorReading &reading : chip.readings) {
+            if (reading.kind != SensorKind::Temperature
+                && reading.kind != SensorKind::Fan
+                && reading.kind != SensorKind::Power) {
+                continue;
+            }
+            auto *item = new QTreeWidgetItem();
+            item->setText(0, chip.name);
+            item->setText(1, reading.label);
+            item->setText(2, sensorValueText(reading));
+            if (reading.hasCrit) {
+                item->setText(3, QStringLiteral("crit %1 %2")
+                                    .arg(reading.crit, 0, 'f', 1)
+                                    .arg(sensorUnit(reading.kind)));
+            } else if (reading.hasWarn) {
+                item->setText(3, QStringLiteral("high %1 %2")
+                                    .arg(reading.warn, 0, 'f', 1)
+                                    .arg(sensorUnit(reading.kind)));
+            }
+            item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            const int severity = sensorSeverity(reading);
+            if (severity >= 2) {
+                item->setForeground(0, QColor(ui_theme::crit()));
+            } else if (severity == 1) {
+                item->setForeground(0, QColor(ui_theme::warn()));
+            }
+            m_sensorTree->addTopLevelItem(item);
+        }
+    }
+
+    if (m_chartSensorTemp != nullptr && sensors.hottestCelsius >= 0.0) {
+        m_chartSensorTemp->push(sensors.hottestCelsius);
+    }
+    if (m_chartSensorPower != nullptr && sensors.totalPowerW >= 0.0) {
+        m_chartSensorPower->push(sensors.totalPowerW);
+    }
 }
 
 void DashboardPanel::updateSloPanel(const SloReport &report) {
@@ -5212,4 +7515,142 @@ void DashboardPanel::setFimSnapshot(const FimSnapshot &snapshot) {
         m_secTileFim->setText(m_osFim ? QStringLiteral("--")
                                       : QStringLiteral("n/a"));
     }
+}
+
+QPushButton *DashboardPanel::makeActionButton(const QString &text,
+                                              const QString &id,
+                                              QWidget *parent) {
+    auto *button = new QPushButton(text, parent);
+    button->setObjectName(QStringLiteral("ddActionBtn"));
+    button->setFont(monoFont(10));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setProperty("ddActionId", id);
+    m_processActionButtons.append(button);
+    connect(button, &QPushButton::clicked, this,
+            [this, id]() { triggerProcessAction(id); });
+    return button;
+}
+
+int DashboardPanel::selectedProcessPid() const {
+    if (m_procs == nullptr) {
+        return 0;
+    }
+    const QList<QTreeWidgetItem *> selected = m_procs->selectedItems();
+    if (selected.isEmpty()) {
+        return 0;
+    }
+    return selected.first()->data(0, Qt::UserRole).toInt();
+}
+
+QString DashboardPanel::selectedProcessName() const {
+    if (m_procs == nullptr) {
+        return QString();
+    }
+    const QList<QTreeWidgetItem *> selected = m_procs->selectedItems();
+    if (selected.isEmpty()) {
+        return QString();
+    }
+    return selected.first()->text(0);
+}
+
+void DashboardPanel::triggerProcessAction(const QString &id) {
+    const int pid = selectedProcessPid();
+    if (pid <= 0) {
+        setActionStatus(QStringLiteral("select a process row first"), false);
+        return;
+    }
+
+    ProcessAction action;
+    action.pid = pid;
+    action.name = selectedProcessName();
+
+    if (id == QStringLiteral("term")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Term;
+    } else if (id == QStringLiteral("kill")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Kill;
+    } else if (id == QStringLiteral("hup")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Hup;
+    } else if (id == QStringLiteral("pause")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Stop;
+    } else if (id == QStringLiteral("resume")) {
+        action.kind = ProcessActionKind::Signal;
+        action.signal = ProcessSignal::Cont;
+    } else if (id == QStringLiteral("nice-up")) {
+        action.kind = ProcessActionKind::Renice;
+        action.niceValue = 5;
+        action.relative = true;
+    } else if (id == QStringLiteral("nice-down")) {
+        action.kind = ProcessActionKind::Renice;
+        action.niceValue = -5;
+        action.relative = true;
+    } else if (id == QStringLiteral("io-idle")) {
+        action.kind = ProcessActionKind::Ionice;
+        action.ioClass = IoPriorityClass::Idle;
+        action.ioLevel = 0;
+    } else if (id == QStringLiteral("io-be")) {
+        action.kind = ProcessActionKind::Ionice;
+        action.ioClass = IoPriorityClass::BestEffort;
+        action.ioLevel = 4;
+    } else if (id == QStringLiteral("oom-up")) {
+        action.kind = ProcessActionKind::OomScore;
+        action.oomScoreAdj = 500;
+        action.relative = true;
+    } else if (id == QStringLiteral("oom-down")) {
+        action.kind = ProcessActionKind::OomScore;
+        action.oomScoreAdj = -500;
+        action.relative = true;
+    } else {
+        return;
+    }
+
+    // Destructive signals ask for a second press on the same row instead of
+    // a modal: the HUD stays usable and the status line states the target.
+    if (processActionNeedsConfirm(action)) {
+        if (m_confirmPid != pid || m_confirmSignal != action.signal) {
+            m_confirmPid = pid;
+            m_confirmSignal = action.signal;
+            if (m_actionStatus != nullptr) {
+                m_actionStatus->setStyleSheet(
+                    QStringLiteral("color: %1;").arg(ui_theme::warn()));
+                m_actionStatus->setText(
+                    QStringLiteral("confirm: %1 - press the same button again")
+                        .arg(processActionConfirmText(action)));
+            }
+            return;
+        }
+    }
+
+    m_confirmPid = 0;
+    emit processActionRequested(action);
+}
+
+void DashboardPanel::setActionStatus(const QString &text, bool ok) {
+    if (m_actionStatus == nullptr) {
+        return;
+    }
+    m_actionStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_actionStatus->setText(text);
+}
+
+void DashboardPanel::setServiceStatus(const QString &text, bool ok) {
+    if (m_serviceStatus == nullptr) {
+        return;
+    }
+    m_serviceStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_serviceStatus->setText(text);
+}
+
+void DashboardPanel::setContainerStatus(const QString &text, bool ok) {
+    if (m_containerStatus == nullptr) {
+        return;
+    }
+    m_containerStatus->setStyleSheet(
+        QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
+    m_containerStatus->setText(text);
 }

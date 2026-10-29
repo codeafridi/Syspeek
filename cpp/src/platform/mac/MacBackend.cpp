@@ -1,5 +1,8 @@
 #include "MacBackend.h"
 
+#include "MacGpu.h"
+#include "MacSensors.h"
+
 #ifdef Q_OS_MACOS
 
 #include <mach/mach.h>
@@ -56,6 +59,7 @@ constexpr int kTcpStateFinWait2 = 9;
 constexpr int kTcpStateTimeWait = 10;
 } // namespace
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <vector>
 
@@ -230,6 +234,13 @@ PlatformCapabilities MacBackend::capabilities() const {
     caps.tcpCounters = readTcpSysctl(probe)
         && (probe.tcps_rcvtotal != 0 || probe.tcps_sndtotal != 0
             || probe.tcps_connattempt != 0);
+    caps.perProcessDisk = true;
+    caps.gpu = true;
+    caps.perProcessDiskScan = true;
+    caps.processSignals = true;
+    caps.processRenice = true;
+    caps.processPause = true;
+    caps.battery = true;
     return caps;
 }
 
@@ -839,6 +850,26 @@ bool MacBackend::procSample(int pid, linuxproc::MemInfo &mem,
     return true;
 }
 
+bool MacBackend::processDiskCounters(int pid, long long &readBytes,
+                                     long long &writeBytes) {
+    struct rusage_info_v6 ri{};
+    if (proc_pid_rusage(pid, RUSAGE_INFO_V6,
+                        reinterpret_cast<rusage_info_t *>(&ri)) != 0) {
+        return false;
+    }
+    readBytes = static_cast<long long>(ri.ri_diskio_bytesread);
+    writeBytes = static_cast<long long>(ri.ri_diskio_byteswritten);
+    return true;
+}
+
+GpuReading MacBackend::gpuInfo() {
+    return macgpu::collect();
+}
+
+SensorsSnapshot MacBackend::sensors() {
+    return macsensors::collect();
+}
+
 int MacBackend::countFds(int pid) {
     const int bytes = proc_pidinfo(pid, kProcPidListFds, 0, nullptr, 0);
     if (bytes <= 0) {
@@ -894,6 +925,58 @@ QString MacBackend::processCmdline(int pid) {
         parts.append(QString::fromUtf8(a));
     }
     return parts.join(QLatin1Char(' '));
+}
+
+bool MacBackend::applyProcessAction(const ProcessAction &action,
+                                    QString *error) {
+    const auto fail = [error](const QString &what) {
+        const int code = errno;
+        if (error != nullptr) {
+            *error = QStringLiteral("%1: %2")
+                         .arg(what, QString::fromLocal8Bit(std::strerror(code)));
+        }
+        return false;
+    };
+    if (action.pid <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("invalid pid");
+        }
+        return false;
+    }
+    switch (action.kind) {
+    case ProcessActionKind::Signal:
+        if (::kill(action.pid, processSignalNumber(action.signal)) != 0) {
+            return fail(processSignalName(action.signal));
+        }
+        return true;
+    case ProcessActionKind::Renice: {
+        int target = clampNice(action.niceValue);
+        if (action.relative) {
+            errno = 0;
+            const int current =
+                ::getpriority(PRIO_PROCESS, static_cast<id_t>(action.pid));
+            if (current == -1 && errno != 0) {
+                return fail(QStringLiteral("getpriority"));
+            }
+            target = clampNice(current + action.niceValue);
+        }
+        if (::setpriority(PRIO_PROCESS, static_cast<id_t>(action.pid), target)
+            != 0) {
+            return fail(QStringLiteral("setpriority"));
+        }
+        return true;
+    }
+    case ProcessActionKind::Ionice:
+    case ProcessActionKind::OomScore:
+        break;
+    }
+    if (error != nullptr) {
+        *error = QStringLiteral("%1 is not supported on macos")
+                     .arg(action.kind == ProcessActionKind::Ionice
+                              ? QStringLiteral("i/o priority")
+                              : QStringLiteral("oom_score_adj"));
+    }
+    return false;
 }
 
 #endif // Q_OS_MACOS

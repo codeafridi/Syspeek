@@ -12,6 +12,18 @@
 // (optionally a second series), a legend footer with min/max/avg/current
 // readouts, an optional centered big-value overlay, an optional bar
 // (histogram) mode and an optional forecast band appended after "now".
+// Threshold band drawn on the plot (Grafana "line+area" style, absolute
+// mode). Grounded on the Grafana panel schema: Threshold{value,color,state},
+// ThresholdsConfig{steps sorted by value}, GraphThresholdsStyleMode.
+struct ChartBand {
+    double value = 0.0;
+    QColor color;
+    QString label;
+    bool above = true; // shade the breaching side: above the line, or below
+};
+
+enum class ChartBandStyle { Off, Line, LineAndArea };
+
 class TimeseriesChart : public QWidget {
     Q_OBJECT
 
@@ -29,6 +41,18 @@ public:
 
     void push(double value);
     void pushB(double value);
+    // Replaces the whole series in one shot (history rewind: the stored
+    // window is rendered as-is instead of being appended tick by tick).
+    void setValues(const QList<double> &valuesA,
+                   const QList<double> &valuesB = QList<double>());
+    // Number of plotted samples (tests + legend honesty checks).
+    int sampleCount() const { return int(m_valuesA.size()); }
+
+    // Monitor bands: the axis grows to include them so a threshold above the
+    // observed data still renders instead of silently falling off the plot.
+    void setBands(const QList<ChartBand> &bands,
+                  ChartBandStyle style = ChartBandStyle::LineAndArea);
+    QList<ChartBand> bands() const { return m_bands; }
 
     // Center big-number overlay (Grafana style, img2 "Containers Running").
     void setOverlayOn(bool on);
@@ -54,6 +78,8 @@ private:
     QColor m_colorA{127, 92, 255};
     QColor m_colorB{60, 202, 170};
     QDateTime m_lastPush;
+    QList<ChartBand> m_bands;
+    ChartBandStyle m_bandStyle = ChartBandStyle::LineAndArea;
     double m_lastPushedA = 0.0;
     double m_lastPushedB = 0.0;
     bool m_paused = false;

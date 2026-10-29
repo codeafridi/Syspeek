@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CloudProbe.h"
+#include "CloudStatus.h"
 #include "CpuSampler.h"
 #include "Config.h"
 #include "DiskSampler.h"
@@ -12,9 +14,11 @@
 #include "LinuxProcess.h"
 #include "NetRateTracker.h"
 #include "ProcessIdentity.h"
+#include "ProcessDiskStatus.h"
 #include "ProcessNetStatus.h"
 #include "SbomSource.h"
 #include "TcpSampler.h"
+#include "TickBudget.h"
 #include "platform/PlatformFactory.h"
 
 #include <QObject>
@@ -23,6 +27,7 @@
 #include <memory>
 
 class FocusedWindowProvider;
+class CloudFleetRunner;
 class QTimer;
 
 class SamplerWorker : public QObject {
@@ -48,6 +53,10 @@ private:
                       const QList<linuxproc::SocketInfo> &sockets);
     void fillProcessNet(DisplaySnapshot &snapshot,
                         const QList<linuxproc::SocketInfo> &sockets);
+    void fillProcessDisk(DisplaySnapshot &snapshot);
+    void fillGpu(DisplaySnapshot &snapshot);
+    void fillSensors(DisplaySnapshot &snapshot);
+    void fillCloud(DisplaySnapshot &snapshot);
 
     FocusedWindowProvider *m_provider;
     std::unique_ptr<SystemBackend> m_backend;
@@ -77,6 +86,48 @@ private:
     QHash<unsigned long long, int> m_netInodePid;
     qint64 m_netMapStampMs = 0;
     qint64 m_netRateStampMs = 0;
+    QHash<int, ProcessDiskCounters> m_rowDiskCounters;
+    QHash<int, ProcessDiskCounters> m_rowDiskPrior;
+    qint64 m_rowDiskStampMs = 0;
+    QHash<int, ProcessDiskCounters> m_scanDiskPrior;
+    qint64 m_scanDiskStampMs = 0;
+    QList<ProcessDiskConsumer> m_scanDiskTop;
+    double m_scanDiskReadPerSec = -1.0;
+    double m_scanDiskWritePerSec = -1.0;
+    int m_scanDiskTracked = 0;
+    int m_scanDiskUnreadable = 0;
+    // GPU: one backend probe per 2 s window plus an incremental fdinfo
+    // client scan (known clients + a rotating pid slice, ~80 pids/tick)
+    // so the per-tick cost stays bounded on big machines.
+    GpuReading m_gpuReading;
+    QHash<quint64, GpuEngineSample> m_gpuClients;
+    QHash<quint64, GpuClientPrior> m_gpuPrior;
+    QList<GpuProcess> m_gpuProcesses;
+    qint64 m_gpuStampMs = 0;
+    qint64 m_gpuWindowMs = 0;
+    int m_gpuRotate = 0;
+    bool m_gpuWarming = true;
+    // Sensors: temperatures/fans/power and battery state change slowly, so
+    // one probe per 2-5 s window is plenty (Stats polls the battery at 5 s).
+    SensorsSnapshot m_sensors;
+    qint64 m_sensorsStampMs = 0;
+    // Cloud (M82): the IMDS probe is an outbound-interface read, so it runs on
+    // a 5 min cadence when an instance answered and 15 min when none does;
+    // costs are recomputed every tick from the cached identity + rate.
+    CloudConfig m_cloud;
+    CloudSnapshot m_cloudBase;
+    CloudRateTable m_cloudRates;
+    QString m_cloudRatesPath;
+    qint64 m_cloudProbeStampMs = 0;
+    qint64 m_cloudRatesStampMs = 0;
+    // M84: measured cost of the last IMDS sweep (ms) and how many requests it
+    // issued; both surface on the CLOUD FOOTPRINT card.
+    qint64 m_cloudSweepMs = -1;
+    int m_cloudSweepRequests = 0;
+    int m_cloudTicks = 0;
+    bool m_cloudProbed = false;
+    // M83: one polled CLI listing per 10 min; the sampler never waits on it.
+    CloudFleetRunner *m_cloudFleet = nullptr;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;
@@ -86,4 +137,13 @@ private:
     ProcessIdentity m_cpuIdentity;
     ProcessIdentity m_healthIdentity;
     HealthEvaluator m_health;
+    // M84: the HUD measures its own cost. `m_selfCpu` reuses the exact
+    // procCpu/totalCpu delta maths the focused app gets, so the number in
+    // Settings is the same arithmetic the top row shows.
+    CpuSampler m_selfCpu;
+    SelfCost m_selfCost;
+    TickCost m_tickCost;
+    QList<TickSection> m_tickSections;
+    QList<double> m_tickTotals;
+    void updateSelfCost();
 };

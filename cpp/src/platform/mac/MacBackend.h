@@ -18,6 +18,7 @@ public:
     QList<linuxproc::SocketInfo> readNetSockets() override;
     bool hostSecurityPosture(QList<SecurityFinding> &out) override;
     bool readTcpCounters(TcpCounters &out) override;
+    bool applyProcessAction(const ProcessAction &action, QString *error) override;
 
     bool exists(int pid) override;
     QString comm(int pid) override;
@@ -34,6 +35,10 @@ public:
     bool procMem(int pid, linuxproc::MemInfo &out) override;
     bool procSample(int pid, linuxproc::MemInfo &mem,
                     linuxproc::ProcDetail &detail) override;
+    bool processDiskCounters(int pid, long long &readBytes,
+                             long long &writeBytes) override;
+    GpuReading gpuInfo() override;
+    SensorsSnapshot sensors() override;
     int countFds(int pid) override;
     QList<QString> fdTargets(int pid) override;
     QByteArray processEnv(int pid) override;

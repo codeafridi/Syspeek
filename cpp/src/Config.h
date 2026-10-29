@@ -7,6 +7,7 @@
 #include <QtGlobal>
 
 #include "AlertEngine.h"
+#include "AlertSilence.h"
 
 struct HealthConfig {
     double cpuWarnPercent = 70.0;
@@ -67,9 +68,16 @@ struct StatsdConfig {
     int emitIntervalMs = 1000;
 };
 
+struct HistoryConfig {
+    bool enabled = true;
+    int samples = 3600;
+};
+
 struct MetricsConfig {
     bool enabled = true;
     int port = 9107;
+    QString bindAddress = QStringLiteral("127.0.0.1");
+    QString token;
 };
 
 struct WebhookConfig {
@@ -133,6 +141,59 @@ struct FimConfig {
     bool watch = true;
 };
 
+struct SilencesConfig {
+    // [silences]: <matcher>=<duration> for a rolling silence authored in the
+    // config, or <matcher>_until=<epoch ms> + <matcher>_comment=... for one
+    // the HUD authored (absolute bounds survive a restart).
+    QList<SilenceRule> rules;
+};
+
+struct ActionsConfig {
+    // [actions] enabled: the master switch for every M78 verb (process
+    // signals, renice/ionice/oom_score_adj, unit restart, container
+    // lifecycle). Off means the console reports the refusal, nothing runs.
+    bool enabled = true;
+};
+
+struct OverlayConfig {
+    // [overlay] click_through: the HUD passes every click to the window
+    // below and keeps only its CLICK control live, so the mode can be
+    // turned back off without a terminal.
+    bool clickThrough = false;
+    // [overlay] sticky: ask the X11 window manager to keep the HUD on every
+    // desktop, so switching workspaces never loses it.
+    bool sticky = true;
+    // [overlay] x/y/width/height: the last position and size the user gave
+    // the HUD, restored on the next launch when a screen still holds it.
+    int x = -1;
+    int y = -1;
+    int width = -1;
+    int height = -1;
+};
+
+struct CloudConfig {
+    // [cloud] enabled: the only network read Syspeek makes on its own is the
+    // link-local instance metadata service (169.254.169.254 / 169.254.0.23),
+    // which is never routed off the host. Turn it off on a box where even that
+    // is unwanted.
+    bool enabled = true;
+    // [cloud] rates: the price table to read. Empty means
+    // defaultCloudRatePath().
+    QString ratesPath;
+    // [cloud] timeout_ms: the budget for the whole metadata sweep (GCP, OCI,
+    // Azure, AWS together). A host with no IMDS blackholes the link-local
+    // address instead of refusing it, so one budget per request would stall a
+    // sampler tick for seconds; IMDS answers in single digits of milliseconds.
+    int timeoutMs = 450;
+    // [cloud] inventory: list the account through the provider's CLI so the
+    // page can show the instance age and the fleet. Off means no CLI is ever
+    // spawned (the metadata read still works).
+    bool inventory = true;
+    // [cloud] inventory_timeout_ms: one listing budget. The CLI call is a
+    // network round trip to the provider API, not link-local.
+    int inventoryTimeoutMs = 25000;
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
@@ -144,6 +205,11 @@ struct Config {
     PathConfig path;
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
+    HistoryConfig history;
+    SilencesConfig silences;
+    ActionsConfig actions;
+    OverlayConfig overlay;
+    CloudConfig cloud;
     WebhookConfig webhook;
     SloConfig slo;
     DbmConfig database;
@@ -160,4 +226,10 @@ Config loadConfig(const QString &path, QString *errorMessage);
 void saveAlertOverrides(const QString &path,
                         const QList<AlertRule> &rules);
 
+void saveSilences(const QString &path, const QList<SilenceRule> &rules);
+
+void saveOverlayConfig(const QString &path, const OverlayConfig &overlay);
+
 QString defaultConfigPath();
+
+QString defaultCloudRatePath();

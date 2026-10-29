@@ -8,6 +8,12 @@
 
 namespace {
 
+// Reporting only: legacy protocols stay mapped so a server that actually
+// negotiates TLS 1.0/1.1 is named instead of being filed under "TLS". Qt
+// deprecates the enum constants, not the ability to read them.
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_DEPRECATED
+
 QString protocolName(QSsl::SslProtocol protocol) {
     switch (protocol) {
     case QSsl::TlsV1_3:
@@ -22,6 +28,8 @@ QString protocolName(QSsl::SslProtocol protocol) {
         return QStringLiteral("TLS");
     }
 }
+
+QT_WARNING_POP
 
 } // namespace
 

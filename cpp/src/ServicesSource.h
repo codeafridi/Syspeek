@@ -16,9 +16,15 @@ public:
 public slots:
     void start();
     void stop();
+    // M78: restart one unit through the platform's own supervisor
+    // (systemctl restart / launchctl kickstart -k). The next poll picks up
+    // the new state; the answer is reported verbatim.
+    void restartUnit(const QString &unit);
 
 signals:
     void servicesReady(const ServicesSnapshot &snapshot);
+    void unitActionFinished(const QString &verb, const QString &unit, bool ok,
+                            const QString &error);
 
 private slots:
     void onTimeout();

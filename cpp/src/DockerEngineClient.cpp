@@ -6,15 +6,15 @@
 
 namespace {
 
-QByteArray requestBytes(const QString &path) {
+QByteArray requestBytes(const QByteArray &method, const QString &path) {
     return QStringLiteral(
-               "GET %1 HTTP/1.1\r\n"
+               "%1 %2 HTTP/1.1\r\n"
                "Host: docker\r\n"
                "User-Agent: syspeek/0.8\r\n"
                "Accept: application/json\r\n"
                "Connection: close\r\n"
                "\r\n")
-        .arg(path)
+        .arg(QString::fromLatin1(method), path)
         .toUtf8();
 }
 
@@ -104,7 +104,21 @@ DockerEngineClient::DockerEngineClient(const QString &socketPath, int timeoutMs)
     : m_socketPath(socketPath), m_timeoutMs(timeoutMs) {}
 
 bool DockerEngineClient::get(const QString &path, QByteArray *body,
-                             QString *error) {
+                             QString *error, int timeoutMs) {
+    return perform("GET", path, body, error, timeoutMs);
+}
+
+bool DockerEngineClient::post(const QString &path, QByteArray *body,
+                              QString *error, int timeoutMs) {
+    return perform("POST", path, body, error, timeoutMs);
+}
+
+bool DockerEngineClient::perform(const QByteArray &method, const QString &path,
+                                 QByteArray *body, QString *error,
+                                 int timeoutMs) {
+    if (timeoutMs <= 0) {
+        timeoutMs = m_timeoutMs;
+    }
     m_lastError.clear();
     if (body != nullptr) {
         body->clear();
@@ -115,7 +129,7 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
 
     QLocalSocket socket;
     socket.connectToServer(m_socketPath);
-    if (!socket.waitForConnected(m_timeoutMs)) {
+    if (!socket.waitForConnected(timeoutMs)) {
         m_lastError = socket.errorString();
         if (error != nullptr) {
             *error = m_lastError;
@@ -123,8 +137,8 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
         return false;
     }
 
-    socket.write(requestBytes(path));
-    if (!socket.waitForBytesWritten(m_timeoutMs)) {
+    socket.write(requestBytes(method, path));
+    if (!socket.waitForBytesWritten(timeoutMs)) {
         m_lastError = QStringLiteral("write to engine did not drain");
         if (error != nullptr) {
             *error = m_lastError;
@@ -134,7 +148,7 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
 
     QByteArray frame;
     while (frame.indexOf("\r\n\r\n") < 0) {
-        if (!socket.waitForReadyRead(m_timeoutMs)) {
+        if (!socket.waitForReadyRead(timeoutMs)) {
             m_lastError = QStringLiteral("engine header never completed: %1")
                               .arg(socket.errorString());
             if (error != nullptr) {
@@ -148,9 +162,13 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
     QByteArray header;
     const int bodyStart = headerKick(frame, &header);
     const int status = statusFromHeader(header);
-    if (status != 200) {
-        m_lastError = QStringLiteral("engine status %1 for %2").arg(status).arg(
-            path);
+    const bool ok = (method == "GET") ? status == 200
+                                      : ((status >= 200 && status < 300)
+                                         || status == 304);
+    if (!ok) {
+        m_lastError = QStringLiteral("engine status %1 for %2 %3")
+                          .arg(status)
+                          .arg(QString::fromLatin1(method), path);
         if (error != nullptr) {
             *error = m_lastError;
         }
@@ -169,7 +187,7 @@ bool DockerEngineClient::get(const QString &path, QByteArray *body,
         } else if (!hasLength || payload.size() >= contentLength) {
             break;
         }
-        if (!socket.waitForReadyRead(m_timeoutMs)) {
+        if (!socket.waitForReadyRead(timeoutMs)) {
             break;
         }
         payload += socket.readAll();
@@ -218,6 +236,7 @@ DockerEngineClient::statsMulti(const QStringList &ids, qint64 budgetMs,
         s->socket.connectToServer(m_socketPath);
         if (s->socket.waitForConnected(m_timeoutMs)) {
             s->socket.write(requestBytes(
+                "GET",
                 QStringLiteral("/containers/%1/stats?stream=false").arg(id)));
             s->socket.waitForBytesWritten(m_timeoutMs);
         } else {

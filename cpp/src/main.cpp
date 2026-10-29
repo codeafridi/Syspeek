@@ -15,10 +15,13 @@
 #include "StatsdSource.h"
 #include "DbmSource.h"
 #include "MetricsServer.h"
+#include "MetricsEndpoint.h"
 #include "DumpReport.h"
+#include "HistoryLog.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
 #include "ExportRun.h"
+#include "CloudPricing.h"
 #include "DashboardPanel.h"
 #include "TlsSource.h"
 #include "FimSource.h"
@@ -242,6 +245,21 @@ void autostartCommand(const QString &mode) {
 // OpenProcess/TerminateProcess, GetCurrentProcessId) and the shipped
 // taskkill self-avoidance precedent (Wine taskkill.c skips
 // pid == self_pid) - we never kill our own PID.
+// A terminated process object is signaled the moment the kernel retires it, so
+// a zero-timeout wait is the cheapest "is this really still running" test.
+// Windows verb grounding: everything.exe 1.4.1.1032 x64 import table
+// (KERNEL32) carries `OpenProcess`, `TerminateProcess` and
+// `WaitForSingleObject` side by side - the same triple this verb uses.
+bool processAlreadyExited(DWORD pid) {
+    HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (process == nullptr) {
+        return false;
+    }
+    const bool exited = ::WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    ::CloseHandle(process);
+    return exited;
+}
+
 QList<DWORD> syspeekPidsExcludingSelf() {
     QList<DWORD> out;
     HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -254,7 +272,8 @@ QList<DWORD> syspeekPidsExcludingSelf() {
     if (Process32FirstW(snapshot, &entry)) {
         do {
             if (_wcsicmp(entry.szExeFile, L"syspeek.exe") == 0
-                    && entry.th32ProcessID != selfId) {
+                    && entry.th32ProcessID != selfId
+                    && !processAlreadyExited(entry.th32ProcessID)) {
                 out.append(entry.th32ProcessID);
             }
         } while (Process32NextW(snapshot, &entry));
@@ -266,12 +285,22 @@ QList<DWORD> syspeekPidsExcludingSelf() {
 int windowsStopOthers() {
     int stopped = 0;
     for (DWORD pid : syspeekPidsExcludingSelf()) {
-        HANDLE process = ::OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+        HANDLE process = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
+                                       pid);
         if (process == nullptr) {
+            // An instance that exited between the snapshot and this call is
+            // already stopped; anything else (another user's instance) stays.
+            if (processAlreadyExited(pid)) {
+                ++stopped;
+            }
             continue;
         }
         if (::TerminateProcess(process, 0)) {
             ++stopped;
+            // "stop" has to mean stopped: Toolhelp still lists a process until
+            // the kernel retires it, so an immediate `start` used to answer
+            // "already running" for an instance that was already dead.
+            ::WaitForSingleObject(process, 2000);
         }
         ::CloseHandle(process);
     }
@@ -370,6 +399,10 @@ int main(int argc, char *argv[]) {
         if (arg == QByteArrayLiteral("--record")
             || arg.startsWith(QByteArrayLiteral("--record="))) {
             return exportRun(argc, argv);
+        }
+        if (arg == QByteArrayLiteral("--cloud-prices")
+            || arg.startsWith(QByteArrayLiteral("--cloud-prices="))) {
+            return cloudPriceRun(argc, argv);
         }
         if (arg == QByteArrayLiteral("logs")) {
             const int status = printAppLogTail(40) ? 0 : 2;
@@ -512,10 +545,30 @@ int main(int argc, char *argv[]) {
         settingsInfo.verbsLine = settingsVerbsLine();
         settingsInfo.metricsLine =
             config.metrics.enabled
-                ? QStringLiteral("http://127.0.0.1:%1/metrics")
-                      .arg(config.metrics.port)
+                ? metricsEndpointText(resolveMetricsEndpoint(config.metrics))
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
+        settingsInfo.historyLine =
+            config.history.enabled
+                ? QStringLiteral("%1 samples max - %2")
+                      .arg(config.history.samples)
+                      .arg(historyDefaultPath())
+                : QStringLiteral("disabled ([history] enabled=false)");
+        {
+            const QString ratesPath = config.cloud.ratesPath.isEmpty()
+                ? defaultCloudRatePath()
+                : config.cloud.ratesPath;
+            CloudRateTable rates;
+            QFile ratesFile(ratesPath);
+            if (ratesFile.open(QIODevice::ReadOnly)) {
+                rates = parseCloudRateFile(
+                    QString::fromUtf8(ratesFile.readAll()), ratesPath);
+                ratesFile.close();
+            }
+            settingsInfo.cloudLine = cloudSettingsLine(
+                config.cloud.enabled, ratesPath, rates,
+                QDateTime::currentMSecsSinceEpoch());
+        }
         settingsInfo.sampleIntervalMs = config.sampleIntervalMs;
         settingsInfo.cpuWarnPercent = config.health.cpuWarnPercent;
         settingsInfo.cpuHighPercent = config.health.cpuHighPercent;
@@ -525,8 +578,13 @@ int main(int argc, char *argv[]) {
         hud.setMonitors(config.alertRules.isEmpty()
                             ? defaultAlertRules()
                             : config.alertRules);
+        hud.setSilences(config.silences.rules);
         hud.setWebhookConfig(config.webhook);
+        hud.setActionsEnabled(config.actions.enabled);
         hud.setExportIntervalMs(config.sampleIntervalMs);
+        hud.setHistoryStore(historyDefaultPath(),
+                            config.history.enabled ? config.history.samples : 0);
+        hud.setOverlayConfig(config.overlay, defaultConfigPath());
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);
@@ -602,6 +660,18 @@ int main(int argc, char *argv[]) {
                          logLine(dockerSummaryText(snapshot));
                          hud.setDockerSnapshot(snapshot);
                      });
+    QObject::connect(&hud, &HudWindow::containerActionRequested, docker,
+                     &DockerSource::containerAction);
+    QObject::connect(docker, &DockerSource::containerActionFinished, &hud,
+                     [&hud](const QString &verb, const QString &id, bool ok,
+                            const QString &error) {
+                         const QString text =
+                             ok ? QStringLiteral("docker %1 %2 ok")
+                                      .arg(verb, id.left(12))
+                                : QStringLiteral("docker %1 %2 failed: %3")
+                                      .arg(verb, id.left(12), error);
+                         hud.setContainerActionStatus(text, ok);
+                     });
     dockerThread->start();
 
     auto *kubeThread = new QThread;
@@ -628,6 +698,17 @@ int main(int argc, char *argv[]) {
                      [&hud](const ServicesSnapshot &snapshot) {
                          logLine(servicesSummaryText(snapshot));
                          hud.setServicesSnapshot(snapshot);
+                     });
+    QObject::connect(&hud, &HudWindow::serviceRestartRequested, services,
+                     &ServicesSource::restartUnit);
+    QObject::connect(services, &ServicesSource::unitActionFinished, &hud,
+                     [&hud](const QString &verb, const QString &unit, bool ok,
+                            const QString &error) {
+                         const QString text =
+                             ok ? QStringLiteral("%1 %2 ok").arg(verb, unit)
+                                : QStringLiteral("%1 %2 failed: %3")
+                                      .arg(verb, unit, error);
+                         hud.setServiceActionStatus(text, ok);
                      });
     servicesThread->start();
 

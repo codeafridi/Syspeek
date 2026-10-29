@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A local-first HUD that follows the app you're focused on — and a 27-view Datadog-style console for everything your kernel, containers and apps are doing.
+### A local-first HUD that follows the app you're focused on — and a 31-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -42,8 +42,10 @@ telemetry** — nothing leaves your machine unless you point a scraper at it.
   Traces (OTLP), Profiles, Databases (PostgreSQL), Security, Settings, Cost,
   Incidents, SLO, Alerts.
 - **Alerts & incidents** — local thresholds (CPU, memory, FD-table, steal,
-  failed services, journal errors) with desktop notifications and an incident
-  timeline.
+  failed services, journal errors) shown on the Alerts page with an incident
+  timeline. No desktop popups, by design — a HUD that steals focus is worse
+  than no HUD; point `[webhook]` at your own receiver if you want to be
+  paged.
 - **Docker & Kubernetes** — containers, problem pods, node capacity, cost
   model, deprecated-API detection.
 
@@ -120,6 +122,23 @@ cmake -S cpp -B cpp/build
 cmake --build cpp/build -j"$(nproc)"
 bash cpp/install.sh              # add --no-systemd, or --uninstall to remove
 ```
+
+The tree compiles on the oldest Qt 6 the distro channel ships (6.2 on Ubuntu
+22.04, 6.4 on 24.04), not just on the newest. That floor is enforced, because
+the `.deb` links the *distribution's* Qt rather than a bundled copy:
+
+```bash
+bash cpp/packaging/build_deb.sh   # writes build/packaging/syspeek_<ver>_amd64.deb
+# or prove it end to end, in a clean container of the target release:
+docker run --rm -v "$PWD":/src:ro -v /tmp/deb:/out ubuntu:24.04 \
+  bash /src/cpp/packaging/ci/deb_container_build.sh
+docker run --rm -v /tmp/deb:/pkg:ro -v "$PWD/cpp/packaging/ci":/ci:ro \
+  ubuntu:24.04 bash /ci/deb_container_verify.sh
+```
+
+The verify script installs the package in a bare container, checks that every
+shared object resolves, and runs `--dump` and `--probe` — the gate for both a
+Qt API newer than the floor and an under-declared `Depends:` line.
 
 </details>
 
@@ -280,16 +299,195 @@ status instead of failing.
   `OOMKilled`) and deployments with too few ready replicas, using your current
   `kubectl` context.
 
+## Sensors & battery
+
+The **Sensors** page reads the hardware counters the kernel already exposes, so
+you can see the thing that is actually hot before it throttles:
+
+- **hwmon** (`/sys/class/hwmon` on Linux) — CPU package and per-core
+  temperatures, NVMe/board/chipset sensors, fan speeds, power and current
+  rails, each with its kernel `crit`/`high` limit. Readings at or past a limit
+  are tinted amber/red, the busiest chip is sorted first, and the page charts
+  the hottest sensor plus total sensor power.
+- **Battery and AC** — charge, state (`charging`/`discharging`/`full`), energy
+  now vs full vs design capacity (so health is the ratio), power draw, voltage,
+  cycle count, temperature and the kernel's time-to-empty. On macOS the same
+  numbers come from `IOPSGetPowerSourceDescription` and the `AppleSmartBattery`
+  registry node; on Windows from the battery device class
+  (`IOCTL_BATTERY_QUERY_INFORMATION`/`_STATUS`), where the reported temperature
+  is converted from tenths of a kelvin.
+
+Two monitors are wired to it: **host temperature** (warning, 85 °C by default)
+and **battery low** (warning, below 20 %). Both are editable in
+Settings → MONITORS like every other rule, and both clear themselves the
+moment the reading goes back to normal.
+
+Deliberately honest on the platforms that gate it: per-sensor temperatures on
+macOS need the privileged SMC helper and on Windows a kernel driver, so those
+two report the battery (which is a normal, permission-free API) and print the
+reason on the thermal side instead of showing an empty card. Battery charge,
+energy and AC state never need root anywhere.
+
+Prometheus exports the same numbers as `syspeek_sensor_celsius{chip,sensor,kind}`,
+`syspeek_sensor_limit_celsius`, `syspeek_sensor_fan_rpm`,
+`syspeek_sensor_power_watts`, `syspeek_battery_charge_percent{battery}`,
+`syspeek_battery_energy_watt_hours{battery,state="now|full"}`,
+`syspeek_battery_power_watts` and `syspeek_ac_online{adapter,online}`.
+
+## Cloud instance & cost
+
+The **Cloud** page answers "which instance am I on, and what is this app costing
+me?" without touching a control plane:
+
+- **Identity** comes from the link-local instance metadata service, the same
+  document the Datadog agent's cloud-provider client reads. AWS (IMDSv2 token
+  then `/latest/dynamic/instance-identity/document`), Azure
+  (`/metadata/instance/compute?api-version=2021-12-13`), GCP
+  (`/computeMetadata/v1/instance/{id,name,machine-type,zone}`) and OCI
+  (`opc/v2/instance/...` behind `Bearer Oracle` at `169.254.0.23`) are probed
+  in that order — each answers only to its own header, so there are no false
+  positives. Instance id, type, region/zone, account/project, private IP, image
+  and architecture are shown as reported.
+- **Accrued cost** is the hourly rate times uptime **since this boot** — the
+  page says "this boot", never "instance age", because a reboot resets host
+  uptime. The monthly projection is the standard 730-hour month.
+- **App share** splits the instance rate by the CPU the focused app actually
+  used: `rate × cpu% / vCPU`. A per-core number is intentional (a fully busy
+  8 vCPU box spends the whole rate), and the page states the formula.
+  `TOP PROCESSES IN THE FOCUSED APP` ranks the focused app's own process tree,
+  not the whole machine.
+- **Prices are never invented or bundled.** Syspeek reads a rate file
+  (`~/.config/syspeek/cloud-rates.txt`, override with `[cloud] rates=`):
+
+  ```ini
+  # imported 2026-10-28
+  aws/c7g.2xlarge       = 0.2920
+  azure/Standard_D2s_v3 = 0.0960
+  ```
+
+  A bare `c7g.2xlarge` works when only one provider lists it. The `# imported`
+  stamp is not decoration: past 30 days the page and the Settings row say
+  `(56 days old)`, so a stale number is never silently presented as current.
+  Import the current on-demand list price for the instance you are on with:
+
+  ```sh
+  syspeek --cloud-prices                    # reads the instance type from IMDS
+  syspeek --cloud-prices=c7g.2xlarge --region=eu-west-1
+  ```
+
+  That shells out to the `aws` CLI you already use
+  (`aws pricing get-products --service-code AmazonEC2`, filtered to the shared /
+  used-capacity / Linux / no-software SKU) and writes the rate file with a fresh
+  import stamp. It is opt-in, never runs on a tick, and Syspeek never reads or
+  stores credentials — the CLI uses whatever profile you already configured.
+- **Instance age and the account inventory** come from the provider's own CLI,
+  because only the account knows when this instance launched. The IMDS
+  document names the provider, then Syspeek asks that provider's CLI, reusing
+  your existing login:
+
+  ```sh
+  aws   ec2 describe-instances --region <imds region> --output json \
+        --query "Reservations[].Instances[]"
+  az    vm list -d --subscription <imds account>
+  gcloud compute instances list --project <imds project> --format=json
+  oci   compute instance list --compartment-id <imds compartment> \
+        --region <imds region> --all --output json
+  ```
+
+  The result is the **FLEET INVENTORY** card: this instance first (`*`), then
+  the rest of the account with type, state, age and `$/MO`. `AGE` on the tile
+  row is the launch time's age; `COST` shows accrual **since launch (upper
+  bound)** above **this boot**. `$/MO` sums running rows only — a stopped (or
+  deallocated) VM never claims a monthly bill — and rows the rate file cannot
+  price are counted as `unpriced` instead of reading `$0`. Long accounts are
+  capped at 200 rows with `showing first N of M` in the summary. Azure's
+  listing carries no creation time, so its rows honestly show `--` age.
+
+  The listing is polled every 10 minutes in the background (a CLI that hangs is
+  killed at the budget), so no tick ever waits on it. It is a real API call, so
+  it is separately switchable from the link-local read:
+
+  ```ini
+  [cloud]
+  enabled              = true   ; the link-local IMDS read
+  inventory            = true   ; the account listing through the provider CLI
+  inventory_timeout_ms = 25000  ; per listing; clamped 2000..120000
+  rates                =        ; empty = ~/.config/syspeek/cloud-rates.txt
+  timeout_ms           = 450    ; the whole four-provider sweep; IMDS answers in ms
+  ```
+
+  No CLI on `PATH`, no login, or an expired session prints the exact refusal
+  and the fix (`aws configure`, `az login`, `gcloud auth login`,
+  `oci setup config`) — Syspeek never reads, caches or stores credentials
+  itself.
+
+The metadata request goes to a link-local address (`169.254.169.254` /
+`169.254.0.23`), which is never routed off the host, and is the single network
+read Syspeek performs without you asking. `enabled = false` turns even that off
+and the page says so instead of showing empty cards. Off a cloud instance —
+or on a host where IMDS is firewalled or IMDSv2 tokens are refused — every card
+prints the gate text rather than a blank.
+
+Read-only in the cloud by design: Syspeek identifies the instance, prices it and
+lists the account, it never starts, stops or terminates anything.
+
+The Cloud page states its own footprint in a **CLOUD FOOTPRINT** card — every
+outbound action, its cadence, the measured cost of the last metadata sweep, and
+the guarantee that no credential is read and nothing is changed. The full
+breakdown (endpoints, headers, budgets, switches, rate-file format) is in
+[docs/cloud.md](docs/cloud.md).
+
 ## Advanced (optional)
 
 Thresholds and polling intervals are configurable in
 `~/.config/syspeek/config.ini`; sensible defaults are used if it's absent.
 
+**What Syspeek costs** — a HUD that watches a machine should be able to say
+what it costs that machine. Settings → GENERAL carries three live rows:
+
+```
+self cost   cpu 6.04%  rss 36.0 MB
+tick        62 ms last  avg 54 ms  worst 84 ms  over 120 ticks
+sections    processes 41 ms  host 12 ms  sockets 4.1 ms
+```
+
+`tick` is the time the sampler spends producing one snapshot; `sections` names
+the slowest collectors in that tick. It is also a regression gate rather than
+decoration: `syspeek --probe` prints `tickMs=` and `selfCpu=`/`selfRssKb=` per
+tick plus a `probe cost` summary, and CI fails a probe whose worst tick exceeds
+1.5 s — which is how a blocking call on a sampler tick would be caught.
+
 **Prometheus endpoint** — Syspeek exposes its live snapshot at
 `http://127.0.0.1:9107/metrics` (localhost only, on by default) in the
 Prometheus text exposition format — point your scraper or Grafana agent config
 at it (nothing leaves your machine unless you do). Disable with
-`[metrics] enabled=false` or move it with `port=`.
+`[metrics] enabled=false`, move it with `port=`, or bind it to an interface
+with `bind=`:
+
+```ini
+[metrics]
+enabled = true
+port    = 9107
+bind    = 127.0.0.1
+token   =
+```
+
+A non-loopback `bind` (e.g. `0.0.0.0` or a LAN address) is **refused unless
+`token` is set** — the server falls back to `127.0.0.1` and the HUD log says
+why, so a scrape endpoint never lands on the network unauthenticated by
+accident. With a token, scrapes must send `Authorization: Bearer <token>`;
+anything else gets `401` + `WWW-Authenticate: Bearer` and no samples. The
+comparison is constant-time, and the Settings page states the live endpoint
+and whether auth is on. Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: syspeek
+    authorization:
+      credentials: <token>
+    static_configs:
+      - targets: ["127.0.0.1:9107"]
+```
 
 **Alert webhooks** — off by default. Point `[webhook]` at your own endpoint to
 POST fired/resolved alert events out of the HUD (nothing is sent until you set
@@ -311,6 +509,54 @@ incoming-webhook message (`text` + `attachments[]` with `color`, `title`,
 `fields`, `mrkdwn_in`). One POST per tick per group (firing batch, resolved
 batch); alerts that clear between ticks produce a `resolved` event. The Settings
 view shows the configured target and the last delivery result.
+
+**Process / unit / container actions** — on by default, and refused loudly
+rather than silently when a permission or an OS does not allow a verb. Every
+verb is available from the page that shows the target: the **Processes** page
+sends signals (TERM/KILL/HUP, pause/resume), changes the nice value
+(`NICE ±5`, relative like `htop`'s priority editor), sets the block-I/O
+priority (`IONICE` class/level) and moves `oom_score_adj`; the **Services**
+page restarts the selected unit through the supervisor (`systemctl restart`,
+`launchctl kickstart -k`, SCM); the **Containers** page starts/stops/restarts
+through the local Docker Engine API. TERM and KILL require a second press on
+the same row — no modal dialog, and the status line names the target. Kill the
+whole feature off with:
+
+```ini
+[actions]
+enabled = false
+```
+
+Actions never run as root and never elevate: a verb your user cannot perform
+comes back with the OS reason (`Operation not permitted`, `systemctl` stderr)
+on the page. Nothing is sent anywhere — the verbs act on this machine only.
+
+**Overlay behaviour** — the HUD remembers where you put it and can get out of
+your way without getting lost:
+
+```ini
+[overlay]
+click_through = false   ; every click but the CLICK button goes to the window below
+sticky        = true    ; follow you across X11 desktops
+x = 200                 ; last position (restored on launch when a screen still holds it)
+y = 120
+width = 820             ; last expanded size
+height = 560
+```
+
+The footer **CLICK** button toggles click-through on X11 (X Shape `ShapeInput`),
+and keeps its own rectangle live inside the input region — so the mode is never
+a one-way trip: press it again to make the whole HUD clickable. While the mode
+is on, the HUD cannot be dragged (clicks pass through); drag it with
+click-through off, or edit `x`/`y` in the ini. A saved rectangle that lands on a
+monitor that no longer exists, or is dragged past the last screen edge, is
+pulled back onto the screen it overlaps most; that rescue runs on a 1 s watch,
+so a hot-unplugged display can never leave an unreachable HUD. `sticky` asks
+the window manager to keep the HUD on every desktop (`_NET_WM_STATE_STICKY`
+plus the `_NET_WM_DESKTOP` all-desktops request) and the Settings page states
+what the wm actually did. Wayland, macOS and Windows state their gate instead
+of pretending: the compositor owns input routing, so click-through is X11-only
+in this build and the Settings row says so.
 
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:

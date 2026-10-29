@@ -359,6 +359,20 @@ void KubeSource::emitSnapshot(KubeState state, const QString &message,
         snapshot.costMissingRequests = cost.missingRequestContainers;
         snapshot.costPods = cost.podsPriced;
         snapshot.costByNamespace = cost.byNamespace;
+        snapshot.costCpuPerCoreHour = m_costConfig.cpuPerCoreHour;
+        snapshot.costMemPerGbHour = m_costConfig.memPerGbHour;
+        const CostSplit split = computeCostSplit(
+            resources.pods, m_costConfig.cpuPerCoreHour,
+            m_costConfig.memPerGbHour);
+        snapshot.costCpuMonthly = split.cpuMonthly;
+        snapshot.costMemMonthly = split.memMonthly;
+        const CostEfficiency efficiency = computeCostEfficiency(
+            resources.pods, m_costConfig.cpuPerCoreHour,
+            m_costConfig.memPerGbHour);
+        snapshot.costCpuEfficiency = costCpuEfficiency(efficiency);
+        snapshot.costMemEfficiency = costMemEfficiency(efficiency);
+        snapshot.costWastedMonthly = efficiency.wastedMonthly;
+        snapshot.costEfficiencyPods = efficiency.podsMeasured;
         snapshot.costTopWorkloads.clear();
         for (const WorkloadCost &workload : cost.topWorkloads) {
             snapshot.costTopWorkloads.append(qMakePair(

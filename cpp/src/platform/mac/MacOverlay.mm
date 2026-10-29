@@ -6,8 +6,18 @@
 
 #import <Foundation/Foundation.h>
 
+#include <QGuiApplication>
+#include <QString>
+
 bool applyMacOverlay(QWidget *widget) {
     if (widget == nullptr || !widget->testAttribute(Qt::WA_WState_ExplicitShowHide)) {
+        return false;
+    }
+    // winId() is an NSView pointer only under the cocoa platform plugin. The
+    // offscreen/minimal plugins hand back a synthetic id, and sending that
+    // address an Objective-C message segfaults (hit by the headless test
+    // suite the first time it showed a window on the mac runner).
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa")) {
         return false;
     }
     NSView *view = reinterpret_cast<NSView *>(widget->winId());
