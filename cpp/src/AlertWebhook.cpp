@@ -1,3 +1,4 @@
+#include "QtCompat.h"
 #include "AlertWebhook.h"
 
 #include <QDateTime>
@@ -20,8 +21,7 @@ QString isoTime(qint64 ms) {
     if (ms <= 0) {
         return QStringLiteral("0001-01-01T00:00:00Z");
     }
-    return QDateTime::fromMSecsSinceEpoch(ms, QTimeZone::UTC)
-        .toString(Qt::ISODate);
+    return qtcompat::fromMSecsSinceEpochUtc(ms).toString(Qt::ISODate);
 }
 
 QString slackColor(const WebhookEvent &event) {

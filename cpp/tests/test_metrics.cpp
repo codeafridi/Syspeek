@@ -43,6 +43,8 @@
 #include "CloudStatus.h"
 #include "CloudPricing.h"
 #include "CloudFleetSource.h"
+#include "TickBudget.h"
+#include "QtCompat.h"
 #include "ServicesSource.h"
 #include "platform/mac/MacFimStream.h"
 #include <QDate>
@@ -4698,6 +4700,149 @@ int main(int argc, char *argv[]) {
                   && fleetCredentialsText(CloudProvider::Aws)
                          .contains(QStringLiteral("never reads or stores")),
               "fleet: the credential refusal names the fix and the promise");
+    }
+
+
+    {
+        // M84: the sampler's own cost. Sections sort slowest-first, the avg
+        // and worst cover the bounded window, and the text helpers never
+        // claim a number they do not have.
+        QList<TickSection> sections;
+        sections.append(TickSection{QStringLiteral("focus"), 3.5});
+        sections.append(TickSection{QStringLiteral("processes"), 41.2});
+        sections.append(TickSection{QStringLiteral("gpu"), 0.01});
+        const TickCost cost = tickbudget::summarize(
+            sections, 62.0, QList<double>{40.0, 62.0, 84.0});
+        check(cost.available && cost.sections.size() == 3
+                  && cost.sections.first().name == QStringLiteral("processes"),
+              "tickbudget: sections are sorted slowest first");
+        check(cost.ticks == 3 && std::abs(cost.avgMs - 62.0) < 0.001
+                  && std::abs(cost.worstMs - 84.0) < 0.001
+                  && std::abs(cost.lastMs - 62.0) < 0.001,
+              "tickbudget: avg/worst come from the window, last from the tick");
+        check(tickbudget::tickCostText(cost).contains(QStringLiteral("62 ms"))
+                  && tickbudget::tickCostText(cost).contains(
+                      QStringLiteral("worst 84 ms"))
+                  && tickbudget::tickCostText(cost).contains(
+                      QStringLiteral("over 3 ticks")),
+              "tickbudget: tick text states last, avg, worst and the window");
+        check(tickbudget::tickSectionText(cost)
+                      .startsWith(QStringLiteral("processes"))
+                  && !tickbudget::tickSectionText(cost).contains(
+                      QStringLiteral("gpu")),
+              "tickbudget: section text leads with the slowest and elides "
+              "sub-0.05 ms work");
+        const TickCost empty = tickbudget::summarize({}, -1.0, {});
+        check(!empty.available
+                  && tickbudget::tickCostText(empty) == QStringLiteral("measuring")
+                  && tickbudget::tickSectionText(empty)
+                         == QStringLiteral("no section timings yet"),
+              "tickbudget: an unmeasured tick says so instead of showing 0 ms");
+
+        SelfCost self;
+        check(!self.available
+                  && tickbudget::selfCostText(self)
+                         == QStringLiteral("not measurable on this platform"),
+              "tickbudget: a missing self sample is stated, not faked");
+        self.available = true;
+        self.warming = true;
+        check(tickbudget::selfCostText(self)
+                  == QStringLiteral("cpu warming"),
+              "tickbudget: a warming self sample omits the cpu number");
+        self.warming = false;
+        self.cpuPercent = 6.04;
+        self.rssKb = 36864.0;
+        check(tickbudget::selfCostText(self)
+                  == QStringLiteral("cpu 6.04%  rss 36.0 MB"),
+              "tickbudget: self cost renders percent and resident size");
+        self.rssKb = -1.0;
+        check(tickbudget::selfCostText(self)
+                  == QStringLiteral("cpu 6.04%"),
+              "tickbudget: an unreadable rss is omitted, not zeroed");
+        check(tickbudget::tickBudgetLine(self, cost)
+                  .contains(QStringLiteral("cpu 6.04%"))
+                  && tickbudget::tickBudgetLine(self, cost)
+                         .contains(QStringLiteral("tick 62 ms")),
+              "tickbudget: the one-line form joins footprint and tick cost");
+
+        // The scope timer appends exactly once, even when end() is explicit.
+        QList<TickSection> scoped;
+        {
+            tickbudget::Section section(&scoped, "cloud");
+            section.end();
+        }
+        check(scoped.size() == 1
+                  && scoped.first().name == QStringLiteral("cloud")
+                  && scoped.first().ms >= 0.0,
+              "tickbudget: a section records once and carries its own name");
+
+        // M84: the cloud footprint disclosure. Every outbound action, the
+        // cadence, the measured sweep, and the two guarantees.
+        CloudFootprint footprint;
+        footprint.timeoutMs = 450;
+        footprint.inventoryTimeoutMs = 25000;
+        footprint.ratesPath = QStringLiteral("/tmp/rates.txt");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("169.254.169.254"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("169.254.0.23"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("link-local only")),
+              "footprint: both link-local services are named");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("every 5 min"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("every 15 min")),
+              "footprint: both probe cadences are stated");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("450 ms for the whole sweep"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("second tick")),
+              "footprint: the sweep budget and the first-tick deferral are "
+              "stated before any sweep ran");
+        footprint.probed = true;
+        footprint.lastSweepMs = 62;
+        footprint.lastRequests = 4;
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("last 62 ms / 4 request(s)")),
+              "footprint: the last sweep is reported with its request count");
+        footprint.inventory = false;
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("no provider CLI is spawned")),
+              "footprint: a disabled inventory names the consequence");
+        footprint.inventory = true;
+        footprint.cliName = QStringLiteral("aws");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("aws every 10 min, 25000 ms budget")),
+              "footprint: the inventory CLI, cadence and budget are stated");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("never from a tick"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("/tmp/rates.txt")),
+              "footprint: price import is on demand and the rate file is "
+              "named");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("no credential is read or stored"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("ever started, stopped or terminated")),
+              "footprint: the no-credentials and read-only guarantees are "
+              "spelled out");
+        footprint.enabled = false;
+        check(cloudFootprintText(footprint).contains(QStringLiteral("disabled"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("is ever issued"))
+                  && !cloudFootprintText(footprint).contains(
+                      QStringLiteral("169.254")),
+              "footprint: a disabled cloud path says nothing is contacted");
+
+        // QtCompat: the shim must yield a real UTC zone on every Qt floor.
+        const QDateTime utc =
+            qtcompat::fromMSecsSinceEpochUtc(1700000000000LL);
+        check(utc.isValid()
+                  && utc.timeZone().id() == qtcompat::utcZone().id()
+                  && utc.toString(QStringLiteral("yyyy-MM-dd HH:mm"))
+                         == QStringLiteral("2023-11-14 22:13"),
+              "qtcompat: the UTC shim matches the 6.5+ zone exactly");
     }
 
     std::printf("%d failure(s)\n", failures);

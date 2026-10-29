@@ -58,7 +58,8 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
-Depends: libc6, libqt6widgets6, libqt6dbus6
+Depends: libc6, libqt6widgets6, libqt6network6, libqt6dbus6
+Recommends: qt6-qpa-plugins
 Maintainer: Syspeek <noreply@example.com>
 Description: Compact always-on-top HUD for focused-process and infra status
  Shows the focused application's PID, CPU, and RSS, plus optional Docker

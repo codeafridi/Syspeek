@@ -5,6 +5,7 @@
 #include "platform/PlatformFactory.h"
 #include "ProcessActions.h"
 #include "CloudStatus.h"
+#include "TickBudget.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -1344,6 +1345,16 @@ int main(int argc, char *argv[]) {
     fleetResolveAges(fleetStory, fleetNow);
     fleetMarkSelf(fleetStory, cloudSnap.cloud.identity);
     cloudSnap.cloud.fleet = fleetStory;
+    // M84: the outbound footprint card. The sampler fills this from the live
+    // budget + measured sweep; here it carries a measured sweep.
+    cloudSnap.cloud.footprint.enabled = true;
+    cloudSnap.cloud.footprint.inventory = true;
+    cloudSnap.cloud.footprint.cliName = QStringLiteral("aws");
+    cloudSnap.cloud.footprint.probed = true;
+    cloudSnap.cloud.footprint.identified = true;
+    cloudSnap.cloud.footprint.lastSweepMs = 62;
+    cloudSnap.cloud.footprint.lastRequests = 4;
+    cloudSnap.cloud.footprint.ratesPath = QStringLiteral("/tmp/rates.txt");
     hud.setSnapshot(cloudSnap);
     hud.setSnapshot(cloudSnap);
 
@@ -1446,6 +1457,22 @@ int main(int argc, char *argv[]) {
               && cloudFleetNote->text().contains(
                   QStringLiteral("running rows only")),
           "cloud fleet note explains the star, the age source and the sum");
+    auto *cloudFootprint =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudFootprint"));
+    check(cloudFootprint != nullptr
+              && cloudFootprint->text().contains(
+                  QStringLiteral("169.254.169.254"))
+              && cloudFootprint->text().contains(
+                  QStringLiteral("every 5 min"))
+              && cloudFootprint->text().contains(
+                  QStringLiteral("last 62 ms / 4 request(s)"))
+              && cloudFootprint->text().contains(
+                  QStringLiteral("aws every 10 min"))
+              && cloudFootprint->text().contains(
+                  QStringLiteral("no credential is read or stored"))
+              && cloudFootprint->text().contains(QStringLiteral("/tmp/rates.txt")),
+          "cloud footprint card states every outbound action, cadence and "
+          "guarantee");
     check(cloudApp != nullptr
               && cloudApp->text().contains(QStringLiteral("cursor"))
               && cloudApp->text().contains(QStringLiteral("214.5%")),
@@ -1614,6 +1641,38 @@ int main(int argc, char *argv[]) {
                       && cloudText.contains(QStringLiteral("60 days old")),
                   "settings GENERAL card states the cloud probe and price age");
             hud.setSettingsInfo(info);
+        }
+        {
+            // M84: the console measures itself. A tick with a measured cost
+            // and footprint must reach the GENERAL card as three rows.
+            DisplaySnapshot selfSnap;
+            selfSnap.self.available = true;
+            selfSnap.self.cpuPercent = 6.04;
+            selfSnap.self.rssKb = 36864.0;
+            QList<TickSection> sections;
+            sections.append(TickSection{QStringLiteral("processes"), 41.2});
+            sections.append(TickSection{QStringLiteral("host"), 3.1});
+            selfSnap.tick = tickbudget::summarize(
+                sections, 62.0, QList<double>{40.0, 62.0, 84.0});
+            hud.setSnapshot(selfSnap);
+            QString costText;
+            for (QLabel *label :
+                 hud.findChildren<QLabel *>(QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("self&nbsp;cost&nbsp;"))) {
+                    costText = label->text();
+                }
+            }
+            check(costText.contains(QStringLiteral("cpu 6.04%"))
+                      && costText.contains(QStringLiteral("rss 36.0 MB")),
+                  "settings GENERAL card states Syspeek's own cpu and rss");
+            check(costText.contains(QStringLiteral("tick&nbsp;"))
+                      && costText.contains(QStringLiteral("62 ms"))
+                      && costText.contains(QStringLiteral("worst 84 ms")),
+                  "settings GENERAL card states the tick cost and its window");
+            check(costText.contains(QStringLiteral("sections&nbsp;"))
+                      && costText.contains(QStringLiteral("processes"))
+                      && costText.contains(QStringLiteral("host")),
+                  "settings GENERAL card names the slowest sections");
         }
         check(exportButtons.size() == 2,
               "settings DIAGNOSTICS card carries both export buttons");

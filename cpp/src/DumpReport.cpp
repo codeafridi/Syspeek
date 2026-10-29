@@ -3,6 +3,7 @@
 #include "CloudProbe.h"
 #include "CloudStatus.h"
 #include "HistoryLog.h"
+#include "TickBudget.h"
 #include "MetricsEndpoint.h"
 #include "CloudFleetSource.h"
 #include "CloudPricing.h"
@@ -752,6 +753,45 @@ QString dumpReportJson(int maxProcs) {
                          && qAbs(pricedFleet.monthlyUsd - 0.2920 * 730.0) < 1e-9);
         cloud.insert(QStringLiteral("fleet"), fleet);
         root.insert(QStringLiteral("cloud"), cloud);
+    }
+
+    {
+        // M84: the sampler's self-cost model. No GUI is needed to prove it,
+        // and the same numbers drive the Settings rows, so a runner asserts
+        // the maths the page shows.
+        QList<TickSection> sections;
+        sections.append(TickSection{QStringLiteral("focus"), 3.5});
+        sections.append(TickSection{QStringLiteral("processes"), 41.2});
+        sections.append(TickSection{QStringLiteral("gpu"), 0.01});
+        const TickCost tickCost =
+            tickbudget::summarize(sections, 62.0,
+                                  QList<double>{40.0, 62.0, 84.0});
+        QJsonObject budget;
+        budget.insert(QStringLiteral("sections"), tickCost.sections.size());
+        budget.insert(QStringLiteral("slowest"),
+                      tickCost.sections.isEmpty()
+                          ? QString()
+                          : tickCost.sections.constFirst().name);
+        budget.insert(QStringLiteral("avgMs"), tickCost.avgMs);
+        budget.insert(QStringLiteral("worstMs"), tickCost.worstMs);
+        budget.insert(QStringLiteral("sortedOk"),
+                      tickCost.sections.size() == 3
+                          && tickCost.sections.constFirst().name
+                                 == QStringLiteral("processes")
+                          && tickCost.sections.constLast().name
+                                 == QStringLiteral("gpu"));
+        budget.insert(QStringLiteral("windowOk"),
+                      qAbs(tickCost.avgMs - 62.0) < 1e-9
+                          && qAbs(tickCost.worstMs - 84.0) < 1e-9);
+        budget.insert(QStringLiteral("unmeasuredOk"),
+                      tickbudget::tickCostText(TickCost{})
+                          == QStringLiteral("measuring"));
+        budget.insert(
+            QStringLiteral("selfTextOk"),
+            tickbudget::selfCostText(SelfCost{})
+                    == QStringLiteral("not measurable on this platform")
+                && !tickbudget::tickSectionText(tickCost).isEmpty());
+        root.insert(QStringLiteral("budget"), budget);
     }
 
     {

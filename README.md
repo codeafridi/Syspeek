@@ -123,6 +123,23 @@ cmake --build cpp/build -j"$(nproc)"
 bash cpp/install.sh              # add --no-systemd, or --uninstall to remove
 ```
 
+The tree compiles on the oldest Qt 6 the distro channel ships (6.2 on Ubuntu
+22.04, 6.4 on 24.04), not just on the newest. That floor is enforced, because
+the `.deb` links the *distribution's* Qt rather than a bundled copy:
+
+```bash
+bash cpp/packaging/build_deb.sh   # writes build/packaging/syspeek_<ver>_amd64.deb
+# or prove it end to end, in a clean container of the target release:
+docker run --rm -v "$PWD":/src:ro -v /tmp/deb:/out ubuntu:24.04 \
+  bash /src/cpp/packaging/ci/deb_container_build.sh
+docker run --rm -v /tmp/deb:/pkg:ro -v "$PWD/cpp/packaging/ci":/ci:ro \
+  ubuntu:24.04 bash /ci/deb_container_verify.sh
+```
+
+The verify script installs the package in a bare container, checks that every
+shared object resolves, and runs `--dump` and `--probe` — the gate for both a
+Qt API newer than the floor and an under-declared `Depends:` line.
+
 </details>
 
 <details>
@@ -414,10 +431,31 @@ prints the gate text rather than a blank.
 Read-only in the cloud by design: Syspeek identifies the instance, prices it and
 lists the account, it never starts, stops or terminates anything.
 
+The Cloud page states its own footprint in a **CLOUD FOOTPRINT** card — every
+outbound action, its cadence, the measured cost of the last metadata sweep, and
+the guarantee that no credential is read and nothing is changed. The full
+breakdown (endpoints, headers, budgets, switches, rate-file format) is in
+[docs/cloud.md](docs/cloud.md).
+
 ## Advanced (optional)
 
 Thresholds and polling intervals are configurable in
 `~/.config/syspeek/config.ini`; sensible defaults are used if it's absent.
+
+**What Syspeek costs** — a HUD that watches a machine should be able to say
+what it costs that machine. Settings → GENERAL carries three live rows:
+
+```
+self cost   cpu 6.04%  rss 36.0 MB
+tick        62 ms last  avg 54 ms  worst 84 ms  over 120 ticks
+sections    processes 41 ms  host 12 ms  sockets 4.1 ms
+```
+
+`tick` is the time the sampler spends producing one snapshot; `sections` names
+the slowest collectors in that tick. It is also a regression gate rather than
+decoration: `syspeek --probe` prints `tickMs=` and `selfCpu=`/`selfRssKb=` per
+tick plus a `probe cost` summary, and CI fails a probe whose worst tick exceeds
+1.5 s — which is how a blocking call on a sampler tick would be caught.
 
 **Prometheus endpoint** — Syspeek exposes its live snapshot at
 `http://127.0.0.1:9107/metrics` (localhost only, on by default) in the

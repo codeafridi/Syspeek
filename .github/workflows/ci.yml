@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82, feat_m83]
+    branches: [main, feat_macos, feat_m39, feat_m50, feat_m52, feat_m53, feat_m54, feat_m55, feat_m58, feat_m62, feat_m63, feat_m64, feat_m65, feat_m66, feat_m67, feat_m68, feat_m69, feat_m70, feat_m71, feat_m72, feat_m73, feat_m74, feat_m75, feat_m76, feat_m77, feat_m78, feat_m79, feat_m80, feat_m81, feat_m82, feat_m83, feat_m84]
     paths-ignore:
       - "site/**"
       - "docs/**"
@@ -24,7 +24,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # Pinned, not ubuntu-latest: the shipped .deb links the
+        # distribution's own Qt, so the build must be tested on the
+        # oldest distro that ships it (see the deb-platform job).
+        os: [ubuntu-24.04, macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -293,6 +296,15 @@ jobs:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
                     "self-tests ok" % cloud["attempted"])
+          budget = d["budget"]
+          assert budget["sortedOk"] is True, budget
+          assert budget["windowOk"] is True, budget
+          assert budget["unmeasuredOk"] is True, budget
+          assert budget["selfTextOk"] is True, budget
+          assert budget["sections"] == 3, budget
+          print("budget ok: avg %d ms worst %d ms slowest %s"
+                % (int(budget["avgMs"]), int(budget["worstMs"]),
+                   budget["slowest"]))
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -311,6 +323,21 @@ jobs:
             "${RUNNER_TEMP}/syspeek-probe.txt"
           grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
           ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+          python3 - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1]).read().splitlines()
+          ticks = [l for l in lines if l.startswith("probe tick=")]
+          assert ticks, lines
+          for line in ticks:
+              assert "tickMs=" in line, line
+              assert "slowest=" in line, line
+              assert "selfRssKb=" in line, line
+          cost = [l for l in lines if l.startswith("probe cost")]
+          assert cost, lines
+          worst = re.search(r"worstMs=([\d.]+)", cost[0])
+          assert worst and float(worst.group(1)) <= 1500.0, cost[0]
+          print(cost[0])
+          PY
         env:
           QT_QPA_PLATFORM: offscreen
 
@@ -326,6 +353,21 @@ jobs:
             "${RUNNER_TEMP}/syspeek-probe.txt"
           grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
           ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
+          python - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1]).read().splitlines()
+          ticks = [l for l in lines if l.startswith("probe tick=")]
+          assert ticks, lines
+          for line in ticks:
+              assert "tickMs=" in line, line
+              assert "slowest=" in line, line
+              assert "selfRssKb=" in line, line
+          cost = [l for l in lines if l.startswith("probe cost")]
+          assert cost, lines
+          worst = re.search(r"worstMs=([\d.]+)", cost[0])
+          assert worst and float(worst.group(1)) <= 1500.0, cost[0]
+          print(cost[0])
+          PY
 
       - name: Record smoke
         if: runner.os != 'Windows'
@@ -462,6 +504,15 @@ jobs:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
                     "self-tests ok" % cloud["attempted"])
+          budget = d["budget"]
+          assert budget["sortedOk"] is True, budget
+          assert budget["windowOk"] is True, budget
+          assert budget["unmeasuredOk"] is True, budget
+          assert budget["selfTextOk"] is True, budget
+          assert budget["sections"] == 3, budget
+          print("budget ok: avg %d ms worst %d ms slowest %s"
+                % (int(budget["avgMs"]), int(budget["worstMs"]),
+                   budget["slowest"]))
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
@@ -628,7 +679,7 @@ jobs:
           echo "linux installer ok"
 
       - name: Screenshot evidence (linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           cmake --build cpp/build --target syspeek_screenshot -j 3
           mkdir -p "${RUNNER_TEMP}/screens"
@@ -670,7 +721,7 @@ jobs:
           PY
 
       - name: Upload screenshot artifact (linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v7
         with:
           name: syspeek-screenshots
@@ -803,3 +854,33 @@ jobs:
             cpp/build/packaging/Syspeek-*-macos.dmg
             cpp/build/packaging/Syspeek-*-macos.dmg.sha256
           if-no-files-found: error
+
+  # The Debian package links the DISTRIBUTION's Qt, not the aqt Qt the matrix
+  # builds against, so it is built and then installed in a clean container of
+  # the same release. This is the gate that catches a Qt API newer than the
+  # floor (QTimeZone::UTC was one) and an under-declared Depends: line
+  # (libqt6network6 was one) before a user's `apt install` does.
+  deb-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "ubuntu:24.04"]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    name: deb (${{ matrix.image }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the .deb inside ${{ matrix.image }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/deb"
+          docker run --rm -v "$PWD":/src:ro -v "${RUNNER_TEMP}/deb":/out \
+            "${{ matrix.image }}" \
+            bash /src/cpp/packaging/ci/deb_container_build.sh
+          ls -l "${RUNNER_TEMP}/deb"
+
+      - name: Clean-room install + run in ${{ matrix.image }}
+        run: |
+          docker run --rm -v "${RUNNER_TEMP}/deb":/pkg:ro \
+            -v "$PWD/cpp/packaging/ci":/ci:ro \
+            "${{ matrix.image }}" bash /ci/deb_container_verify.sh

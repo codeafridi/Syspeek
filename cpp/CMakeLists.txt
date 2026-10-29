@@ -175,6 +175,9 @@ add_library(syspeek_core STATIC
     src/DumpReport.h
     src/AppLog.cpp
     src/AppLog.h
+    src/QtCompat.h
+    src/TickBudget.cpp
+    src/TickBudget.h
     src/ProbeRun.cpp
     src/ProbeRun.h
     src/MetricsExport.cpp

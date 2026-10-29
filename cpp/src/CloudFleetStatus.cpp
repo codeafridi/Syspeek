@@ -1,3 +1,4 @@
+#include "QtCompat.h"
 #include "CloudStatus.h"
 
 #include "CostModel.h"
@@ -59,7 +60,7 @@ qint64 timestampMs(const QString &text) {
         return -1;
     }
     if (moment.timeSpec() == Qt::LocalTime) {
-        moment.setTimeZone(QTimeZone::UTC);
+        moment.setTimeZone(qtcompat::utcZone());
     }
     return moment.toMSecsSinceEpoch();
 }
@@ -581,8 +582,8 @@ QString fleetSummaryText(const CloudFleetStatus &fleet) {
                                 cloudUptimeText(self.ageSec));
         if (self.launchedAtMs > 0) {
             line += QStringLiteral("  launched %1")
-                        .arg(QDateTime::fromMSecsSinceEpoch(
-                                 self.launchedAtMs, QTimeZone::UTC)
+                        .arg(qtcompat::fromMSecsSinceEpochUtc(
+                                 self.launchedAtMs)
                                  .toString(QStringLiteral("yyyy-MM-dd")));
         }
         lines.append(line);

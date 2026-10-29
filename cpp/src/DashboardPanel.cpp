@@ -542,7 +542,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCloudTileProvider, #ddCloudTileAge, #ddCloudTileAccrued,"
         " #ddCloudTileMonthly { color: %TEXT%; }"
         "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
-        " #ddCloudFleetSummary, #ddCloudFleetNote { color: %MUTED%; }"
+        " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint"
+        " { color: %MUTED%; }"
         "#ddCloudShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
@@ -3413,6 +3414,15 @@ void DashboardPanel::applySettingsInfo() {
         m_settings.cloudLine.isEmpty()
             ? muted(QStringLiteral("--"))
             : muted(wrapValue(m_settings.cloudLine, 88)));
+    general += row(
+        QStringLiteral("self cost"),
+        strong(tickbudget::selfCostText(m_liveSelf)));
+    general += row(
+        QStringLiteral("tick"),
+        muted(wrapValue(tickbudget::tickCostText(m_liveTick), 88)));
+    general += row(
+        QStringLiteral("sections"),
+        muted(wrapValue(tickbudget::tickSectionText(m_liveTick), 88)));
     m_settingsGeneral->setText(general);
 
     // Collection scope: every surface the backend can reach on this OS.
@@ -4149,6 +4159,22 @@ QWidget *DashboardPanel::buildCloudView() {
     layout->addWidget(makeCard(
         QStringLiteral("TOP PROCESSES IN THE FOCUSED APP"), m_cloudConsumers,
         view));
+
+    // --- M84: the outbound footprint. Every network action Syspeek takes on
+    // its own, its cadence and the measured cost of the last sweep, plus the
+    // two guarantees (no credentials, read-only). Stated on the page, not
+    // buried in docs.
+    m_cloudFootprint = new QLabel(QStringLiteral("--"), view);
+    m_cloudFootprint->setObjectName(QStringLiteral("ddCloudFootprint"));
+    m_cloudFootprint->setFont(monoFont(9));
+    m_cloudFootprint->setWordWrap(true);
+    m_cloudFootprint->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("CLOUD FOOTPRINT"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("what leaves this host"), m_cloudFootprint,
+                 view));
 
     m_cloudShare = new QLabel(cloudShareNote(), view);
     m_cloudShare->setObjectName(QStringLiteral("ddCloudShare"));
@@ -5028,6 +5054,14 @@ QWidget *DashboardPanel::buildSoftwareView() {
 }
 
 void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
+    // M84: the console reports its own footprint. This is a two-line string
+    // rebuild on a label that is usually hidden, so it costs nothing next to
+    // the process tree above.
+    m_liveSelf = snapshot.self;
+    m_liveTick = snapshot.tick;
+    if (m_settingsGeneral != nullptr) {
+        applySettingsInfo();
+    }
     m_appValue->setText(snapshot.appName);
     m_pidValue->setText(QStringLiteral("pid %1").arg(snapshot.pid));
     m_cpuValue->setText(snapshot.cpu);
@@ -6819,6 +6853,9 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
                                   : QStringLiteral("--"));
 
     m_cloudSummary->setText(cloudSummaryText(cloud));
+    if (m_cloudFootprint != nullptr) {
+        m_cloudFootprint->setText(cloudFootprintText(cloud.footprint));
+    }
     m_cloudDetail->setText(cloudDetailText(cloud));
     m_cloudCost->setText(cloudCostText(cloud));
     m_cloudApp->setText(cloudAppText(cloud));

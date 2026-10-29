@@ -119,6 +119,24 @@ struct CloudFleetStatus {
     int selfIndex = -1;
 };
 
+// M84: the outbound footprint, in one struct, so the page can state every
+// network action Syspeek takes on its own instead of leaving it in docs. The
+// guarantee it renders is the whole point of the cloud path: link-local reads
+// plus the user's own CLI login, nothing stored, nothing changed.
+struct CloudFootprint {
+    bool enabled = true;
+    bool inventory = true;
+    int timeoutMs = 450;
+    int inventoryTimeoutMs = 25000;
+    bool probed = false;
+    bool identified = false;
+    int lastRequests = 0;
+    qint64 lastSweepMs = -1;
+    bool fleetAttempted = false;
+    QString cliName;
+    QString ratesPath;
+};
+
 struct CloudSnapshot {
     bool available = false;
     bool warming = false;
@@ -147,6 +165,9 @@ struct CloudSnapshot {
     qint64 instanceAgeSec = -1;
     qint64 launchedAtMs = -1;
     double accruedLaunchUsd = -1.0;
+    // M84: what the cloud path contacts, how often, and how long the last
+    // sweep took.
+    CloudFootprint footprint;
 };
 
 struct CloudCostMath {
@@ -288,4 +309,7 @@ QString cloudAppText(const CloudSnapshot &snapshot);
 QString cloudShareNote();
 QString cloudSettingsLine(bool enabled, const QString &ratesPath,
                          const CloudRateTable &table, qint64 nowMs);
+// M84: one card that names every outbound action, its cadence, the budget in
+// force, and the two guarantees (no credentials, read-only).
+QString cloudFootprintText(const CloudFootprint &footprint);
 QString cloudUptimeText(qint64 seconds);

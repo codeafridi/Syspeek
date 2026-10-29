@@ -18,6 +18,7 @@
 #include "ProcessNetStatus.h"
 #include "SbomSource.h"
 #include "TcpSampler.h"
+#include "TickBudget.h"
 #include "platform/PlatformFactory.h"
 
 #include <QObject>
@@ -119,6 +120,10 @@ private:
     QString m_cloudRatesPath;
     qint64 m_cloudProbeStampMs = 0;
     qint64 m_cloudRatesStampMs = 0;
+    // M84: measured cost of the last IMDS sweep (ms) and how many requests it
+    // issued; both surface on the CLOUD FOOTPRINT card.
+    qint64 m_cloudSweepMs = -1;
+    int m_cloudSweepRequests = 0;
     int m_cloudTicks = 0;
     bool m_cloudProbed = false;
     // M83: one polled CLI listing per 10 min; the sampler never waits on it.
@@ -132,4 +137,13 @@ private:
     ProcessIdentity m_cpuIdentity;
     ProcessIdentity m_healthIdentity;
     HealthEvaluator m_health;
+    // M84: the HUD measures its own cost. `m_selfCpu` reuses the exact
+    // procCpu/totalCpu delta maths the focused app gets, so the number in
+    // Settings is the same arithmetic the top row shows.
+    CpuSampler m_selfCpu;
+    SelfCost m_selfCost;
+    TickCost m_tickCost;
+    QList<TickSection> m_tickSections;
+    QList<double> m_tickTotals;
+    void updateSelfCost();
 };

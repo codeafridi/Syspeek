@@ -1,3 +1,4 @@
+#include "QtCompat.h"
 #include "MetricsExport.h"
 
 #include <QDateTime>
@@ -53,7 +54,7 @@ QJsonValue stringOrNull(const QString &value) {
 }
 
 QDateTime utc(qint64 ms) {
-    return QDateTime::fromMSecsSinceEpoch(ms > 0 ? ms : 0, QTimeZone::UTC);
+    return qtcompat::fromMSecsSinceEpochUtc(ms > 0 ? ms : 0);
 }
 
 QString intervalSeconds(int intervalMs) {

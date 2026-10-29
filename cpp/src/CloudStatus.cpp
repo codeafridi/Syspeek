@@ -1,3 +1,4 @@
+#include "QtCompat.h"
 #include "CloudStatus.h"
 
 #include "CostModel.h"
@@ -516,8 +517,7 @@ QString cloudDetailText(const CloudSnapshot &snapshot) {
             cloudUptimeText(snapshot.instanceAgeSec));
         if (snapshot.launchedAtMs > 0) {
             age += QStringLiteral("  launched %1").arg(
-                QDateTime::fromMSecsSinceEpoch(snapshot.launchedAtMs,
-                                               QTimeZone::UTC)
+                qtcompat::fromMSecsSinceEpochUtc(snapshot.launchedAtMs)
                     .toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'")));
         }
         lines.append(age);
@@ -561,8 +561,8 @@ QString cloudCostText(const CloudSnapshot &snapshot) {
     line += QLatin1Char('\n');
     if (snapshot.launchedAtMs > 0 && snapshot.instanceAgeSec >= 0) {
         line += QStringLiteral("launched   %1  age %2")
-                    .arg(QDateTime::fromMSecsSinceEpoch(snapshot.launchedAtMs,
-                                                        QTimeZone::UTC)
+                    .arg(qtcompat::fromMSecsSinceEpochUtc(
+                                 snapshot.launchedAtMs)
                              .toString(QStringLiteral("yyyy-MM-dd")),
                          cloudUptimeText(snapshot.instanceAgeSec));
         line += QLatin1Char('\n');
@@ -643,4 +643,54 @@ QString cloudSettingsLine(bool enabled, const QString &ratesPath,
         }
     }
     return line;
+}
+
+QString cloudFootprintText(const CloudFootprint &footprint) {
+    if (!footprint.enabled) {
+        return QStringLiteral(
+            "disabled ([cloud] enabled=false) - no instance metadata request "
+            "is ever issued and no provider CLI is ever spawned");
+    }
+    QStringList lines;
+    lines.append(QStringLiteral(
+        "metadata   169.254.169.254 (aws/azure/gcp) + 169.254.0.23 (oci), "
+        "link-local only, read only"));
+    lines.append(QStringLiteral(
+        "cadence    every 5 min while an instance is identified, every 15 min "
+        "otherwise"));
+    QString budget =
+        QStringLiteral("budget     %1 ms for the whole sweep").arg(footprint.timeoutMs);
+    if (footprint.lastSweepMs >= 0) {
+        budget += QStringLiteral(", last %1 ms").arg(footprint.lastSweepMs);
+        if (footprint.lastRequests > 0) {
+            budget += QStringLiteral(" / %1 request(s)").arg(footprint.lastRequests);
+        }
+    } else if (footprint.probed) {
+        budget += QStringLiteral(", last sweep not timed");
+    } else {
+        budget += QStringLiteral(", the first sweep starts on the second tick");
+    }
+    lines.append(budget);
+    if (footprint.inventory) {
+        lines.append(
+            QStringLiteral("inventory  %1 every 10 min, %2 ms budget - the "
+                           "CLI's own login, no credential is read")
+                .arg(footprint.cliName.isEmpty() ? QStringLiteral("provider cli")
+                                                 : footprint.cliName)
+                .arg(footprint.inventoryTimeoutMs));
+    } else {
+        lines.append(QStringLiteral(
+            "inventory  off ([cloud] inventory=false) - no provider CLI is "
+            "spawned"));
+    }
+    lines.append(QStringLiteral(
+        "prices     on demand only: `syspeek --cloud-prices` asks the AWS "
+        "Price List API with your aws(1) credentials, never from a tick"));
+    lines.append(QStringLiteral("rates      %1").arg(
+        footprint.ratesPath.isEmpty() ? QStringLiteral("no rate file")
+                                      : footprint.ratesPath));
+    lines.append(QStringLiteral(
+        "writes     none - no credential is read or stored, no instance is "
+        "ever started, stopped or terminated"));
+    return lines.join(QLatin1Char('\n'));
 }

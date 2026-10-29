@@ -3,6 +3,7 @@
 #include "HistoryLog.h"
 #include "SensorStatus.h"
 #include "CloudStatus.h"
+#include "TickBudget.h"
 
 #include <QApplication>
 #include <QListWidget>
@@ -541,6 +542,35 @@ DisplaySnapshot demoSnapshot(int tick) {
     fleetResolveAges(fleet, shotNow);
     fleetMarkSelf(fleet, s.cloud.identity);
     s.cloud.fleet = fleet;
+
+    // M84: the footprint card. A measured sweep, so the render proves the
+    // request count and budget both reach the page.
+    s.cloud.footprint.enabled = true;
+    s.cloud.footprint.inventory = true;
+    s.cloud.footprint.cliName = fleet.cliName;
+    s.cloud.footprint.probed = true;
+    s.cloud.footprint.identified = true;
+    s.cloud.footprint.lastSweepMs = 62;
+    s.cloud.footprint.lastRequests = 4;
+    s.cloud.footprint.ratesPath = QStringLiteral(
+        "/home/you/.config/syspeek/cloud-rates.txt");
+
+    // M84: the console measures itself. A measured footprint and a 62 ms tick
+    // with named sections, so the Settings render shows real rows.
+    s.self.available = true;
+    s.self.warming = false;
+    s.self.cpuPercent = 6.04;
+    s.self.rssKb = 36864.0;
+    {
+        QList<TickSection> sections;
+        sections.append(TickSection{QStringLiteral("processes"), 41.2});
+        sections.append(TickSection{QStringLiteral("host"), 12.4});
+        sections.append(TickSection{QStringLiteral("sockets"), 4.1});
+        sections.append(TickSection{QStringLiteral("gpu"), 1.2});
+        s.tick = tickbudget::summarize(
+            sections, 62.0,
+            QList<double>{54.0, 48.0, 62.0, 84.0, 51.0});
+    }
 
     return s;
 }

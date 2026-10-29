@@ -267,6 +267,7 @@ private:
     QLabel *m_cloudCost = nullptr;
     QLabel *m_cloudApp = nullptr;
     QLabel *m_cloudShare = nullptr;
+    QLabel *m_cloudFootprint = nullptr;
     QTreeWidget *m_cloudConsumers = nullptr;
     TimeseriesChart *m_chartCloudApp = nullptr;
     QLabel *m_diskSummary = nullptr;
@@ -620,6 +621,8 @@ private:
     QSet<int> m_collapsedPids;
     bool m_populating = false;
     SettingsInfo m_settings;
+    SelfCost m_liveSelf;
+    TickCost m_liveTick;
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
     QLabel *m_settingsDiagnostics = nullptr;

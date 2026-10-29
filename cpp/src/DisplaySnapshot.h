@@ -15,6 +15,7 @@
 #include "TcpStatus.h"
 #include "FimStatus.h"
 #include "CloudStatus.h"
+#include "TickBudget.h"
 
 #include <QList>
 #include <QPair>
@@ -177,5 +178,9 @@ struct DisplaySnapshot {
     double focusIoWritePerSec = 0.0;
     QList<QString> focusOpenFiles;
     QList<QString> dependencies;
+    // M84: Syspeek's own footprint and the cost of the tick that produced
+    // this snapshot (both self-measured, both shown in Settings).
+    SelfCost self;
+    TickCost tick;
     quint64 sequence = 0;
 };
