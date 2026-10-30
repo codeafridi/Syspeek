@@ -110,16 +110,44 @@ fi
 log "building AppImage"
 export UPDATE_INFORMATION="${UPDATE_INFORMATION:-gh-releases-zsync|codeafridi|Syspeek|latest|Syspeek-*x86_64.AppImage.zsync}"
 if ! command -v zsyncmake >/dev/null 2>&1; then
+  # appimagetool ships zsyncmake inside itself, but `--appimage-extract`
+  # ignores an output directory and unpacks into ./squashfs-root, so the
+  # extraction has to run in its own directory. Getting this wrong is silent:
+  # appimagetool still emits the AppImage and simply skips the .zsync, which
+  # leaves the update channel the binary advertises pointing at a 404.
   tool_tmp="$(mktemp -d)"
-  "$appimagetool" --appimage-extract "usr/bin/zsyncmake" -o "$tool_tmp" >/dev/null 2>&1 || true
-  if [ -x "$tool_tmp/usr/bin/zsyncmake" ]; then
-    export PATH="$tool_tmp/usr/bin:$PATH"
+  if ( cd "$tool_tmp" \
+       && "$appimagetool" --appimage-extract "usr/bin/zsyncmake" >/dev/null 2>&1 ) \
+     && [ -x "$tool_tmp/squashfs-root/usr/bin/zsyncmake" ]; then
+    export PATH="$tool_tmp/squashfs-root/usr/bin:$PATH"
+  else
+    echo "warning: no zsyncmake found; install it (apt install zsync) for" >&2
+    echo "         AppImageUpdate delta support" >&2
   fi
 fi
 if ! ARCH="$arch" "$appimagetool" -u "$UPDATE_INFORMATION" --no-appstream "$appdir" "$appimage" >/dev/null 2>&1; then
   ARCH="$arch" "$appimagetool" -u "$UPDATE_INFORMATION" "$appdir" "$appimage"
 fi
 chmod +x "$appimage" 2>/dev/null || true
+
+# appimagetool writes the .zsync into the CURRENT directory, not next to the
+# image, so every release since 0.5.0 left it in the repo root and shipped an
+# AppImage advertising an update file nobody uploaded. Move it where the image
+# is before checking.
+if [ ! -f "${appimage}.zsync" ]; then
+  stray="$(basename "$appimage").zsync"
+  if [ -f "$stray" ]; then
+    mv "$stray" "${appimage}.zsync"
+  fi
+fi
+
+# The embedded UPDATE_INFORMATION names <image>.zsync. Shipping the image
+# without it advertises an update channel that 404s, so refuse to finish.
+if [ ! -f "${appimage}.zsync" ]; then
+  echo "error: ${appimage}.zsync was not produced - AppImageUpdate would" >&2
+  echo "       point at a missing file (install zsync and rerun)" >&2
+  exit 1
+fi
 
 log "done: $appimage"
 log "run:  $appimage"
