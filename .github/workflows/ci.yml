@@ -296,6 +296,13 @@ jobs:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
                     "self-tests ok" % cloud["attempted"])
+          spend = d["cloud"]["spend"]
+          assert spend["spendAwsOk"] is True, spend
+          assert spend["spendAzureOk"] is True, spend
+          assert spend["spendForecastOk"] is True, spend
+          assert spend["spendPeriodOk"] is True, spend
+          assert spend["spendGateOk"] is True, spend
+          print("cloud spend: %s" % spend["note"].splitlines()[0])
           budget = d["budget"]
           assert budget["sortedOk"] is True, budget
           assert budget["windowOk"] is True, budget
@@ -504,6 +511,13 @@ jobs:
               assert cloud.get("note"), cloud
               print("cloud gated (no IMDS here): %d probes, rate/cost/share "
                     "self-tests ok" % cloud["attempted"])
+          spend = d["cloud"]["spend"]
+          assert spend["spendAwsOk"] is True, spend
+          assert spend["spendAzureOk"] is True, spend
+          assert spend["spendForecastOk"] is True, spend
+          assert spend["spendPeriodOk"] is True, spend
+          assert spend["spendGateOk"] is True, spend
+          print("cloud spend: %s" % spend["note"].splitlines()[0])
           budget = d["budget"]
           assert budget["sortedOk"] is True, budget
           assert budget["windowOk"] is True, budget

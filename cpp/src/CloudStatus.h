@@ -5,6 +5,9 @@
 #include <QString>
 #include <QtGlobal>
 
+#include "CloudProvider.h"
+#include "CloudSpendStatus.h"
+
 // Cloud instance identity + accrued-cost model. Everything here is pure so
 // the same code serves the HUD, `--dump` and the tests.
 //
@@ -28,16 +31,6 @@
 //   `PriceDimensions json:"priceDimensions"`, `PricePerUnit json:"pricePerUnit"`,
 //   `OperatingSystem json:"operatingSystem"`, `capacitystatus`,
 //   `preInstalledSw`, `instanceFamily`, "pricing.us-east-1.amazonaws.com".
-enum class CloudProvider {
-    None,
-    Aws,
-    Azure,
-    Gcp,
-    Oci,
-};
-
-QString cloudProviderName(CloudProvider provider);
-QString cloudProviderLabel(CloudProvider provider);
 
 struct CloudIdentity {
     CloudProvider provider = CloudProvider::None;
@@ -133,6 +126,10 @@ struct CloudFootprint {
     int lastRequests = 0;
     qint64 lastSweepMs = -1;
     bool fleetAttempted = false;
+    // M85: the billed-spend query (provider cost API).
+    bool spend = true;
+    int spendTimeoutMs = 30000;
+    QString spendCommand;
     QString cliName;
     QString ratesPath;
 };
@@ -168,6 +165,8 @@ struct CloudSnapshot {
     // M84: what the cloud path contacts, how often, and how long the last
     // sweep took.
     CloudFootprint footprint;
+    // M85: what the provider actually billed this month, from its cost API.
+    CloudSpendStatus spend;
 };
 
 struct CloudCostMath {

@@ -268,6 +268,11 @@ private:
     QLabel *m_cloudApp = nullptr;
     QLabel *m_cloudShare = nullptr;
     QLabel *m_cloudFootprint = nullptr;
+    QLabel *m_cloudSpendSummary = nullptr;
+    QLabel *m_cloudSpendDetail = nullptr;
+    QLabel *m_cloudSpendNote = nullptr;
+    QTreeWidget *m_cloudSpendServices = nullptr;
+    TimeseriesChart *m_chartCloudSpend = nullptr;
     QTreeWidget *m_cloudConsumers = nullptr;
     TimeseriesChart *m_chartCloudApp = nullptr;
     QLabel *m_diskSummary = nullptr;

@@ -683,6 +683,19 @@ QString cloudFootprintText(const CloudFootprint &footprint) {
             "inventory  off ([cloud] inventory=false) - no provider CLI is "
             "spawned"));
     }
+    if (footprint.spend) {
+        lines.append(
+            QStringLiteral("spend      %1 every 6 h, %2 ms budget - the "
+                           "provider's cost API is billable to your account, "
+                           "so [cloud] spend=false turns it off")
+                .arg(footprint.spendCommand.isEmpty()
+                         ? QStringLiteral("cost query")
+                         : footprint.spendCommand)
+                .arg(footprint.spendTimeoutMs));
+    } else {
+        lines.append(QStringLiteral(
+            "spend      off ([cloud] spend=false) - no cost query is issued"));
+    }
     lines.append(QStringLiteral(
         "prices     on demand only: `syspeek --cloud-prices` asks the AWS "
         "Price List API with your aws(1) credentials, never from a tick"));

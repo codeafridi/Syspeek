@@ -43,6 +43,8 @@
 #include "CloudStatus.h"
 #include "CloudPricing.h"
 #include "CloudFleetSource.h"
+#include "CloudSpendStatus.h"
+#include "CloudSpendSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
 #include "ServicesSource.h"
@@ -4827,6 +4829,24 @@ int main(int argc, char *argv[]) {
                       QStringLiteral("ever started, stopped or terminated")),
               "footprint: the no-credentials and read-only guarantees are "
               "spelled out");
+        // M85: the billed-spend query is the second billable outbound action,
+        // so the footprint names it with its cadence and switch.
+        footprint.spend = true;
+        footprint.spendTimeoutMs = 30000;
+        footprint.spendCommand = QStringLiteral(
+            "aws ce get-cost-and-usage --time-period Start=2026-10-01,"
+            "End=2026-10-02");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("spend      aws ce get-cost-and-usage"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("every 6 h, 30000 ms budget"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("billable to your account")),
+              "footprint: the cost query is disclosed with its cadence and cost");
+        footprint.spend = false;
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("spend      off ([cloud] spend=false)")),
+              "footprint: a disabled cost query says nothing is issued");
         footprint.enabled = false;
         check(cloudFootprintText(footprint).contains(QStringLiteral("disabled"))
                   && cloudFootprintText(footprint).contains(
@@ -5198,6 +5218,302 @@ int main(int argc, char *argv[]) {
         for (const char *name : {"SYSPEEK_FAKE_ARGV_LOG", "SYSPEEK_FAKE_STDOUT",
                                  "SYSPEEK_FAKE_STDERR", "SYSPEEK_FAKE_EXIT",
                                  "SYSPEEK_FAKE_SLEEP"}) {
+            qunsetenv(name);
+        }
+    }
+
+
+    {
+        // M85: billed spend. The parsers are pure, so both provider payloads
+        // and the arithmetic are asserted without a network or a CLI.
+        QString spendError;
+        const QByteArray awsCost = QByteArrayLiteral(
+            "{\"ResultsByTime\":["
+            "{\"TimePeriod\":{\"Start\":\"2026-10-01\",\"End\":\"2026-10-02\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"12.5\",\"Unit\":\"USD\"}}},"
+            "{\"Keys\":[\"Amazon Simple Storage Service\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"1.5\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":false},"
+            "{\"TimePeriod\":{\"Start\":\"2026-10-02\",\"End\":\"2026-10-03\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"10.0\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":true}]}");
+        CloudSpendStatus awsSpend = parseAwsCostAndUsage(awsCost, &spendError);
+        check(awsSpend.available
+                  && qAbs(awsSpend.monthToDateUsd - 24.0) < 1e-9
+                  && awsSpend.periodStart == QStringLiteral("2026-10-01")
+                  && awsSpend.periodEnd == QStringLiteral("2026-10-03"),
+              "spend: aws groups fold into a month-to-date total and a period");
+        check(awsSpend.services.size() == 2
+                  && awsSpend.services.first().name
+                         == QStringLiteral("Amazon Elastic Compute Cloud - Compute")
+                  && qAbs(awsSpend.services.first().usd - 22.5) < 1e-9
+                  && qAbs(awsSpend.services.last().usd - 1.5) < 1e-9,
+              "spend: per-service totals are summed across days, sorted desc");
+        check(awsSpend.days.size() == 2
+                  && qAbs(awsSpend.days.at(0).usd - 14.0) < 1e-9
+                  && qAbs(awsSpend.days.at(1).usd - 10.0) < 1e-9
+                  && awsSpend.estimated,
+              "spend: the daily series and the provider's estimated flag survive");
+        spendApplyForecast(&awsSpend, 50.0);
+        check(qAbs(awsSpend.forecastUsd - 74.0) < 1e-9
+                  && qAbs(awsSpend.forecastRemainingUsd - 50.0) < 1e-9,
+              "spend: the month-end projection is billed + forecast");
+
+        const CloudSpendStatus azureSpend = parseAzureUsageList(
+            QByteArrayLiteral(
+                "{\"value\":["
+                "{\"properties\":{\"pretaxCost\":\"3.25\","
+                "\"product\":\"Virtual Machines\","
+                "\"usageStart\":\"2026-10-01T00:00:00Z\"}},"
+                "{\"properties\":{\"pretaxCost\":1.75,"
+                "\"product\":\"Storage\","
+                "\"usageStart\":\"2026-10-02T00:00:00Z\"}},"
+                "{\"properties\":{\"pretaxCost\":1.0,"
+                "\"product\":\"Storage\","
+                "\"usageStart\":\"2026-10-02T00:00:00Z\"}}]}"),
+            &spendError);
+        check(azureSpend.available
+                  && qAbs(azureSpend.monthToDateUsd - 6.0) < 1e-9
+                  && azureSpend.days.size() == 2
+                  && qAbs(azureSpend.days.at(1).usd - 2.75) < 1e-9
+                  && azureSpend.services.size() == 2,
+              "spend: azure usage rows accept string costs, fold days and "
+              "products");
+
+        const CloudSpendStatus forecastOnly = parseAwsCostForecast(
+            QByteArrayLiteral(
+                "{\"Total\":{\"Amount\":\"118.33\",\"Unit\":\"USD\"},"
+                "\"ForecastResultsByTime\":[]}"),
+            &spendError);
+        check(forecastOnly.available
+                  && qAbs(forecastOnly.forecastRemainingUsd - 118.33) < 1e-9,
+              "spend: the forecast payload yields the remaining-month figure");
+        QString emptyError;
+        check(!parseAwsCostAndUsage(QByteArrayLiteral("{}"), &emptyError)
+                   .available
+                  && emptyError.contains(QStringLiteral("ResultsByTime"))
+                  && !parseAwsCostForecast(QByteArrayLiteral("{}"), &emptyError)
+                          .available
+                  && !parseAzureUsageList(QByteArrayLiteral("not json"),
+                                          &emptyError)
+                          .available,
+              "spend: an empty or malformed payload states the reason");
+
+        CloudSpendStatus capped;
+        capped.available = true;
+        capped.monthToDateUsd = 100.0;
+        for (int i = 0; i < 20; ++i) {
+            capped.services.append(
+                CloudSpendService{QStringLiteral("svc%1").arg(i),
+                                  double(20 - i)});
+        }
+        spendSortServices(&capped, 3);
+        check(capped.services.size() == 4
+                  && capped.services.first().name == QStringLiteral("svc0")
+                  && capped.services.last().name.contains(QStringLiteral("17")),
+              "spend: the service table caps itself and says how many it hid");
+
+        check(cloudSpendAmountText(12.5) == QStringLiteral("$12.50")
+                  && cloudSpendAmountText(0.004) == QStringLiteral("<$0.01")
+                  && cloudSpendAmountText(-1.0) == QStringLiteral("--"),
+              "spend: money text keeps cents, flags sub-cent and never fakes 0");
+        check(cloudSpendSummaryText(awsSpend)
+                      .contains(QStringLiteral("month to date $24.00"))
+                  && cloudSpendSummaryText(awsSpend)
+                         .contains(QStringLiteral("(+$50.00 forecast)"))
+                  && cloudSpendSummaryText(awsSpend)
+                         .contains(QStringLiteral("estimated")),
+              "spend: the summary states billed, forecast and the estimate flag");
+        check(cloudSpendDetailText(awsSpend)
+                      .contains(QStringLiteral("2026-10-01 .. 2026-10-03"))
+                  && cloudSpendDetailText(awsSpend)
+                         .contains(QStringLiteral("unblended cost"))
+                  && cloudSpendDetailText(azureSpend)
+                         .contains(QStringLiteral("pretax cost")),
+              "spend: the detail names the window and each provider's metric");
+        check(cloudSpendServicesText(awsSpend)
+                      .contains(QStringLiteral("(93.8%)"))
+                  && cloudSpendServicesText(CloudSpendStatus{})
+                         .isEmpty(),
+              "spend: service rows carry their share of the month");
+        check(cloudSpendGateText(CloudProvider::Gcp)
+                      .contains(QStringLiteral("BigQuery"))
+                  && cloudSpendGateText(CloudProvider::Oci)
+                         .contains(QStringLiteral("usage API"))
+                  && cloudSpendNote().contains(QStringLiteral("billable"))
+                  && cloudSpendDisabledText().contains(QStringLiteral("spend=false")),
+              "spend: gated providers and the disabled state state the reason");
+        check(cloudSpendPeriodStart(1700000000000LL)
+                      == QStringLiteral("2023-11-01")
+                  && cloudSpendPeriodEnd(1700000000000LL)
+                         == QStringLiteral("2023-11-15")
+                  && cloudSpendForecastEnd(1700000000000LL)
+                         == QStringLiteral("2023-12-01"),
+              "spend: the window is computed in UTC, so the query is stable "
+              "across time zones");
+
+        // The same numbers on the Prometheus endpoint, and nothing at all when
+        // the query has not answered.
+        DisplaySnapshot spendSnap;
+        spendSnap.cloud.spend = awsSpend;
+        const QString spendText = prometheusText(spendSnap);
+        check(spendText.contains(QStringLiteral("syspeek_cloud_spend_month_usd"))
+                  && spendText.contains(
+                      QStringLiteral("syspeek_cloud_spend_forecast_usd"))
+                  && spendText.contains(
+                      QStringLiteral("syspeek_cloud_spend_service_usd{provider=\"aws\""))
+                  && spendText.contains(QStringLiteral("service=\"Amazon Simple "
+                                                       "Storage Service\"")),
+              "spend: prometheus exports month, forecast and per-service cost");
+        DisplaySnapshot noSpendSnap;
+        check(!prometheusText(noSpendSnap)
+                   .contains(QStringLiteral("syspeek_cloud_spend_")),
+              "spend: a host with no billed data exports no spend series");
+    }
+
+    {
+        // M85: billed spend end to end against a fake CLI: two AWS calls in
+        // order (cost, then forecast) and one Azure call.
+        QTemporaryDir spendDir;
+        const QString bin = spendDir.path();
+        const QString costFile = bin + QStringLiteral("/cost.json");
+        const QString forecastFile = bin + QStringLiteral("/forecast.json");
+        const QString argvLog = bin + QStringLiteral("/argv.log");
+        const QByteArray costDoc = QByteArrayLiteral(
+            "{\"ResultsByTime\":[{\"TimePeriod\":{\"Start\":\"2026-10-01\","
+            "\"End\":\"2026-10-02\"},\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"100.0\",\"Unit\":\"USD\"}}}]}]}");
+        const QByteArray forecastDoc = QByteArrayLiteral(
+            "{\"Total\":{\"Amount\":\"118.33\",\"Unit\":\"USD\"}}");
+        const auto write = [](const QString &path, const QByteArray &data) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                return false;
+            }
+            file.write(data);
+            file.close();
+            file.setPermissions(QFile::ReadOwner | QFile::WriteOwner
+                                | QFile::ExeOwner | QFile::ReadGroup
+                                | QFile::ExeGroup | QFile::ReadOther
+                                | QFile::ExeOther);
+            return true;
+        };
+        write(costFile, costDoc);
+        write(forecastFile, forecastDoc);
+#if defined(Q_OS_WIN)
+        const QString awsName = bin + QStringLiteral("/aws.cmd");
+        const QByteArray script =
+            "@echo off\r\n"
+            "echo %*>>\"%SPEND_ARGV_LOG%\"\r\n"
+            "if \"%2\"==\"get-cost-forecast\" (type \"%SPEND_FORECAST%\") "
+            "else (type \"%SPEND_COST%\")\r\n"
+            "exit /b 0\r\n";
+#else
+        const QString awsName = bin + QStringLiteral("/aws");
+        const QByteArray script =
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$SPEND_ARGV_LOG\"\n"
+            "case \"$2\" in get-cost-forecast) cat \"$SPEND_FORECAST\";; "
+            "*) cat \"$SPEND_COST\";; esac\n";
+#endif
+        const bool wrote = write(awsName, script);
+        check(wrote, "spend: the fake aws CLI is executable");
+        const QString oldPath = qEnvironmentVariable("PATH");
+        qputenv("PATH", (bin
+#if defined(Q_OS_WIN)
+                         + QLatin1Char(';') + oldPath
+#else
+                         + QLatin1Char(':') + oldPath
+#endif
+                         ).toUtf8());
+        qputenv("SPEND_ARGV_LOG", argvLog.toUtf8());
+        qputenv("SPEND_COST", costFile.toUtf8());
+        qputenv("SPEND_FORECAST", forecastFile.toUtf8());
+
+        CloudIdentity identity;
+        identity.provider = CloudProvider::Aws;
+        identity.instanceId = QStringLiteral("i-0aaa");
+        identity.accountId = QStringLiteral("123456789012");
+        CloudSpendOptions options;
+        options.timeoutMs = 10000;
+        const qint64 nowMs = 1'760'000'000'000LL;   // 2025-10-09 UTC
+
+        const CloudSpendStatus spend = probeCloudSpend(identity, options, nowMs);
+        QFile log(argvLog);
+        const QStringList calls =
+            log.open(QIODevice::ReadOnly)
+                ? QString::fromUtf8(log.readAll())
+                      .split(QLatin1Char('\n'), Qt::SkipEmptyParts)
+                : QStringList();
+        check(calls.size() == 2
+                  && calls.at(0).startsWith(
+                      QStringLiteral("ce get-cost-and-usage --time-period "
+                                     "Start=2025-10-01,End=2025-10-10 "))
+                  && calls.at(0).contains(
+                      QStringLiteral("--group-by Type=DIMENSION,Key=SERVICE"))
+                  && calls.at(0).contains(
+                      QStringLiteral("--metrics UnblendedCost"))
+                  && calls.at(1).startsWith(
+                      QStringLiteral("ce get-cost-forecast --time-period "
+                                     "Start=2025-10-10,End=2025-11-01 "))
+                  && calls.at(1).contains(
+                      QStringLiteral("--metric UNBLENDED_COST")),
+              "spend: aws runs cost-and-usage then the month-end forecast");
+        check(spend.available
+                  && qAbs(spend.monthToDateUsd - 100.0) < 1e-9
+                  && qAbs(spend.forecastUsd - 218.33) < 1e-9
+                  && spend.scope == QStringLiteral("account 123456789012")
+                  && spend.source.startsWith(
+                      QStringLiteral("aws ce get-cost-and-usage")),
+              "spend: the two answers fold into billed + month-end");
+
+        // A provider whose CLI has no cost API never spawns anything.
+        QFile::remove(argvLog);
+        CloudIdentity gcpIdentity;
+        gcpIdentity.provider = CloudProvider::Gcp;
+        const CloudSpendStatus gcp = probeCloudSpend(gcpIdentity, options, nowMs);
+        check(!gcp.attempted
+                  && gcp.note.contains(QStringLiteral("BigQuery"))
+                  && !QFile::exists(argvLog),
+              "spend: a gated provider issues no query at all");
+
+        // The polled runner, on the same fake CLI.
+        {
+            QFile::remove(argvLog);
+            CloudSpendRunner runner;
+            runner.setOptions(options);
+            QElapsedTimer clock;
+            clock.start();
+            qint64 worstUpdateMs = 0;
+            for (int i = 0; i < 400; ++i) {
+                QElapsedTimer one;
+                one.start();
+                runner.update(identity, QDateTime::currentMSecsSinceEpoch());
+                worstUpdateMs = qMax(worstUpdateMs, one.elapsed());
+                if (runner.status().available
+                    && runner.status().forecastUsd >= 0.0) {
+                    break;
+                }
+                app.processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            check(runner.status().available
+                      && qAbs(runner.status().monthToDateUsd - 100.0) < 1e-9
+                      && qAbs(runner.status().forecastUsd - 218.33) < 1e-9,
+                  "spend: the polled runner walks both steps and ends with the "
+                  "full picture");
+            check(worstUpdateMs < 1200,
+                  "spend: no runner update blocks the sampler thread");
+            runner.stop();
+        }
+
+        qputenv("PATH", oldPath.toUtf8());
+        for (const char *name : {"SPEND_ARGV_LOG", "SPEND_COST", "SPEND_FORECAST"}) {
             qunsetenv(name);
         }
     }

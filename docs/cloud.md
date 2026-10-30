@@ -66,6 +66,35 @@ says `listing in progress` / `stale` while a refresh is in flight.
 
 `[cloud] inventory=false` disables it entirely: no CLI is spawned at all.
 
+## Billed spend (what the provider actually charged)
+
+The estimate above is a rate × time projection. **Billed spend** is the other
+number: what the provider says it charged the account this month.
+
+| Provider | Query | Metric |
+|---|---|---|
+| AWS | `aws ce get-cost-and-usage` (daily, grouped by `SERVICE`) then `aws ce get-cost-forecast` (month to end) | `UnblendedCost` |
+| Azure | `az consumption usage list --top 1000 --filter "properties/usageStart ge '<month start>'"` | `pretaxCost` |
+| GCP | — | gate: Google bills through a BigQuery export, so there is no CLI cost API |
+| OCI | — | gate: the OCI usage API is not wired yet |
+
+The card shows month to date, the month-end projection (billed + forecast for
+the remaining days), a daily chart and the per-service split with each service's
+share. Where the provider flags a period as *estimated*, the card says so; where
+the query hits Azure's 1000-row page cap, the total is labelled a floor.
+
+Three properties are deliberate:
+
+- **The window is UTC.** Cost Explorer's `TimePeriod` is a UTC date and Azure's
+  `usageStart` is UTC, so the month is computed in UTC — a machine in IST and a
+  machine in UTC ask for the same window.
+- **The query is billable.** AWS charges for Cost Explorer requests, so it runs
+  every 6 hours, is separately switchable (`[cloud] spend=false`), separately
+  budgeted (`spend_timeout_ms`, 5000–180000), and is named in the CLOUD
+  FOOTPRINT card next to the metadata read.
+- **It is polled, never awaited.** The sampler publishes the last completed
+  answer; no tick waits on a CLI.
+
 ## Cost
 
 - **Rate file.** `~/.config/syspeek/cloud-rates.txt` (override with

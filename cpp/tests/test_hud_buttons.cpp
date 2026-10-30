@@ -1355,6 +1355,32 @@ int main(int argc, char *argv[]) {
     cloudSnap.cloud.footprint.lastSweepMs = 62;
     cloudSnap.cloud.footprint.lastRequests = 4;
     cloudSnap.cloud.footprint.ratesPath = QStringLiteral("/tmp/rates.txt");
+    // M85: a CE-shaped month for the render.
+    cloudSnap.cloud.spend.attempted = true;
+    cloudSnap.cloud.spend.available = true;
+    cloudSnap.cloud.spend.provider = CloudProvider::Aws;
+    cloudSnap.cloud.spend.cliName = QStringLiteral("aws");
+    cloudSnap.cloud.spend.scope = QStringLiteral("account 123456789012");
+    cloudSnap.cloud.spend.source = QStringLiteral(
+        "aws ce get-cost-and-usage --time-period Start=2026-10-01,"
+        "End=2026-10-29");
+    cloudSnap.cloud.spend.periodStart = QStringLiteral("2026-10-01");
+    cloudSnap.cloud.spend.periodEnd = QStringLiteral("2026-10-29");
+    cloudSnap.cloud.spend.monthToDateUsd = 452.10;
+    cloudSnap.cloud.spend.forecastRemainingUsd = 331.02;
+    cloudSnap.cloud.spend.forecastUsd = 783.12;
+    cloudSnap.cloud.spend.services = {
+        CloudSpendService{
+            QStringLiteral("Amazon Elastic Compute Cloud - Compute"), 380.40},
+        CloudSpendService{QStringLiteral("Amazon Simple Storage Service"), 51.70},
+        CloudSpendService{QStringLiteral("Amazon CloudWatch"), 20.00},
+    };
+    for (int day = 1; day <= 28; ++day) {
+        cloudSnap.cloud.spend.days.append(
+            CloudSpendDay{QStringLiteral("2026-10-%1").arg(day, 2, 10,
+                                                           QLatin1Char('0')),
+                          12.0 + day % 5});
+    }
     hud.setSnapshot(cloudSnap);
     hud.setSnapshot(cloudSnap);
 
@@ -1473,6 +1499,38 @@ int main(int argc, char *argv[]) {
               && cloudFootprint->text().contains(QStringLiteral("/tmp/rates.txt")),
           "cloud footprint card states every outbound action, cadence and "
           "guarantee");
+    // M85: billed spend. The fixture carries a real CE-shaped fold: $452.10
+    // billed, +$331.02 forecast for the rest of the month.
+    auto *cloudSpendSummary =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudSpendSummary"));
+    auto *cloudSpendDetail =
+        hud.findChild<QLabel *>(QStringLiteral("ddCloudSpendDetail"));
+    auto *cloudSpendServices =
+        hud.findChild<QTreeWidget *>(QStringLiteral("ddCloudSpendServices"));
+    auto *cloudSpendChart =
+        hud.findChild<TimeseriesChart *>(QStringLiteral("ddCloudSpendChart"));
+    check(cloudSpendSummary != nullptr
+              && cloudSpendSummary->text().contains(
+                  QStringLiteral("month to date $452.10"))
+              && cloudSpendSummary->text().contains(
+                  QStringLiteral("month end $783.12"))
+              && cloudSpendSummary->text().contains(
+                  QStringLiteral("(+$331.02 forecast)")),
+          "cloud spend card states billed, month end and the forecast");
+    check(cloudSpendDetail != nullptr
+              && cloudSpendDetail->text().contains(
+                  QStringLiteral("2026-10-01 .. 2026-10-29"))
+              && cloudSpendDetail->text().contains(
+                  QStringLiteral("unblended cost")),
+          "cloud spend detail names the window and the metric");
+    check(cloudSpendServices != nullptr && cloudSpendServices->topLevelItemCount() >= 2
+              && cloudSpendServices->topLevelItem(0)->text(0)
+                     == QStringLiteral("Amazon Elastic Compute Cloud - Compute")
+              && cloudSpendServices->topLevelItem(0)->text(1)
+                     .contains(QStringLiteral("$")),
+          "cloud spend table lists services with their share");
+    check(cloudSpendChart != nullptr && cloudSpendChart->sampleCount() > 1,
+          "cloud spend chart carries the daily series");
     check(cloudApp != nullptr
               && cloudApp->text().contains(QStringLiteral("cursor"))
               && cloudApp->text().contains(QStringLiteral("214.5%")),

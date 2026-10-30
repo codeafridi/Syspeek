@@ -61,6 +61,9 @@ void SamplerWorker::start() {
     if (m_cloudFleet == nullptr) {
         m_cloudFleet = new CloudFleetRunner(this);
     }
+    if (m_cloudSpend == nullptr) {
+        m_cloudSpend = new CloudSpendRunner(this);
+    }
     if (!m_hostInfoReady) {
         m_hostInfo = collectHostInfo();
         m_hostInfoReady = true;
@@ -80,6 +83,9 @@ void SamplerWorker::stop() {
     }
     if (m_cloudFleet != nullptr) {
         m_cloudFleet->stop();
+    }
+    if (m_cloudSpend != nullptr) {
+        m_cloudSpend->stop();
     }
 }
 
@@ -967,6 +973,11 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
     footprint.lastRequests = m_cloudSweepRequests;
     footprint.ratesPath = m_cloud.ratesPath.isEmpty() ? defaultCloudRatePath()
                                                       : m_cloud.ratesPath;
+    footprint.spend = m_cloud.spend;
+    footprint.spendTimeoutMs = m_cloud.spendTimeoutMs;
+    footprint.spendCommand = m_cloudBase.available
+                                 ? cloudSpendCommandText(m_cloudBase.identity)
+                                 : QString();
     footprint.identified = m_cloudBase.available;
     if (!m_cloudProbed) {
         cloud.note = cloudProbingText();
@@ -1025,6 +1036,16 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
                         .accruedUsd;
             }
         }
+    }
+    // M85: what the provider actually billed. Polled like the inventory, on a
+    // much slower cadence because cost data lags and the API call is billable.
+    if (m_cloudSpend != nullptr) {
+        CloudSpendOptions spendOptions;
+        spendOptions.enabled = m_cloud.spend;
+        spendOptions.timeoutMs = m_cloud.spendTimeoutMs;
+        m_cloudSpend->setOptions(spendOptions);
+        m_cloudSpend->update(cloud.identity, now);
+        cloud.spend = m_cloudSpend->status();
     }
     cloud.footprint = footprint;
     snapshot.cloud = cloud;
