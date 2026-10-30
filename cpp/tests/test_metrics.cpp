@@ -1513,7 +1513,12 @@ int main(int argc, char *argv[]) {
                 sample.comm = QStringLiteral("demo");
                 sample.state = QStringLiteral("waiting");
                 sample.waitChannel = QStringLiteral("WrUserRequest");
-                sample.utimeTicks = calls * 1000000ULL;
+                // 2 CPU-seconds per sample: the sampler divides by the
+                // MEASURED wall gap, and a loaded runner can overshoot
+                // the 105 ms fixture by hundreds of ms. A fixture that
+                // spends more CPU than wall time keeps the assertion
+                // about the delta, not about the runner's scheduler.
+                sample.utimeTicks = calls * 20000000ULL;
                 sample.stimeTicks = 0;
                 out = {sample};
                 tickHz = 10000000;
@@ -4898,12 +4903,29 @@ int main(int argc, char *argv[]) {
         };
 
 #if defined(Q_OS_WIN)
-        const QByteArray script =
-            "@echo off\r\n"
-            "echo %*>>\"%SYSPEEK_FAKE_ARGV_LOG%\"\r\n"
-            "if defined SYSPEEK_FAKE_STDERR type \"%SYSPEEK_FAKE_STDERR%\" 1>&2\r\n"
-            "if defined SYSPEEK_FAKE_STDOUT type \"%SYSPEEK_FAKE_STDOUT%\"\r\n"
-            "exit /b %SYSPEEK_FAKE_EXIT%\r\n";
+        // Windows CLIs are .cmd shims, and the runner starts those through
+        // cmd.exe. A batch file cannot reliably stream a file to the child's
+        // stdout pipe, so the shim delegates to PowerShell, which reads the
+        // fixture and writes it verbatim (and dispatches the second CE call).
+        const QByteArray script = "@echo off\r\n"
+                                  "powershell -NoProfile -ExecutionPolicy "
+                                  "Bypass -File \"%~dp0fake.ps1\" %*\r\n";
+        const QByteArray ps1 =
+            "$ErrorActionPreference = \'Stop\'\r\n"
+            "$out = $env:SYSPEEK_FAKE_STDOUT\r\n"
+            "if ($env:SYSPEEK_FAKE_ALT_MATCH -and $args.Count -ge 2 -and "
+            "$args[1] -eq $env:SYSPEEK_FAKE_ALT_MATCH) { $out = "
+            "$env:SYSPEEK_FAKE_ALT_STDOUT }\r\n"
+            "Add-Content -Path $env:SYSPEEK_FAKE_ARGV_LOG -Value ($args -join "
+            "' ')\r\n"
+            "if ($env:SYSPEEK_FAKE_STDERR) { "
+            "[Console]::Error.Write([IO.File]::ReadAllText("
+            "$env:SYSPEEK_FAKE_STDERR)) }\r\n"
+            "if ($out) { [Console]::Out.Write([IO.File]::ReadAllText($out)) "
+            "}\r\n"
+            "if ($env:SYSPEEK_FAKE_SLEEP) { Start-Sleep -Seconds "
+            "([int]$env:SYSPEEK_FAKE_SLEEP) }\r\n"
+            "exit [int]$env:SYSPEEK_FAKE_EXIT\r\n";
         const QString suffix = QStringLiteral(".cmd");
 #else
         const QByteArray script =
@@ -4916,6 +4938,9 @@ int main(int argc, char *argv[]) {
         const QString suffix;
 #endif
         bool wroteAll = true;
+#if defined(Q_OS_WIN)
+        wroteAll = writeFile(binDir + QStringLiteral("/fake.ps1"), ps1, false);
+#endif
         for (const char *cli : {"aws", "az", "gcloud", "oci"}) {
             wroteAll = wroteAll
                 && writeFile(binDir + QLatin1Char('/') + QLatin1String(cli)
@@ -4997,19 +5022,6 @@ int main(int argc, char *argv[]) {
                                "--region eu-west-1 --query "
                                "Reservations[].Instances[]"),
               "cloud cli: aws gets the exact regional describe-instances argv");
-#if defined(Q_OS_WIN)
-        {
-            // Temporary: the Windows fake-CLI path needs the child's own view
-            // of the world when a parse test fails.
-            QFile probe(outFile);
-            std::printf("cloud cli diag: out=%s exists=%d size=%lld note=%s\n",
-                        outFile.toUtf8().constData(), int(probe.exists()),
-                        probe.exists() ? qlonglong(probe.size()) : -1LL,
-                        awsFleet.note.toUtf8().constData());
-            std::printf("cloud cli diag: stdoutenv=%s\n",
-                        qgetenv("SYSPEEK_FAKE_STDOUT").constData());
-        }
-#endif
         check(awsFleet.available && awsFleet.rows.size() == 1
                   && awsFleet.rows.first().name == QStringLiteral("hud-box")
                   && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
@@ -5422,10 +5434,15 @@ int main(int argc, char *argv[]) {
         const QString awsName = bin + QStringLiteral("/aws.cmd");
         const QByteArray script =
             "@echo off\r\n"
-            "echo %*>>\"%SPEND_ARGV_LOG%\"\r\n"
-            "if \"%2\"==\"get-cost-forecast\" (type \"%SPEND_FORECAST%\") "
-            "else (type \"%SPEND_COST%\")\r\n"
-            "exit /b 0\r\n";
+            "powershell -NoProfile -ExecutionPolicy Bypass -File "
+            "\"%~dp0fake.ps1\" %*\r\n";
+        const QByteArray ps1 =
+            "$out = if ($args.Count -ge 2 -and $args[1] -eq "
+            "'get-cost-forecast') { $env:SPEND_FORECAST } else { "
+            "$env:SPEND_COST }\r\n"
+            "Add-Content -Path $env:SPEND_ARGV_LOG -Value ($args -join ' ')\r\n"
+            "[Console]::Out.Write([IO.File]::ReadAllText($out))\r\n"
+            "exit 0\r\n";
 #else
         const QString awsName = bin + QStringLiteral("/aws");
         const QByteArray script =
@@ -5434,7 +5451,10 @@ int main(int argc, char *argv[]) {
             "case \"$2\" in get-cost-forecast) cat \"$SPEND_FORECAST\";; "
             "*) cat \"$SPEND_COST\";; esac\n";
 #endif
-        const bool wrote = write(awsName, script);
+        bool wrote = write(awsName, script);
+#if defined(Q_OS_WIN)
+        wrote = wrote && write(bin + QStringLiteral("/fake.ps1"), ps1);
+#endif
         check(wrote, "spend: the fake aws CLI is executable");
         const QString oldPath = qEnvironmentVariable("PATH");
         qputenv("PATH", (bin
