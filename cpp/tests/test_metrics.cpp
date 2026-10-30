@@ -5042,7 +5042,11 @@ int main(int argc, char *argv[]) {
         )JSON";
 
         CloudFleetOptions cliOptions;
-        cliOptions.timeoutMs = 2000;
+        // A cold PowerShell start on Windows takes ~2 s, and this budget is a
+        // NETWORK budget in production (25 s), so a test-sized 2 s would kill
+        // the fake's very first run. The hang case below keeps its own tiny
+        // budget on purpose.
+        cliOptions.timeoutMs = 15000;
         const qint64 cliNow = 1'700'000'000'000LL;
 
         setFake(awsListing, QByteArray(), 0);
@@ -5053,21 +5057,6 @@ int main(int argc, char *argv[]) {
                                "--region eu-west-1 --query "
                                "Reservations[].Instances[]"),
               "cloud cli: aws gets the exact regional describe-instances argv");
-        if (awsFleet.rows.isEmpty()
-            || awsFleet.rows.first().ageSec != cliNow / 1000 - 1685613600) {
-            std::printf("cloud cli diag: available=%d rows=%d age=%lld "
-                        "expected=%lld launched=%lld tz=%s\n",
-                        int(awsFleet.available), int(awsFleet.rows.size()),
-                        awsFleet.rows.isEmpty()
-                            ? -1LL
-                            : qlonglong(awsFleet.rows.first().ageSec),
-                        qlonglong(cliNow / 1000 - 1685613600),
-                        awsFleet.rows.isEmpty()
-                            ? -1LL
-                            : qlonglong(awsFleet.rows.first().launchedAtMs),
-                        QTimeZone::systemTimeZoneId().constData());
-            std::fflush(stdout);
-        }
         check(awsFleet.available && awsFleet.rows.size() == 1
                   && awsFleet.rows.first().name == QStringLiteral("hud-box")
                   && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
@@ -5146,10 +5135,12 @@ int main(int argc, char *argv[]) {
         // A CLI that hangs: the budget must end it, and the card must say so.
         setFake(awsListing, QByteArray(), 0);
         qputenv("SYSPEEK_FAKE_SLEEP", "6");
+        CloudFleetOptions hangOptions;
+        hangOptions.timeoutMs = 2000;
         QElapsedTimer timeoutClock;
         timeoutClock.start();
         const CloudFleetStatus hung =
-            probeCloudFleet(awsId, cliOptions, cliNow);
+            probeCloudFleet(awsId, hangOptions, cliNow);
         const qint64 hungMs = timeoutClock.elapsed();
         qunsetenv("SYSPEEK_FAKE_SLEEP");
         check(!hung.available
