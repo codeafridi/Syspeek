@@ -4997,6 +4997,19 @@ int main(int argc, char *argv[]) {
                                "--region eu-west-1 --query "
                                "Reservations[].Instances[]"),
               "cloud cli: aws gets the exact regional describe-instances argv");
+#if defined(Q_OS_WIN)
+        {
+            // Temporary: the Windows fake-CLI path needs the child's own view
+            // of the world when a parse test fails.
+            QFile probe(outFile);
+            std::printf("cloud cli diag: out=%s exists=%d size=%lld note=%s\n",
+                        outFile.toUtf8().constData(), int(probe.exists()),
+                        probe.exists() ? qlonglong(probe.size()) : -1LL,
+                        awsFleet.note.toUtf8().constData());
+            std::printf("cloud cli diag: stdoutenv=%s\n",
+                        qgetenv("SYSPEEK_FAKE_STDOUT").constData());
+        }
+#endif
         check(awsFleet.available && awsFleet.rows.size() == 1
                   && awsFleet.rows.first().name == QStringLiteral("hud-box")
                   && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
