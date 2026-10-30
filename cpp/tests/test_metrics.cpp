@@ -4845,6 +4845,363 @@ int main(int argc, char *argv[]) {
               "qtcompat: the UTC shim matches the 6.5+ zone exactly");
     }
 
+
+    {
+        // M85a: the cloud CLI paths end to end against a FAKE cli on PATH.
+        // The parsers and argument builders are already fixture-tested; what
+        // this proves is the wiring a user actually hits — the argv handed to
+        // the provider's own client, the credential/format/timeout refusals,
+        // the polled runner, and the opt-in price import writing a stamped
+        // rate file.
+        QTemporaryDir cliDir;
+        check(cliDir.isValid(), "cloud cli: a temp dir for the fake CLIs");
+        const QString binDir = cliDir.path();
+        const QString argvLog = binDir + QStringLiteral("/argv.log");
+        const QString outFile = binDir + QStringLiteral("/stdout.json");
+        const QString errFile = binDir + QStringLiteral("/stderr.txt");
+
+        const auto writeFile = [](const QString &path, const QByteArray &data,
+                                  bool executable) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                return false;
+            }
+            file.write(data);
+            file.close();
+            if (executable) {
+                file.setPermissions(QFile::ReadOwner | QFile::WriteOwner
+                                    | QFile::ExeOwner | QFile::ReadGroup
+                                    | QFile::ExeGroup | QFile::ReadOther
+                                    | QFile::ExeOther);
+            }
+            return true;
+        };
+
+#if defined(Q_OS_WIN)
+        const QByteArray script =
+            "@echo off\r\n"
+            "echo %*>>\"%SYSPEEK_FAKE_ARGV_LOG%\"\r\n"
+            "if defined SYSPEEK_FAKE_STDERR type \"%SYSPEEK_FAKE_STDERR%\" 1>&2\r\n"
+            "if defined SYSPEEK_FAKE_STDOUT type \"%SYSPEEK_FAKE_STDOUT%\"\r\n"
+            "exit /b %SYSPEEK_FAKE_EXIT%\r\n";
+        const QString suffix = QStringLiteral(".cmd");
+#else
+        const QByteArray script =
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$SYSPEEK_FAKE_ARGV_LOG\"\n"
+            "if [ -n \"${SYSPEEK_FAKE_SLEEP:-}\" ]; then sleep \"$SYSPEEK_FAKE_SLEEP\"; fi\n"
+            "if [ -n \"${SYSPEEK_FAKE_STDERR:-}\" ]; then cat \"$SYSPEEK_FAKE_STDERR\" >&2; fi\n"
+            "if [ -n \"${SYSPEEK_FAKE_STDOUT:-}\" ]; then cat \"$SYSPEEK_FAKE_STDOUT\"; fi\n"
+            "exit \"${SYSPEEK_FAKE_EXIT:-0}\"\n";
+        const QString suffix;
+#endif
+        bool wroteAll = true;
+        for (const char *cli : {"aws", "az", "gcloud", "oci"}) {
+            wroteAll = wroteAll
+                && writeFile(binDir + QLatin1Char('/') + QLatin1String(cli)
+                                 + suffix,
+                             script, true);
+        }
+        check(wroteAll, "cloud cli: the fake provider CLIs are executable");
+
+        const QString oldPath = qEnvironmentVariable("PATH");
+        qputenv("PATH", (binDir
+#if defined(Q_OS_WIN)
+                         + QLatin1Char(';') + oldPath
+#else
+                         + QLatin1Char(':') + oldPath
+#endif
+                         ).toUtf8());
+        qputenv("SYSPEEK_FAKE_ARGV_LOG", argvLog.toUtf8());
+
+        const auto setFake = [&](const QByteArray &stdoutData,
+                                 const QByteArray &stderrData, int exitCode) {
+            writeFile(outFile, stdoutData, false);
+            writeFile(errFile, stderrData, false);
+            qputenv("SYSPEEK_FAKE_STDOUT",
+                    stdoutData.isEmpty() ? QByteArray()
+                                         : outFile.toUtf8());
+            qputenv("SYSPEEK_FAKE_STDERR",
+                    stderrData.isEmpty() ? QByteArray()
+                                         : errFile.toUtf8());
+            qputenv("SYSPEEK_FAKE_EXIT", QByteArray::number(exitCode));
+            qunsetenv("SYSPEEK_FAKE_SLEEP");
+            QFile::remove(argvLog);
+        };
+        const auto lastArgv = [&argvLog]() {
+            QFile log(argvLog);
+            if (!log.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            const QStringList lines =
+                QString::fromUtf8(log.readAll()).split(
+                    QLatin1Char('\n'), Qt::SkipEmptyParts);
+            return lines.isEmpty() ? QString() : lines.last().trimmed();
+        };
+        // Resolving the CLI hits the filesystem, so it runs with the fake
+        // dir first on PATH; the identity below is what the metadata service
+        // would report on each provider.
+        CloudIdentity awsId;
+        awsId.provider = CloudProvider::Aws;
+        awsId.instanceId = QStringLiteral("i-0123");
+        awsId.region = QStringLiteral("eu-west-1");
+        CloudIdentity azId;
+        azId.provider = CloudProvider::Azure;
+        azId.accountId = QStringLiteral("sub-9");
+        CloudIdentity gcpId;
+        gcpId.provider = CloudProvider::Gcp;
+        gcpId.accountId = QStringLiteral("proj-7");
+        CloudIdentity ociId;
+        ociId.provider = CloudProvider::Oci;
+        ociId.accountId = QStringLiteral("ocid1.compartment");
+        ociId.region = QStringLiteral("eu-frankfurt-1");
+
+        const QByteArray awsListing = R"JSON(
+          {"Reservations":[{"Instances":[
+            {"InstanceId":"i-0123","InstanceType":"c7g.2xlarge",
+             "State":{"Name":"running"},
+             "Placement":{"AvailabilityZone":"eu-west-1a"},
+             "LaunchTime":"2023-06-01T10:00:00Z",
+             "Tags":[{"Key":"Name","Value":"hud-box"}]}]}]}
+        )JSON";
+
+        CloudFleetOptions cliOptions;
+        cliOptions.timeoutMs = 2000;
+        const qint64 cliNow = 1'700'000'000'000LL;
+
+        setFake(awsListing, QByteArray(), 0);
+        const CloudFleetStatus awsFleet =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "ec2 describe-instances --output json "
+                               "--region eu-west-1 --query "
+                               "Reservations[].Instances[]"),
+              "cloud cli: aws gets the exact regional describe-instances argv");
+        check(awsFleet.available && awsFleet.rows.size() == 1
+                  && awsFleet.rows.first().name == QStringLiteral("hud-box")
+                  && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
+              "cloud cli: the aws listing parses into a row with its age");
+
+        setFake(QByteArrayLiteral(
+                    "[{\"name\":\"vm-a\",\"location\":\"westus\","
+                    "\"powerState\":\"VM running\","
+                    "\"hardwareProfile\":{\"vmSize\":\"Standard_D2s_v3\"}}]"),
+                QByteArray(), 0);
+        const CloudFleetStatus azFleet =
+            probeCloudFleet(azId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "vm list -d -o json --subscription sub-9"),
+              "cloud cli: az lists with -d and the imds subscription");
+        check(azFleet.available && azFleet.rows.size() == 1
+                  && azFleet.rows.first().instanceType
+                         == QStringLiteral("Standard_D2s_v3"),
+              "cloud cli: the az listing parses into a row");
+
+        setFake(QByteArrayLiteral(
+                    "[{\"name\":\"gce-1\",\"id\":\"44\","
+                    "\"machineType\":\"projects/p/zones/us-central1-a/"
+                    "machineTypes/e2-small\","
+                    "\"zone\":\"projects/p/zones/us-central1-a\","
+                    "\"status\":\"RUNNING\"}]"),
+                QByteArray(), 0);
+        const CloudFleetStatus gcpFleet =
+            probeCloudFleet(gcpId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "compute instances list --format=json "
+                               "--project proj-7"),
+              "cloud cli: gcloud lists the imds project as json");
+        check(gcpFleet.available && gcpFleet.rows.size() == 1
+                  && gcpFleet.rows.first().instanceType
+                         == QStringLiteral("e2-small"),
+              "cloud cli: the gcloud listing parses into a row");
+
+        setFake(QByteArrayLiteral(
+                    "{\"data\":[{\"id\":\"ocid1.instance\","
+                    "\"display-name\":\"oci-1\",\"shape\":\"VM.Standard.A1\","
+                    "\"lifecycle-state\":\"RUNNING\",\"region\":\"eu-frankfurt-1\"}]}"),
+                QByteArray(), 0);
+        const CloudFleetStatus ociFleet =
+            probeCloudFleet(ociId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "compute instance list --compartment-id "
+                               "ocid1.compartment --region eu-frankfurt-1 "
+                               "--all --output json"),
+              "cloud cli: oci pages the compartment with its region");
+        check(ociFleet.available && ociFleet.rows.size() == 1
+                  && ociFleet.rows.first().name == QStringLiteral("oci-1"),
+              "cloud cli: the oci listing parses into a row");
+
+        // A logged-out CLI is the failure a user actually meets: the refusal
+        // must name the fix, not print a stack of provider noise.
+        setFake(QByteArray(),
+                QByteArrayLiteral("Unable to locate credentials. You can "
+                                  "configure credentials by running \"aws "
+                                  "configure\".\n"),
+                255);
+        const CloudFleetStatus refused =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!refused.available && refused.note == fleetCredentialsText(
+                                        CloudProvider::Aws)
+                  && refused.note.contains(QStringLiteral("aws configure")),
+              "cloud cli: a credential refusal names the fix");
+
+        setFake(QByteArrayLiteral("<html>gateway</html>"), QByteArray(), 0);
+        const CloudFleetStatus notJson =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!notJson.available
+                  && notJson.note.contains(QStringLiteral("not JSON")),
+              "cloud cli: non-JSON output is refused, never half-parsed");
+
+        // A CLI that hangs: the budget must end it, and the card must say so.
+        setFake(awsListing, QByteArray(), 0);
+        qputenv("SYSPEEK_FAKE_SLEEP", "6");
+        QElapsedTimer timeoutClock;
+        timeoutClock.start();
+        const CloudFleetStatus hung =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        const qint64 hungMs = timeoutClock.elapsed();
+        qunsetenv("SYSPEEK_FAKE_SLEEP");
+        check(!hung.available
+                  && hung.note == fleetTimeoutText(QStringLiteral("aws"), 2)
+                  && hungMs >= 1800 && hungMs < 6000,
+              "cloud cli: a hanging CLI is killed at the budget");
+
+        // No CLI on PATH at all: the gate names the package to install.
+        // (The fake dir is dropped and the real PATH is replaced too:
+        // a developer box may well have a working `aws` installed.)
+        const QString emptyDir = binDir + QStringLiteral("/empty");
+        QDir().mkpath(emptyDir);
+        qputenv("PATH", emptyDir.toUtf8());
+        const CloudFleetStatus missing =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!missing.available
+                  && missing.note == fleetCliMissingText(QStringLiteral("aws")),
+              "cloud cli: a missing CLI states the gate and the fix");
+        qputenv("PATH", (binDir
+#if defined(Q_OS_WIN)
+                         + QLatin1Char(';') + oldPath
+#else
+                         + QLatin1Char(':') + oldPath
+#endif
+                         ).toUtf8());
+
+        // The HUD's path: the polled runner must deliver the same rows without
+        // ever blocking the caller.
+        {
+            setFake(awsListing, QByteArray(), 0);
+            CloudFleetRunner runner;
+            CloudFleetOptions runnerOptions;
+            runnerOptions.timeoutMs = 5000;
+            runner.setOptions(runnerOptions);
+            QElapsedTimer pollClock;
+            pollClock.start();
+            qint64 worstUpdateMs = 0;
+            for (int i = 0; i < 400; ++i) {
+                QElapsedTimer one;
+                one.start();
+                runner.update(awsId, QDateTime::currentMSecsSinceEpoch());
+                worstUpdateMs = qMax(worstUpdateMs, one.elapsed());
+                if (runner.status().fetchedAtMs > 0 && !runner.status().rows.isEmpty()) {
+                    break;
+                }
+                app.processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            check(runner.status().available
+                      && runner.status().rows.size() == 1
+                      && runner.status().rows.first().name
+                             == QStringLiteral("hud-box"),
+                  "cloud cli: the polled runner delivers the listing");
+            check(worstUpdateMs < 1200,
+                  "cloud cli: no runner update blocks the sampler thread");
+            runner.stop();
+        }
+
+        // `syspeek --cloud-prices` end to end: the fake aws answers a Price
+        // List payload and the import writes a stamped rate file.
+        {
+            const QString ratesPath = binDir + QStringLiteral("/rates.txt");
+            // The API answers PriceList as an array of JSON *strings*, so the
+            // fixture is built the way the service builds it.
+            const QByteArray productDoc = R"JSON(
+              {"product":{"attributes":{"instanceType":"c7g.2xlarge",
+                 "capacitystatus":"Used","preInstalledSw":"NA",
+                 "tenancy":"Shared","operatingSystem":"Linux"}},
+               "terms":{"OnDemand":{"X":{"priceDimensions":{"X.1":{
+                 "unit":"Hrs","pricePerUnit":{"USD":"0.2920000000"}}}}}}}
+            )JSON";
+            QJsonObject priceResponse;
+            priceResponse.insert(QStringLiteral("FormatVersion"),
+                                 QStringLiteral("aws_v1"));
+            priceResponse.insert(
+                QStringLiteral("PriceList"),
+                QJsonArray{QString::fromUtf8(productDoc)});
+            setFake(QJsonDocument(priceResponse).toJson(QJsonDocument::Compact),
+                    QByteArray(), 0);
+            const QByteArray typeArg =
+                QByteArrayLiteral("--cloud-prices=c7g.2xlarge");
+            const QByteArray regionArg = QByteArrayLiteral("--region=eu-west-1");
+            const QByteArray ratesArg =
+                QByteArrayLiteral("--rates=") + ratesPath.toUtf8();
+            char *argv[] = {const_cast<char *>("syspeek"),
+                            const_cast<char *>(typeArg.constData()),
+                            const_cast<char *>(regionArg.constData()),
+                            const_cast<char *>(ratesArg.constData()), nullptr};
+            const int rc = cloudPriceRun(4, argv);
+            QFile written(ratesPath);
+            const QString text = written.open(QIODevice::ReadOnly)
+                                     ? QString::fromUtf8(written.readAll())
+                                     : QString();
+            check(rc == 0
+                      && text.contains(QStringLiteral(
+                          "aws/c7g.2xlarge = 0.2920"))
+                      && text.contains(QStringLiteral("# imported "))
+                      && lastArgv().startsWith(QStringLiteral("pricing get-products")),
+                  "cloud cli: --cloud-prices writes the imported rate and its date");
+
+            // Re-importing the same type updates the line instead of
+            // appending a duplicate, and keeps a hand-written rate.
+            {
+                QFile seed(ratesPath);
+                if (seed.open(QIODevice::WriteOnly | QIODevice::Append)) {
+                    seed.write("azure/Standard_D2s_v3 = 0.0960\n");
+                }
+            }
+            const int rc2 = cloudPriceRun(4, argv);
+            QFile reread(ratesPath);
+            const QString text2 = reread.open(QIODevice::ReadOnly)
+                                      ? QString::fromUtf8(reread.readAll())
+                                      : QString();
+            check(rc2 == 0
+                      && text2.count(QStringLiteral("aws/c7g.2xlarge")) == 1
+                      && text2.contains(QStringLiteral(
+                          "azure/Standard_D2s_v3 = 0.0960")),
+                  "cloud cli: a re-import replaces its line and keeps the rest");
+
+            // A logged-out CLI: no file is written and the refusal is stated.
+            const QString untouched = binDir + QStringLiteral("/rates2.txt");
+            setFake(QByteArray(),
+                    QByteArrayLiteral("Unable to locate credentials\n"), 255);
+            const QByteArray ratesArg2 =
+                QByteArrayLiteral("--rates=") + untouched.toUtf8();
+            char *argv2[] = {const_cast<char *>("syspeek"),
+                             const_cast<char *>(typeArg.constData()),
+                             const_cast<char *>(regionArg.constData()),
+                             const_cast<char *>(ratesArg2.constData()),
+                             nullptr};
+            const int rc3 = cloudPriceRun(4, argv2);
+            check(rc3 == 1 && !QFile::exists(untouched),
+                  "cloud cli: a refused import writes no rate file");
+        }
+
+        qputenv("PATH", oldPath.toUtf8());
+        for (const char *name : {"SYSPEEK_FAKE_ARGV_LOG", "SYSPEEK_FAKE_STDOUT",
+                                 "SYSPEEK_FAKE_STDERR", "SYSPEEK_FAKE_EXIT",
+                                 "SYSPEEK_FAKE_SLEEP"}) {
+            qunsetenv(name);
+        }
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
