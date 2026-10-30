@@ -64,6 +64,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QStandardPaths>
+#include <QTimeZone>
 #include <QThread>
 
 #include <QApplication>
@@ -5052,6 +5053,21 @@ int main(int argc, char *argv[]) {
                                "--region eu-west-1 --query "
                                "Reservations[].Instances[]"),
               "cloud cli: aws gets the exact regional describe-instances argv");
+        if (awsFleet.rows.isEmpty()
+            || awsFleet.rows.first().ageSec != cliNow / 1000 - 1685613600) {
+            std::printf("cloud cli diag: available=%d rows=%d age=%lld "
+                        "expected=%lld launched=%lld tz=%s\n",
+                        int(awsFleet.available), int(awsFleet.rows.size()),
+                        awsFleet.rows.isEmpty()
+                            ? -1LL
+                            : qlonglong(awsFleet.rows.first().ageSec),
+                        qlonglong(cliNow / 1000 - 1685613600),
+                        awsFleet.rows.isEmpty()
+                            ? -1LL
+                            : qlonglong(awsFleet.rows.first().launchedAtMs),
+                        QTimeZone::systemTimeZoneId().constData());
+            std::fflush(stdout);
+        }
         check(awsFleet.available && awsFleet.rows.size() == 1
                   && awsFleet.rows.first().name == QStringLiteral("hud-box")
                   && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
