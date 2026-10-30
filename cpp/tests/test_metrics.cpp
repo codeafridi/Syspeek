@@ -4950,13 +4950,27 @@ int main(int argc, char *argv[]) {
         check(wroteAll, "cloud cli: the fake provider CLIs are executable");
 
         const QString oldPath = qEnvironmentVariable("PATH");
-        qputenv("PATH", (binDir
+        // Windows runners ship the real aws.exe/az.exe, and the primary
+        // lookup finds those before a .cmd of the same name, so the fake PATH
+        // keeps only the OS directories (cmd, powershell) plus the fakes.
+        const auto fakePath = [](const QString &dir, const QString &base) {
 #if defined(Q_OS_WIN)
-                         + QLatin1Char(';') + oldPath
+            QStringList keep;
+            const QString root = qEnvironmentVariable("SystemRoot");
+            for (const QString &entry : base.split(QLatin1Char(';'))) {
+                if (entry.contains(QStringLiteral("System32"),
+                                   Qt::CaseInsensitive)
+                    || (!root.isEmpty()
+                        && entry.compare(root, Qt::CaseInsensitive) == 0)) {
+                    keep.append(entry);
+                }
+            }
+            return dir + QLatin1Char(';') + keep.join(QLatin1Char(';'));
 #else
-                         + QLatin1Char(':') + oldPath
+            return dir + QLatin1Char(':') + base;
 #endif
-                         ).toUtf8());
+        };
+        qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
         qputenv("SYSPEEK_FAKE_ARGV_LOG", argvLog.toUtf8());
 
         const auto setFake = [&](const QByteArray &stdoutData,
@@ -5122,13 +5136,7 @@ int main(int argc, char *argv[]) {
         check(!missing.available
                   && missing.note == fleetCliMissingText(QStringLiteral("aws")),
               "cloud cli: a missing CLI states the gate and the fix");
-        qputenv("PATH", (binDir
-#if defined(Q_OS_WIN)
-                         + QLatin1Char(';') + oldPath
-#else
-                         + QLatin1Char(':') + oldPath
-#endif
-                         ).toUtf8());
+        qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
 
         // The HUD's path: the polled runner must deliver the same rows without
         // ever blocking the caller.
@@ -5457,13 +5465,24 @@ int main(int argc, char *argv[]) {
 #endif
         check(wrote, "spend: the fake aws CLI is executable");
         const QString oldPath = qEnvironmentVariable("PATH");
-        qputenv("PATH", (bin
+        const auto fakePath = [](const QString &dir, const QString &base) {
 #if defined(Q_OS_WIN)
-                         + QLatin1Char(';') + oldPath
+            QStringList keep;
+            const QString root = qEnvironmentVariable("SystemRoot");
+            for (const QString &entry : base.split(QLatin1Char(';'))) {
+                if (entry.contains(QStringLiteral("System32"),
+                                   Qt::CaseInsensitive)
+                    || (!root.isEmpty()
+                        && entry.compare(root, Qt::CaseInsensitive) == 0)) {
+                    keep.append(entry);
+                }
+            }
+            return dir + QLatin1Char(';') + keep.join(QLatin1Char(';'));
 #else
-                         + QLatin1Char(':') + oldPath
+            return dir + QLatin1Char(':') + base;
 #endif
-                         ).toUtf8());
+        };
+        qputenv("PATH", fakePath(bin, oldPath).toUtf8());
         qputenv("SPEND_ARGV_LOG", argvLog.toUtf8());
         qputenv("SPEND_COST", costFile.toUtf8());
         qputenv("SPEND_FORECAST", forecastFile.toUtf8());
@@ -5477,12 +5496,14 @@ int main(int argc, char *argv[]) {
         const qint64 nowMs = 1'760'000'000'000LL;   // 2025-10-09 UTC
 
         const CloudSpendStatus spend = probeCloudSpend(identity, options, nowMs);
-        QFile log(argvLog);
-        const QStringList calls =
-            log.open(QIODevice::ReadOnly)
-                ? QString::fromUtf8(log.readAll())
-                      .split(QLatin1Char('\n'), Qt::SkipEmptyParts)
-                : QStringList();
+        QStringList calls;
+        {
+            QFile log(argvLog);
+            if (log.open(QIODevice::ReadOnly)) {
+                calls = QString::fromUtf8(log.readAll())
+                            .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            }
+        }
         check(calls.size() == 2
                   && calls.at(0).startsWith(
                       QStringLiteral("ce get-cost-and-usage --time-period "
