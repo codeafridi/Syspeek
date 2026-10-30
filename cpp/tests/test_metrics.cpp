@@ -63,10 +63,12 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QStandardPaths>
 #include <QThread>
 
 #include <QApplication>
 #include <QPixmap>
+#include <QStandardPaths>
 #include <QThread>
 
 #include <cmath>
@@ -4907,9 +4909,17 @@ int main(int argc, char *argv[]) {
         // cmd.exe. A batch file cannot reliably stream a file to the child's
         // stdout pipe, so the shim delegates to PowerShell, which reads the
         // fixture and writes it verbatim (and dispatches the second CE call).
-        const QByteArray script = "@echo off\r\n"
-                                  "powershell -NoProfile -ExecutionPolicy "
-                                  "Bypass -File \"%~dp0fake.ps1\" %*\r\n";
+        QString psPath =
+            QStandardPaths::findExecutable(QStringLiteral("powershell"));
+        if (psPath.isEmpty()) {
+            psPath = qEnvironmentVariable("SystemRoot")
+                     + QStringLiteral(
+                         "/System32/WindowsPowerShell/v1.0/powershell.exe");
+        }
+        const QByteArray script =
+            ("@echo off\r\n\"" + psPath.toUtf8()
+             + "\" -NoProfile -ExecutionPolicy Bypass -File "
+               "\"%~dp0fake.ps1\" %*\r\n");
         const QByteArray ps1 =
             "$ErrorActionPreference = \'Stop\'\r\n"
             "$out = $env:SYSPEEK_FAKE_STDOUT\r\n"
@@ -4972,6 +4982,12 @@ int main(int argc, char *argv[]) {
         };
         qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
         qputenv("SYSPEEK_FAKE_ARGV_LOG", argvLog.toUtf8());
+        {
+            const QString resolved =
+                QStandardPaths::findExecutable(QStringLiteral("aws"));
+            check(resolved.startsWith(binDir),
+                  "cloud cli: PATH resolves aws to the fake, not the real CLI");
+        }
 
         const auto setFake = [&](const QByteArray &stdoutData,
                                  const QByteArray &stderrData, int exitCode) {
