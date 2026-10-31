@@ -2,6 +2,7 @@
 
 #include "CloudProbe.h"
 #include "CloudStatus.h"
+#include "CloudSpendSource.h"
 #include "CpuSampler.h"
 #include "Config.h"
 #include "DiskSampler.h"
@@ -128,6 +129,8 @@ private:
     bool m_cloudProbed = false;
     // M83: one polled CLI listing per 10 min; the sampler never waits on it.
     CloudFleetRunner *m_cloudFleet = nullptr;
+    // M85: one polled cost query per 6 h (Cost Explorer requests are billable).
+    CloudSpendRunner *m_cloudSpend = nullptr;
     GroupCache m_groupCache;
     QTimer *m_timer = nullptr;
     int m_intervalMs = 1000;

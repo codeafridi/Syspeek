@@ -554,6 +554,39 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.cloud.footprint.lastRequests = 4;
     s.cloud.footprint.ratesPath = QStringLiteral(
         "/home/you/.config/syspeek/cloud-rates.txt");
+    s.cloud.footprint.spend = true;
+    s.cloud.footprint.spendTimeoutMs = 30000;
+    s.cloud.footprint.spendCommand = QStringLiteral(
+        "aws ce get-cost-and-usage --time-period Start=2026-10-01,"
+        "End=2026-10-29");
+
+    // M85: a CE-shaped billed month, so the render proves the card, the
+    // service split and the daily chart.
+    s.cloud.spend.attempted = true;
+    s.cloud.spend.available = true;
+    s.cloud.spend.provider = CloudProvider::Aws;
+    s.cloud.spend.cliName = QStringLiteral("aws");
+    s.cloud.spend.scope = QStringLiteral("account 123456789012");
+    s.cloud.spend.source = QStringLiteral(
+        "aws ce get-cost-and-usage --time-period Start=2026-10-01,"
+        "End=2026-10-29 --granularity DAILY --metrics UnblendedCost");
+    s.cloud.spend.periodStart = QStringLiteral("2026-10-01");
+    s.cloud.spend.periodEnd = QStringLiteral("2026-10-29");
+    s.cloud.spend.monthToDateUsd = 452.10;
+    s.cloud.spend.forecastRemainingUsd = 331.02;
+    s.cloud.spend.forecastUsd = 783.12;
+    s.cloud.spend.services = {
+        CloudSpendService{
+            QStringLiteral("Amazon Elastic Compute Cloud - Compute"), 380.40},
+        CloudSpendService{QStringLiteral("Amazon Simple Storage Service"), 51.70},
+        CloudSpendService{QStringLiteral("Amazon CloudWatch"), 20.00},
+    };
+    for (int day = 1; day <= 28; ++day) {
+        s.cloud.spend.days.append(
+            CloudSpendDay{QStringLiteral("2026-10-%1").arg(day, 2, 10,
+                                                           QLatin1Char('0')),
+                          12.0 + double((day * 7) % 9)});
+    }
 
     // M84: the console measures itself. A measured footprint and a 62 ms tick
     // with named sections, so the Settings render shows real rows.

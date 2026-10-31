@@ -380,6 +380,37 @@ me?" without touching a control plane:
   used-capacity / Linux / no-software SKU) and writes the rate file with a fresh
   import stamp. It is opt-in, never runs on a tick, and Syspeek never reads or
   stores credentials — the CLI uses whatever profile you already configured.
+- **Billed spend** is what the provider actually charged this month, read from
+  its cost API — a different number from the estimate above, and labelled as
+  such:
+
+  ```sh
+  aws ce get-cost-and-usage --time-period Start=<month start>,End=<tomorrow> \
+      --granularity DAILY --metrics UnblendedCost \
+      --group-by Type=DIMENSION,Key=SERVICE --output json
+  aws ce get-cost-forecast --time-period Start=<today>,End=<month end> \
+      --metric UNBLENDED_COST --granularity MONTHLY --output json
+  az  consumption usage list --top 1000 \
+      --filter "properties/usageStart ge '<month start>'" -o json
+  ```
+
+  The **BILLED SPEND** card shows month to date, the month-end projection
+  (billed + the provider's forecast for the rest of the month), a daily chart
+  and the per-service split. The metric is named where it matters: AWS
+  `UnblendedCost`, Azure `pretaxCost`. Cost data lags by up to a day and part
+  of it can be marked estimated — both are stated on the card rather than
+  smoothed over. GCP bills through a BigQuery export (no CLI cost API) and OCI's
+  usage API is not wired yet, so both print the gate instead of a number.
+
+  Cost Explorer requests are **billable to your own account**, so this query
+  runs every 6 hours and has its own switch:
+
+  ```ini
+  [cloud]
+  spend            = true    ; the provider cost query (billable, every 6 h)
+  spend_timeout_ms = 30000   ; per query; clamped 5000..180000
+  ```
+
 - **Instance age and the account inventory** come from the provider's own CLI,
   because only the account knows when this instance launched. The IMDS
   document names the provider, then Syspeek asks that provider's CLI, reusing

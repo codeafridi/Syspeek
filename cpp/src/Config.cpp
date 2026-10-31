@@ -326,6 +326,16 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             config.cloud.inventoryTimeoutMs =
                 qBound(2000, inventoryTimeout, 120000);
         }
+        if (settings.contains(QStringLiteral("spend"))) {
+            config.cloud.spend =
+                settings.value(QStringLiteral("spend")).toBool();
+        }
+        const int spendTimeout =
+            settings.value(QStringLiteral("spend_timeout_ms")).toInt();
+        if (spendTimeout > 0) {
+            config.cloud.spendTimeoutMs =
+                qBound(5000, spendTimeout, 180000);
+        }
     }
     settings.endGroup();
 

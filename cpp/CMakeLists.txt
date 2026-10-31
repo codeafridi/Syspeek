@@ -202,6 +202,7 @@ add_library(syspeek_core STATIC
     src/SensorStatus.h
     src/CloudStatus.cpp
     src/CloudStatus.h
+    src/CloudProvider.h
     src/CloudProbe.cpp
     src/CloudProbe.h
     src/CloudFleetStatus.cpp
@@ -209,6 +210,10 @@ add_library(syspeek_core STATIC
     src/CloudFleetSource.h
     src/CloudPricing.cpp
     src/CloudPricing.h
+    src/CloudSpendStatus.cpp
+    src/CloudSpendStatus.h
+    src/CloudSpendSource.cpp
+    src/CloudSpendSource.h
     src/OverlayStatus.cpp
     src/OverlayStatus.h
     src/KubeStatus.cpp

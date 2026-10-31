@@ -192,6 +192,13 @@ struct CloudConfig {
     // [cloud] inventory_timeout_ms: one listing budget. The CLI call is a
     // network round trip to the provider API, not link-local.
     int inventoryTimeoutMs = 25000;
+    // [cloud] spend: read the account's BILLED month-to-date cost from the
+    // provider's cost API (AWS Cost Explorer, Azure consumption). Cost Explorer
+    // requests are themselves billable and the data lags, so this is a
+    // separate switch from the link-local read and the inventory listing.
+    bool spend = true;
+    // [cloud] spend_timeout_ms: budget per cost query.
+    int spendTimeoutMs = 30000;
 };
 
 struct Config {

@@ -6,6 +6,7 @@
 #include "TickBudget.h"
 #include "MetricsEndpoint.h"
 #include "CloudFleetSource.h"
+#include "CloudSpendSource.h"
 #include "CloudPricing.h"
 
 #include "OverlayStatus.h"
@@ -752,6 +753,99 @@ QString dumpReportJson(int maxProcs) {
                          && pricedFleet.unpriced == 0
                          && qAbs(pricedFleet.monthlyUsd - 0.2920 * 730.0) < 1e-9);
         cloud.insert(QStringLiteral("fleet"), fleet);
+
+        // M85: the billed-spend query. Same shape as the inventory: the real
+        // call only happens where a provider was identified, and the parsers
+        // plus the arithmetic carry self-tests every runner can assert.
+        CloudSpendOptions spendOptions;
+        spendOptions.timeoutMs = 12000;
+        const CloudSpendStatus spend =
+            probeCloudSpend(probe.identity, spendOptions);
+        QJsonObject spendJson;
+        spendJson.insert(QStringLiteral("attempted"), spend.attempted);
+        spendJson.insert(QStringLiteral("available"), spend.available);
+        spendJson.insert(QStringLiteral("provider"),
+                         cloudProviderName(spend.provider));
+        spendJson.insert(QStringLiteral("cli"), spend.cliName);
+        spendJson.insert(QStringLiteral("scope"), spend.scope);
+        spendJson.insert(QStringLiteral("note"),
+                         cloudSpendSummaryText(spend));
+        spendJson.insert(QStringLiteral("periodStart"), spend.periodStart);
+        spendJson.insert(QStringLiteral("monthToDateUsd"), spend.monthToDateUsd);
+        spendJson.insert(QStringLiteral("forecastUsd"), spend.forecastUsd);
+        spendJson.insert(QStringLiteral("services"), spend.services.size());
+        spendJson.insert(QStringLiteral("days"), spend.days.size());
+
+        const QByteArray spendFixture = QByteArrayLiteral(
+            "{\"ResultsByTime\":["
+            "{\"TimePeriod\":{\"Start\":\"2026-10-01\",\"End\":\"2026-10-02\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"12.5\",\"Unit\":\"USD\"}}},"
+            "{\"Keys\":[\"Amazon Simple Storage Service\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"1.5\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":false},"
+            "{\"TimePeriod\":{\"Start\":\"2026-10-02\",\"End\":\"2026-10-03\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"10.0\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":true}]}");
+        QString spendError;
+        CloudSpendStatus awsSpend =
+            parseAwsCostAndUsage(spendFixture, &spendError);
+        spendApplyForecast(&awsSpend, 50.0);
+        spendJson.insert(QStringLiteral("spendAwsOk"),
+                         awsSpend.available
+                             && qAbs(awsSpend.monthToDateUsd - 24.0) < 1e-9
+                             && qAbs(awsSpend.forecastUsd - 74.0) < 1e-9
+                             && awsSpend.days.size() == 2
+                             && awsSpend.services.size() == 2
+                             && awsSpend.services.at(0).name
+                                    == QStringLiteral("Amazon Elastic Compute "
+                                                      "Cloud - Compute")
+                             && qAbs(awsSpend.services.at(0).usd - 22.5) < 1e-9
+                             && awsSpend.estimated);
+        const CloudSpendStatus azureSpend = parseAzureUsageList(
+            QByteArrayLiteral(
+                "[{\"properties\":{\"pretaxCost\":3.25,"
+                "\"product\":\"Virtual Machines\","
+                "\"usageStart\":\"2026-10-01T00:00:00Z\"}},"
+                "{\"properties\":{\"pretaxCost\":1.75,"
+                "\"product\":\"Storage\","
+                "\"usageStart\":\"2026-10-02T00:00:00Z\"}}]"),
+            &spendError);
+        spendJson.insert(QStringLiteral("spendAzureOk"),
+                         azureSpend.available
+                             && qAbs(azureSpend.monthToDateUsd - 5.0) < 1e-9
+                             && azureSpend.days.size() == 2
+                             && azureSpend.services.size() == 2);
+        QString forecastError;
+        const CloudSpendStatus forecast = parseAwsCostForecast(
+            QByteArrayLiteral(
+                "{\"Total\":{\"Amount\":\"118.33\",\"Unit\":\"USD\"},"
+                "\"ForecastResultsByTime\":[]}"),
+            &forecastError);
+        spendJson.insert(QStringLiteral("spendForecastOk"),
+                         forecast.available
+                             && qAbs(forecast.forecastRemainingUsd - 118.33)
+                                    < 1e-9);
+        spendJson.insert(
+            QStringLiteral("spendPeriodOk"),
+            cloudSpendPeriodStart(1'700'000'000'000LL)
+                    == QStringLiteral("2023-11-01")
+                && cloudSpendPeriodEnd(1'700'000'000'000LL)
+                       == QStringLiteral("2023-11-15")
+                && cloudSpendForecastEnd(1'700'000'000'000LL)
+                       == QStringLiteral("2023-12-01"));
+        CloudIdentity gcpOnly;
+        gcpOnly.provider = CloudProvider::Gcp;
+        spendJson.insert(
+            QStringLiteral("spendGateOk"),
+            cloudSpendGateText(CloudProvider::Gcp).contains(
+                QStringLiteral("BigQuery"))
+                && probeCloudSpend(gcpOnly, spendOptions)
+                       .note.contains(QStringLiteral("BigQuery")));
+        cloud.insert(QStringLiteral("spend"), spendJson);
         root.insert(QStringLiteral("cloud"), cloud);
     }
 

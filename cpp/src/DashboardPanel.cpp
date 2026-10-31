@@ -542,7 +542,8 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "#ddCloudTileProvider, #ddCloudTileAge, #ddCloudTileAccrued,"
         " #ddCloudTileMonthly { color: %TEXT%; }"
         "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
-        " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint"
+        " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint,"
+        " #ddCloudSpendSummary, #ddCloudSpendDetail, #ddCloudSpendNote"
         " { color: %MUTED%; }"
         "#ddCloudShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
@@ -4160,6 +4161,59 @@ QWidget *DashboardPanel::buildCloudView() {
         QStringLiteral("TOP PROCESSES IN THE FOCUSED APP"), m_cloudConsumers,
         view));
 
+    // --- M85: what the provider actually billed. The estimate above comes
+    // from a rate file; this comes from the provider's own cost API, so the
+    // two numbers are labelled differently on purpose.
+    m_chartCloudSpend = new TimeseriesChart(view);
+    m_chartCloudSpend->setObjectName(QStringLiteral("ddCloudSpendChart"));
+    m_chartCloudSpend->setUnit(QStringLiteral("$"));
+    m_chartCloudSpend->setSeriesName(
+        QStringLiteral("syspeek.cloud.spend_daily"));
+
+    m_cloudSpendSummary = new QLabel(QStringLiteral("--"), view);
+    m_cloudSpendSummary->setObjectName(
+        QStringLiteral("ddCloudSpendSummary"));
+    m_cloudSpendSummary->setFont(monoFont(10));
+    m_cloudSpendSummary->setWordWrap(true);
+    m_cloudSpendSummary->setMinimumWidth(1);
+
+    m_cloudSpendDetail = new QLabel(QStringLiteral("--"), view);
+    m_cloudSpendDetail->setObjectName(QStringLiteral("ddCloudSpendDetail"));
+    m_cloudSpendDetail->setFont(monoFont(10));
+    m_cloudSpendDetail->setWordWrap(true);
+    m_cloudSpendDetail->setMinimumWidth(1);
+
+    m_cloudSpendServices = new QTreeWidget(view);
+    m_cloudSpendServices->setObjectName(QStringLiteral("ddCloudSpendServices"));
+    m_cloudSpendServices->setColumnCount(2);
+    m_cloudSpendServices->setHeaderLabels({QStringLiteral("SERVICE"),
+                                          QStringLiteral("$ / SHARE")});
+    m_cloudSpendServices->setRootIsDecorated(false);
+    m_cloudSpendServices->setSelectionMode(QAbstractItemView::NoSelection);
+    m_cloudSpendServices->setFocusPolicy(Qt::NoFocus);
+    m_cloudSpendServices->header()->setSectionResizeMode(
+        0, QHeaderView::Stretch);
+    m_cloudSpendServices->header()->setSectionResizeMode(
+        1, QHeaderView::ResizeToContents);
+
+    m_cloudSpendNote = new QLabel(cloudSpendNote(), view);
+    m_cloudSpendNote->setObjectName(QStringLiteral("ddCloudSpendNote"));
+    m_cloudSpendNote->setFont(monoFont(9));
+    m_cloudSpendNote->setWordWrap(true);
+    m_cloudSpendNote->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("BILLED SPEND"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("daily spend"),
+                                    m_chartCloudSpend, view));
+    layout->addWidget(
+        makeCard(QStringLiteral("month to date"), m_cloudSpendSummary, view));
+    layout->addWidget(makeCard(QStringLiteral("detail"), m_cloudSpendDetail,
+                               view));
+    layout->addWidget(makeCard(QStringLiteral("by service"),
+                               m_cloudSpendServices, view));
+    layout->addWidget(m_cloudSpendNote);
+
     // --- M84: the outbound footprint. Every network action Syspeek takes on
     // its own, its cadence and the measured cost of the last sweep, plus the
     // two guarantees (no credentials, read-only). Stated on the page, not
@@ -6855,6 +6909,37 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
     m_cloudSummary->setText(cloudSummaryText(cloud));
     if (m_cloudFootprint != nullptr) {
         m_cloudFootprint->setText(cloudFootprintText(cloud.footprint));
+    }
+    if (m_cloudSpendSummary != nullptr) {
+        const CloudSpendStatus &spend = cloud.spend;
+        m_cloudSpendSummary->setText(cloudSpendSummaryText(spend));
+        m_cloudSpendDetail->setText(cloudSpendDetailText(spend));
+        m_cloudSpendServices->clear();
+        for (const CloudSpendService &service : spend.services) {
+            auto *item =
+                new QTreeWidgetItem(m_cloudSpendServices,
+                                    {service.name,
+                                     service.usd < 0.0
+                                         ? QString()
+                                         : cloudSpendAmountText(service.usd)});
+            if (spend.monthToDateUsd > 0.0 && service.usd >= 0.0) {
+                item->setText(1,
+                              QStringLiteral("%1  %2%")
+                                  .arg(cloudSpendAmountText(service.usd),
+                                       QString::number(
+                                           service.usd / spend.monthToDateUsd
+                                               * 100.0,
+                                           'f', 1)));
+            }
+        }
+        if (spend.days.size() > 1) {
+            QList<double> values;
+            values.reserve(spend.days.size());
+            for (const CloudSpendDay &day : spend.days) {
+                values.append(day.usd);
+            }
+            m_chartCloudSpend->setValues(values);
+        }
     }
     m_cloudDetail->setText(cloudDetailText(cloud));
     m_cloudCost->setText(cloudCostText(cloud));

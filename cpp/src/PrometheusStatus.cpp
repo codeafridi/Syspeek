@@ -1,5 +1,7 @@
 #include "PrometheusStatus.h"
 
+#include "CloudStatus.h"
+
 #include <QList>
 #include <QStringList>
 
@@ -484,6 +486,50 @@ QString prometheusText(const DisplaySnapshot &s) {
                 "# HELP syspeek_cgroup_pids Focused app cgroup task count."));
             lines.append(QStringLiteral("# TYPE syspeek_cgroup_pids gauge"));
             lines.append(gaugeInt("syspeek_cgroup_pids", s.cgroupPidsCurrent));
+        }
+    }
+
+    // M85: what the provider billed this month. Cloud data
+    // lags, so the gauges are point-in-time snapshots of the last query, not
+    // an accounting ledger; the series are Syspeek-own because the provider
+    // has no metric for "month to date at this moment".
+    const CloudSpendStatus &spend = s.cloud.spend;
+    if (spend.available && spend.monthToDateUsd >= 0.0) {
+        const QString provider = cloudProviderName(spend.provider);
+        lines.append(QStringLiteral(
+            "# HELP syspeek_cloud_spend_month_usd Billed cost this month, as "
+            "reported by the provider's cost API."));
+        lines.append(
+            QStringLiteral("# TYPE syspeek_cloud_spend_month_usd gauge"));
+        lines.append(labeled("syspeek_cloud_spend_month_usd", QStringLiteral("provider"),
+                             provider, spend.monthToDateUsd));
+        if (spend.forecastUsd >= 0.0) {
+            lines.append(QStringLiteral(
+                "# HELP syspeek_cloud_spend_forecast_usd Month-end projection: "
+                "billed so far plus the provider's forecast."));
+            lines.append(QStringLiteral(
+                "# TYPE syspeek_cloud_spend_forecast_usd gauge"));
+            lines.append(labeled("syspeek_cloud_spend_forecast_usd",
+                                 QStringLiteral("provider"), provider,
+                                 spend.forecastUsd));
+        }
+        if (!spend.services.isEmpty()) {
+            lines.append(QStringLiteral(
+                "# HELP syspeek_cloud_spend_service_usd Billed cost this month "
+                "per provider service."));
+            lines.append(QStringLiteral(
+                "# TYPE syspeek_cloud_spend_service_usd gauge"));
+            for (const CloudSpendService &service : spend.services) {
+                if (service.usd < 0.0) {
+                    continue;
+                }
+                lines.append(
+                    QStringLiteral(
+                        "syspeek_cloud_spend_service_usd{provider=\"%1\","
+                        "service=\"%2\"} %3")
+                        .arg(escapeLabel(provider), escapeLabel(service.name),
+                             num(service.usd)));
+            }
         }
     }
 

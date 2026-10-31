@@ -43,6 +43,8 @@
 #include "CloudStatus.h"
 #include "CloudPricing.h"
 #include "CloudFleetSource.h"
+#include "CloudSpendStatus.h"
+#include "CloudSpendSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
 #include "ServicesSource.h"
@@ -61,10 +63,13 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QStandardPaths>
+#include <QTimeZone>
 #include <QThread>
 
 #include <QApplication>
 #include <QPixmap>
+#include <QStandardPaths>
 #include <QThread>
 
 #include <cmath>
@@ -1511,7 +1516,12 @@ int main(int argc, char *argv[]) {
                 sample.comm = QStringLiteral("demo");
                 sample.state = QStringLiteral("waiting");
                 sample.waitChannel = QStringLiteral("WrUserRequest");
-                sample.utimeTicks = calls * 1000000ULL;
+                // 2 CPU-seconds per sample: the sampler divides by the
+                // MEASURED wall gap, and a loaded runner can overshoot
+                // the 105 ms fixture by hundreds of ms. A fixture that
+                // spends more CPU than wall time keeps the assertion
+                // about the delta, not about the runner's scheduler.
+                sample.utimeTicks = calls * 20000000ULL;
                 sample.stimeTicks = 0;
                 out = {sample};
                 tickHz = 10000000;
@@ -4827,6 +4837,24 @@ int main(int argc, char *argv[]) {
                       QStringLiteral("ever started, stopped or terminated")),
               "footprint: the no-credentials and read-only guarantees are "
               "spelled out");
+        // M85: the billed-spend query is the second billable outbound action,
+        // so the footprint names it with its cadence and switch.
+        footprint.spend = true;
+        footprint.spendTimeoutMs = 30000;
+        footprint.spendCommand = QStringLiteral(
+            "aws ce get-cost-and-usage --time-period Start=2026-10-01,"
+            "End=2026-10-02");
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("spend      aws ce get-cost-and-usage"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("every 6 h, 30000 ms budget"))
+                  && cloudFootprintText(footprint).contains(
+                      QStringLiteral("billable to your account")),
+              "footprint: the cost query is disclosed with its cadence and cost");
+        footprint.spend = false;
+        check(cloudFootprintText(footprint).contains(
+                  QStringLiteral("spend      off ([cloud] spend=false)")),
+              "footprint: a disabled cost query says nothing is issued");
         footprint.enabled = false;
         check(cloudFootprintText(footprint).contains(QStringLiteral("disabled"))
                   && cloudFootprintText(footprint).contains(
@@ -4843,6 +4871,728 @@ int main(int argc, char *argv[]) {
                   && utc.toString(QStringLiteral("yyyy-MM-dd HH:mm"))
                          == QStringLiteral("2023-11-14 22:13"),
               "qtcompat: the UTC shim matches the 6.5+ zone exactly");
+    }
+
+
+    {
+        // M85a: the cloud CLI paths end to end against a FAKE cli on PATH.
+        // The parsers and argument builders are already fixture-tested; what
+        // this proves is the wiring a user actually hits — the argv handed to
+        // the provider's own client, the credential/format/timeout refusals,
+        // the polled runner, and the opt-in price import writing a stamped
+        // rate file.
+        QTemporaryDir cliDir;
+        check(cliDir.isValid(), "cloud cli: a temp dir for the fake CLIs");
+        const QString binDir = cliDir.path();
+        const QString argvLog = binDir + QStringLiteral("/argv.log");
+        const QString outFile = binDir + QStringLiteral("/stdout.json");
+        const QString errFile = binDir + QStringLiteral("/stderr.txt");
+
+        const auto writeFile = [](const QString &path, const QByteArray &data,
+                                  bool executable) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                return false;
+            }
+            file.write(data);
+            file.close();
+            if (executable) {
+                file.setPermissions(QFile::ReadOwner | QFile::WriteOwner
+                                    | QFile::ExeOwner | QFile::ReadGroup
+                                    | QFile::ExeGroup | QFile::ReadOther
+                                    | QFile::ExeOther);
+            }
+            return true;
+        };
+
+#if defined(Q_OS_WIN)
+        // Windows CLIs are .cmd shims, and the runner starts those through
+        // cmd.exe. A batch file cannot reliably stream a file to the child's
+        // stdout pipe, so the shim delegates to PowerShell, which reads the
+        // fixture and writes it verbatim (and dispatches the second CE call).
+        QString psPath =
+            QStandardPaths::findExecutable(QStringLiteral("powershell"));
+        if (psPath.isEmpty()) {
+            psPath = qEnvironmentVariable("SystemRoot")
+                     + QStringLiteral(
+                         "/System32/WindowsPowerShell/v1.0/powershell.exe");
+        }
+        const QByteArray script =
+            ("@echo off\r\n\"" + psPath.toUtf8()
+             + "\" -NoProfile -ExecutionPolicy Bypass -File "
+               "\"%~dp0fake.ps1\" %*\r\n");
+        const QByteArray ps1 =
+            "$ErrorActionPreference = \'Stop\'\r\n"
+            "$out = $env:SYSPEEK_FAKE_STDOUT\r\n"
+            "if ($env:SYSPEEK_FAKE_ALT_MATCH -and $args.Count -ge 2 -and "
+            "$args[1] -eq $env:SYSPEEK_FAKE_ALT_MATCH) { $out = "
+            "$env:SYSPEEK_FAKE_ALT_STDOUT }\r\n"
+            "Add-Content -Path $env:SYSPEEK_FAKE_ARGV_LOG -Value ($args -join "
+            "' ')\r\n"
+            "if ($env:SYSPEEK_FAKE_STDERR) { "
+            "[Console]::Error.Write([IO.File]::ReadAllText("
+            "$env:SYSPEEK_FAKE_STDERR)) }\r\n"
+            "if ($out) { [Console]::Out.Write([IO.File]::ReadAllText($out)) "
+            "}\r\n"
+            "if ($env:SYSPEEK_FAKE_SLEEP) { Start-Sleep -Seconds "
+            "([int]$env:SYSPEEK_FAKE_SLEEP) }\r\n"
+            "exit [int]$env:SYSPEEK_FAKE_EXIT\r\n";
+        const QString suffix = QStringLiteral(".cmd");
+#else
+        const QByteArray script =
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$SYSPEEK_FAKE_ARGV_LOG\"\n"
+            "if [ -n \"${SYSPEEK_FAKE_SLEEP:-}\" ]; then sleep \"$SYSPEEK_FAKE_SLEEP\"; fi\n"
+            "if [ -n \"${SYSPEEK_FAKE_STDERR:-}\" ]; then cat \"$SYSPEEK_FAKE_STDERR\" >&2; fi\n"
+            "if [ -n \"${SYSPEEK_FAKE_STDOUT:-}\" ]; then cat \"$SYSPEEK_FAKE_STDOUT\"; fi\n"
+            "exit \"${SYSPEEK_FAKE_EXIT:-0}\"\n";
+        const QString suffix;
+#endif
+        bool wroteAll = true;
+#if defined(Q_OS_WIN)
+        wroteAll = writeFile(binDir + QStringLiteral("/fake.ps1"), ps1, false);
+#endif
+        for (const char *cli : {"aws", "az", "gcloud", "oci"}) {
+            wroteAll = wroteAll
+                && writeFile(binDir + QLatin1Char('/') + QLatin1String(cli)
+                                 + suffix,
+                             script, true);
+        }
+        check(wroteAll, "cloud cli: the fake provider CLIs are executable");
+
+        const QString oldPath = qEnvironmentVariable("PATH");
+        // Windows runners ship the real aws.exe/az.exe, and the primary
+        // lookup finds those before a .cmd of the same name, so the fake PATH
+        // keeps only the OS directories (cmd, powershell) plus the fakes.
+        const auto fakePath = [](const QString &dir, const QString &base) {
+#if defined(Q_OS_WIN)
+            QStringList keep;
+            const QString root = qEnvironmentVariable("SystemRoot");
+            for (const QString &entry : base.split(QLatin1Char(';'))) {
+                if (entry.contains(QStringLiteral("System32"),
+                                   Qt::CaseInsensitive)
+                    || (!root.isEmpty()
+                        && entry.compare(root, Qt::CaseInsensitive) == 0)) {
+                    keep.append(entry);
+                }
+            }
+            return dir + QLatin1Char(';') + keep.join(QLatin1Char(';'));
+#else
+            return dir + QLatin1Char(':') + base;
+#endif
+        };
+        qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
+        qputenv("SYSPEEK_FAKE_ARGV_LOG", argvLog.toUtf8());
+        {
+            const QString resolved =
+                QStandardPaths::findExecutable(QStringLiteral("aws"));
+            check(resolved.startsWith(binDir),
+                  "cloud cli: PATH resolves aws to the fake, not the real CLI");
+        }
+
+        const auto setFake = [&](const QByteArray &stdoutData,
+                                 const QByteArray &stderrData, int exitCode) {
+            writeFile(outFile, stdoutData, false);
+            writeFile(errFile, stderrData, false);
+            qputenv("SYSPEEK_FAKE_STDOUT",
+                    stdoutData.isEmpty() ? QByteArray()
+                                         : outFile.toUtf8());
+            qputenv("SYSPEEK_FAKE_STDERR",
+                    stderrData.isEmpty() ? QByteArray()
+                                         : errFile.toUtf8());
+            qputenv("SYSPEEK_FAKE_EXIT", QByteArray::number(exitCode));
+            qunsetenv("SYSPEEK_FAKE_SLEEP");
+            QFile::remove(argvLog);
+        };
+        const auto lastArgv = [&argvLog]() {
+            QFile log(argvLog);
+            if (!log.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            const QStringList lines =
+                QString::fromUtf8(log.readAll()).split(
+                    QLatin1Char('\n'), Qt::SkipEmptyParts);
+            return lines.isEmpty() ? QString() : lines.last().trimmed();
+        };
+        // Resolving the CLI hits the filesystem, so it runs with the fake
+        // dir first on PATH; the identity below is what the metadata service
+        // would report on each provider.
+        CloudIdentity awsId;
+        awsId.provider = CloudProvider::Aws;
+        awsId.instanceId = QStringLiteral("i-0123");
+        awsId.region = QStringLiteral("eu-west-1");
+        CloudIdentity azId;
+        azId.provider = CloudProvider::Azure;
+        azId.accountId = QStringLiteral("sub-9");
+        CloudIdentity gcpId;
+        gcpId.provider = CloudProvider::Gcp;
+        gcpId.accountId = QStringLiteral("proj-7");
+        CloudIdentity ociId;
+        ociId.provider = CloudProvider::Oci;
+        ociId.accountId = QStringLiteral("ocid1.compartment");
+        ociId.region = QStringLiteral("eu-frankfurt-1");
+
+        const QByteArray awsListing = R"JSON(
+          {"Reservations":[{"Instances":[
+            {"InstanceId":"i-0123","InstanceType":"c7g.2xlarge",
+             "State":{"Name":"running"},
+             "Placement":{"AvailabilityZone":"eu-west-1a"},
+             "LaunchTime":"2023-06-01T10:00:00Z",
+             "Tags":[{"Key":"Name","Value":"hud-box"}]}]}]}
+        )JSON";
+
+        CloudFleetOptions cliOptions;
+        // A cold PowerShell start on Windows takes ~2 s, and this budget is a
+        // NETWORK budget in production (25 s), so a test-sized 2 s would kill
+        // the fake's very first run. The hang case below keeps its own tiny
+        // budget on purpose.
+        cliOptions.timeoutMs = 15000;
+        const qint64 cliNow = 1'700'000'000'000LL;
+
+        setFake(awsListing, QByteArray(), 0);
+        const CloudFleetStatus awsFleet =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "ec2 describe-instances --output json "
+                               "--region eu-west-1 --query "
+                               "Reservations[].Instances[]"),
+              "cloud cli: aws gets the exact regional describe-instances argv");
+        check(awsFleet.available && awsFleet.rows.size() == 1
+                  && awsFleet.rows.first().name == QStringLiteral("hud-box")
+                  && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
+              "cloud cli: the aws listing parses into a row with its age");
+
+        setFake(QByteArrayLiteral(
+                    "[{\"name\":\"vm-a\",\"location\":\"westus\","
+                    "\"powerState\":\"VM running\","
+                    "\"hardwareProfile\":{\"vmSize\":\"Standard_D2s_v3\"}}]"),
+                QByteArray(), 0);
+        const CloudFleetStatus azFleet =
+            probeCloudFleet(azId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "vm list -d -o json --subscription sub-9"),
+              "cloud cli: az lists with -d and the imds subscription");
+        check(azFleet.available && azFleet.rows.size() == 1
+                  && azFleet.rows.first().instanceType
+                         == QStringLiteral("Standard_D2s_v3"),
+              "cloud cli: the az listing parses into a row");
+
+        setFake(QByteArrayLiteral(
+                    "[{\"name\":\"gce-1\",\"id\":\"44\","
+                    "\"machineType\":\"projects/p/zones/us-central1-a/"
+                    "machineTypes/e2-small\","
+                    "\"zone\":\"projects/p/zones/us-central1-a\","
+                    "\"status\":\"RUNNING\"}]"),
+                QByteArray(), 0);
+        const CloudFleetStatus gcpFleet =
+            probeCloudFleet(gcpId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "compute instances list --format=json "
+                               "--project proj-7"),
+              "cloud cli: gcloud lists the imds project as json");
+        check(gcpFleet.available && gcpFleet.rows.size() == 1
+                  && gcpFleet.rows.first().instanceType
+                         == QStringLiteral("e2-small"),
+              "cloud cli: the gcloud listing parses into a row");
+
+        setFake(QByteArrayLiteral(
+                    "{\"data\":[{\"id\":\"ocid1.instance\","
+                    "\"display-name\":\"oci-1\",\"shape\":\"VM.Standard.A1\","
+                    "\"lifecycle-state\":\"RUNNING\",\"region\":\"eu-frankfurt-1\"}]}"),
+                QByteArray(), 0);
+        const CloudFleetStatus ociFleet =
+            probeCloudFleet(ociId, cliOptions, cliNow);
+        check(lastArgv() == QStringLiteral(
+                               "compute instance list --compartment-id "
+                               "ocid1.compartment --region eu-frankfurt-1 "
+                               "--all --output json"),
+              "cloud cli: oci pages the compartment with its region");
+        check(ociFleet.available && ociFleet.rows.size() == 1
+                  && ociFleet.rows.first().name == QStringLiteral("oci-1"),
+              "cloud cli: the oci listing parses into a row");
+
+        // A logged-out CLI is the failure a user actually meets: the refusal
+        // must name the fix, not print a stack of provider noise.
+        setFake(QByteArray(),
+                QByteArrayLiteral("Unable to locate credentials. You can "
+                                  "configure credentials by running \"aws "
+                                  "configure\".\n"),
+                255);
+        const CloudFleetStatus refused =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!refused.available && refused.note == fleetCredentialsText(
+                                        CloudProvider::Aws)
+                  && refused.note.contains(QStringLiteral("aws configure")),
+              "cloud cli: a credential refusal names the fix");
+
+        setFake(QByteArrayLiteral("<html>gateway</html>"), QByteArray(), 0);
+        const CloudFleetStatus notJson =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!notJson.available
+                  && notJson.note.contains(QStringLiteral("not JSON")),
+              "cloud cli: non-JSON output is refused, never half-parsed");
+
+        // A CLI that hangs: the budget must end it, and the card must say so.
+        setFake(awsListing, QByteArray(), 0);
+        qputenv("SYSPEEK_FAKE_SLEEP", "6");
+        CloudFleetOptions hangOptions;
+        hangOptions.timeoutMs = 2000;
+        QElapsedTimer timeoutClock;
+        timeoutClock.start();
+        const CloudFleetStatus hung =
+            probeCloudFleet(awsId, hangOptions, cliNow);
+        const qint64 hungMs = timeoutClock.elapsed();
+        qunsetenv("SYSPEEK_FAKE_SLEEP");
+        check(!hung.available
+                  && hung.note == fleetTimeoutText(QStringLiteral("aws"), 2)
+                  && hungMs >= 1800 && hungMs < 6000,
+              "cloud cli: a hanging CLI is killed at the budget");
+
+        // No CLI on PATH at all: the gate names the package to install.
+        // (The fake dir is dropped and the real PATH is replaced too:
+        // a developer box may well have a working `aws` installed.)
+        const QString emptyDir = binDir + QStringLiteral("/empty");
+        QDir().mkpath(emptyDir);
+        qputenv("PATH", emptyDir.toUtf8());
+        const CloudFleetStatus missing =
+            probeCloudFleet(awsId, cliOptions, cliNow);
+        check(!missing.available
+                  && missing.note == fleetCliMissingText(QStringLiteral("aws")),
+              "cloud cli: a missing CLI states the gate and the fix");
+        qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
+
+        // The HUD's path: the polled runner must deliver the same rows without
+        // ever blocking the caller.
+        {
+            setFake(awsListing, QByteArray(), 0);
+            CloudFleetRunner runner;
+            CloudFleetOptions runnerOptions;
+            runnerOptions.timeoutMs = 5000;
+            runner.setOptions(runnerOptions);
+            QElapsedTimer pollClock;
+            pollClock.start();
+            qint64 worstUpdateMs = 0;
+            for (int i = 0; i < 400; ++i) {
+                QElapsedTimer one;
+                one.start();
+                runner.update(awsId, QDateTime::currentMSecsSinceEpoch());
+                worstUpdateMs = qMax(worstUpdateMs, one.elapsed());
+                if (runner.status().fetchedAtMs > 0 && !runner.status().rows.isEmpty()) {
+                    break;
+                }
+                app.processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            check(runner.status().available
+                      && runner.status().rows.size() == 1
+                      && runner.status().rows.first().name
+                             == QStringLiteral("hud-box"),
+                  "cloud cli: the polled runner delivers the listing");
+            check(worstUpdateMs < 1200,
+                  "cloud cli: no runner update blocks the sampler thread");
+            runner.stop();
+        }
+
+        // `syspeek --cloud-prices` end to end: the fake aws answers a Price
+        // List payload and the import writes a stamped rate file.
+        {
+            const QString ratesPath = binDir + QStringLiteral("/rates.txt");
+            // The API answers PriceList as an array of JSON *strings*, so the
+            // fixture is built the way the service builds it.
+            const QByteArray productDoc = R"JSON(
+              {"product":{"attributes":{"instanceType":"c7g.2xlarge",
+                 "capacitystatus":"Used","preInstalledSw":"NA",
+                 "tenancy":"Shared","operatingSystem":"Linux"}},
+               "terms":{"OnDemand":{"X":{"priceDimensions":{"X.1":{
+                 "unit":"Hrs","pricePerUnit":{"USD":"0.2920000000"}}}}}}}
+            )JSON";
+            QJsonObject priceResponse;
+            priceResponse.insert(QStringLiteral("FormatVersion"),
+                                 QStringLiteral("aws_v1"));
+            priceResponse.insert(
+                QStringLiteral("PriceList"),
+                QJsonArray{QString::fromUtf8(productDoc)});
+            setFake(QJsonDocument(priceResponse).toJson(QJsonDocument::Compact),
+                    QByteArray(), 0);
+            const QByteArray typeArg =
+                QByteArrayLiteral("--cloud-prices=c7g.2xlarge");
+            const QByteArray regionArg = QByteArrayLiteral("--region=eu-west-1");
+            const QByteArray ratesArg =
+                QByteArrayLiteral("--rates=") + ratesPath.toUtf8();
+            char *argv[] = {const_cast<char *>("syspeek"),
+                            const_cast<char *>(typeArg.constData()),
+                            const_cast<char *>(regionArg.constData()),
+                            const_cast<char *>(ratesArg.constData()), nullptr};
+            const int rc = cloudPriceRun(4, argv);
+            QFile written(ratesPath);
+            const QString text = written.open(QIODevice::ReadOnly)
+                                     ? QString::fromUtf8(written.readAll())
+                                     : QString();
+            check(rc == 0
+                      && text.contains(QStringLiteral(
+                          "aws/c7g.2xlarge = 0.2920"))
+                      && text.contains(QStringLiteral("# imported "))
+                      && lastArgv().startsWith(QStringLiteral("pricing get-products")),
+                  "cloud cli: --cloud-prices writes the imported rate and its date");
+
+            // Re-importing the same type updates the line instead of
+            // appending a duplicate, and keeps a hand-written rate.
+            {
+                QFile seed(ratesPath);
+                if (seed.open(QIODevice::WriteOnly | QIODevice::Append)) {
+                    seed.write("azure/Standard_D2s_v3 = 0.0960\n");
+                }
+            }
+            const int rc2 = cloudPriceRun(4, argv);
+            QFile reread(ratesPath);
+            const QString text2 = reread.open(QIODevice::ReadOnly)
+                                      ? QString::fromUtf8(reread.readAll())
+                                      : QString();
+            check(rc2 == 0
+                      && text2.count(QStringLiteral("aws/c7g.2xlarge")) == 1
+                      && text2.contains(QStringLiteral(
+                          "azure/Standard_D2s_v3 = 0.0960")),
+                  "cloud cli: a re-import replaces its line and keeps the rest");
+
+            // A logged-out CLI: no file is written and the refusal is stated.
+            const QString untouched = binDir + QStringLiteral("/rates2.txt");
+            setFake(QByteArray(),
+                    QByteArrayLiteral("Unable to locate credentials\n"), 255);
+            const QByteArray ratesArg2 =
+                QByteArrayLiteral("--rates=") + untouched.toUtf8();
+            char *argv2[] = {const_cast<char *>("syspeek"),
+                             const_cast<char *>(typeArg.constData()),
+                             const_cast<char *>(regionArg.constData()),
+                             const_cast<char *>(ratesArg2.constData()),
+                             nullptr};
+            const int rc3 = cloudPriceRun(4, argv2);
+            check(rc3 == 1 && !QFile::exists(untouched),
+                  "cloud cli: a refused import writes no rate file");
+        }
+
+        qputenv("PATH", oldPath.toUtf8());
+        for (const char *name : {"SYSPEEK_FAKE_ARGV_LOG", "SYSPEEK_FAKE_STDOUT",
+                                 "SYSPEEK_FAKE_STDERR", "SYSPEEK_FAKE_EXIT",
+                                 "SYSPEEK_FAKE_SLEEP"}) {
+            qunsetenv(name);
+        }
+    }
+
+
+    {
+        // M85: billed spend. The parsers are pure, so both provider payloads
+        // and the arithmetic are asserted without a network or a CLI.
+        QString spendError;
+        const QByteArray awsCost = QByteArrayLiteral(
+            "{\"ResultsByTime\":["
+            "{\"TimePeriod\":{\"Start\":\"2026-10-01\",\"End\":\"2026-10-02\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"12.5\",\"Unit\":\"USD\"}}},"
+            "{\"Keys\":[\"Amazon Simple Storage Service\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"1.5\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":false},"
+            "{\"TimePeriod\":{\"Start\":\"2026-10-02\",\"End\":\"2026-10-03\"},"
+            "\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"10.0\",\"Unit\":\"USD\"}}}],"
+            "\"Estimated\":true}]}");
+        CloudSpendStatus awsSpend = parseAwsCostAndUsage(awsCost, &spendError);
+        check(awsSpend.available
+                  && qAbs(awsSpend.monthToDateUsd - 24.0) < 1e-9
+                  && awsSpend.periodStart == QStringLiteral("2026-10-01")
+                  && awsSpend.periodEnd == QStringLiteral("2026-10-03"),
+              "spend: aws groups fold into a month-to-date total and a period");
+        check(awsSpend.services.size() == 2
+                  && awsSpend.services.first().name
+                         == QStringLiteral("Amazon Elastic Compute Cloud - Compute")
+                  && qAbs(awsSpend.services.first().usd - 22.5) < 1e-9
+                  && qAbs(awsSpend.services.last().usd - 1.5) < 1e-9,
+              "spend: per-service totals are summed across days, sorted desc");
+        check(awsSpend.days.size() == 2
+                  && qAbs(awsSpend.days.at(0).usd - 14.0) < 1e-9
+                  && qAbs(awsSpend.days.at(1).usd - 10.0) < 1e-9
+                  && awsSpend.estimated,
+              "spend: the daily series and the provider's estimated flag survive");
+        spendApplyForecast(&awsSpend, 50.0);
+        check(qAbs(awsSpend.forecastUsd - 74.0) < 1e-9
+                  && qAbs(awsSpend.forecastRemainingUsd - 50.0) < 1e-9,
+              "spend: the month-end projection is billed + forecast");
+
+        const CloudSpendStatus azureSpend = parseAzureUsageList(
+            QByteArrayLiteral(
+                "{\"value\":["
+                "{\"properties\":{\"pretaxCost\":\"3.25\","
+                "\"product\":\"Virtual Machines\","
+                "\"usageStart\":\"2026-10-01T00:00:00Z\"}},"
+                "{\"properties\":{\"pretaxCost\":1.75,"
+                "\"product\":\"Storage\","
+                "\"usageStart\":\"2026-10-02T00:00:00Z\"}},"
+                "{\"properties\":{\"pretaxCost\":1.0,"
+                "\"product\":\"Storage\","
+                "\"usageStart\":\"2026-10-02T00:00:00Z\"}}]}"),
+            &spendError);
+        check(azureSpend.available
+                  && qAbs(azureSpend.monthToDateUsd - 6.0) < 1e-9
+                  && azureSpend.days.size() == 2
+                  && qAbs(azureSpend.days.at(1).usd - 2.75) < 1e-9
+                  && azureSpend.services.size() == 2,
+              "spend: azure usage rows accept string costs, fold days and "
+              "products");
+
+        const CloudSpendStatus forecastOnly = parseAwsCostForecast(
+            QByteArrayLiteral(
+                "{\"Total\":{\"Amount\":\"118.33\",\"Unit\":\"USD\"},"
+                "\"ForecastResultsByTime\":[]}"),
+            &spendError);
+        check(forecastOnly.available
+                  && qAbs(forecastOnly.forecastRemainingUsd - 118.33) < 1e-9,
+              "spend: the forecast payload yields the remaining-month figure");
+        QString emptyError;
+        check(!parseAwsCostAndUsage(QByteArrayLiteral("{}"), &emptyError)
+                   .available
+                  && emptyError.contains(QStringLiteral("ResultsByTime"))
+                  && !parseAwsCostForecast(QByteArrayLiteral("{}"), &emptyError)
+                          .available
+                  && !parseAzureUsageList(QByteArrayLiteral("not json"),
+                                          &emptyError)
+                          .available,
+              "spend: an empty or malformed payload states the reason");
+
+        CloudSpendStatus capped;
+        capped.available = true;
+        capped.monthToDateUsd = 100.0;
+        for (int i = 0; i < 20; ++i) {
+            capped.services.append(
+                CloudSpendService{QStringLiteral("svc%1").arg(i),
+                                  double(20 - i)});
+        }
+        spendSortServices(&capped, 3);
+        check(capped.services.size() == 4
+                  && capped.services.first().name == QStringLiteral("svc0")
+                  && capped.services.last().name.contains(QStringLiteral("17")),
+              "spend: the service table caps itself and says how many it hid");
+
+        check(cloudSpendAmountText(12.5) == QStringLiteral("$12.50")
+                  && cloudSpendAmountText(0.004) == QStringLiteral("<$0.01")
+                  && cloudSpendAmountText(-1.0) == QStringLiteral("--"),
+              "spend: money text keeps cents, flags sub-cent and never fakes 0");
+        check(cloudSpendSummaryText(awsSpend)
+                      .contains(QStringLiteral("month to date $24.00"))
+                  && cloudSpendSummaryText(awsSpend)
+                         .contains(QStringLiteral("(+$50.00 forecast)"))
+                  && cloudSpendSummaryText(awsSpend)
+                         .contains(QStringLiteral("estimated")),
+              "spend: the summary states billed, forecast and the estimate flag");
+        check(cloudSpendDetailText(awsSpend)
+                      .contains(QStringLiteral("2026-10-01 .. 2026-10-03"))
+                  && cloudSpendDetailText(awsSpend)
+                         .contains(QStringLiteral("unblended cost"))
+                  && cloudSpendDetailText(azureSpend)
+                         .contains(QStringLiteral("pretax cost")),
+              "spend: the detail names the window and each provider's metric");
+        check(cloudSpendServicesText(awsSpend)
+                      .contains(QStringLiteral("(93.8%)"))
+                  && cloudSpendServicesText(CloudSpendStatus{})
+                         .isEmpty(),
+              "spend: service rows carry their share of the month");
+        check(cloudSpendGateText(CloudProvider::Gcp)
+                      .contains(QStringLiteral("BigQuery"))
+                  && cloudSpendGateText(CloudProvider::Oci)
+                         .contains(QStringLiteral("usage API"))
+                  && cloudSpendNote().contains(QStringLiteral("billable"))
+                  && cloudSpendDisabledText().contains(QStringLiteral("spend=false")),
+              "spend: gated providers and the disabled state state the reason");
+        check(cloudSpendPeriodStart(1700000000000LL)
+                      == QStringLiteral("2023-11-01")
+                  && cloudSpendPeriodEnd(1700000000000LL)
+                         == QStringLiteral("2023-11-15")
+                  && cloudSpendForecastEnd(1700000000000LL)
+                         == QStringLiteral("2023-12-01"),
+              "spend: the window is computed in UTC, so the query is stable "
+              "across time zones");
+
+        // The same numbers on the Prometheus endpoint, and nothing at all when
+        // the query has not answered.
+        DisplaySnapshot spendSnap;
+        spendSnap.cloud.spend = awsSpend;
+        const QString spendText = prometheusText(spendSnap);
+        check(spendText.contains(QStringLiteral("syspeek_cloud_spend_month_usd"))
+                  && spendText.contains(
+                      QStringLiteral("syspeek_cloud_spend_forecast_usd"))
+                  && spendText.contains(
+                      QStringLiteral("syspeek_cloud_spend_service_usd{provider=\"aws\""))
+                  && spendText.contains(QStringLiteral("service=\"Amazon Simple "
+                                                       "Storage Service\"")),
+              "spend: prometheus exports month, forecast and per-service cost");
+        DisplaySnapshot noSpendSnap;
+        check(!prometheusText(noSpendSnap)
+                   .contains(QStringLiteral("syspeek_cloud_spend_")),
+              "spend: a host with no billed data exports no spend series");
+    }
+
+    {
+        // M85: billed spend end to end against a fake CLI: two AWS calls in
+        // order (cost, then forecast) and one Azure call.
+        QTemporaryDir spendDir;
+        const QString bin = spendDir.path();
+        const QString costFile = bin + QStringLiteral("/cost.json");
+        const QString forecastFile = bin + QStringLiteral("/forecast.json");
+        const QString argvLog = bin + QStringLiteral("/argv.log");
+        const QByteArray costDoc = QByteArrayLiteral(
+            "{\"ResultsByTime\":[{\"TimePeriod\":{\"Start\":\"2026-10-01\","
+            "\"End\":\"2026-10-02\"},\"Total\":{},\"Groups\":["
+            "{\"Keys\":[\"Amazon Elastic Compute Cloud - Compute\"],"
+            "\"Metrics\":{\"UnblendedCost\":{\"Amount\":\"100.0\",\"Unit\":\"USD\"}}}]}]}");
+        const QByteArray forecastDoc = QByteArrayLiteral(
+            "{\"Total\":{\"Amount\":\"118.33\",\"Unit\":\"USD\"}}");
+        const auto write = [](const QString &path, const QByteArray &data) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                return false;
+            }
+            file.write(data);
+            file.close();
+            file.setPermissions(QFile::ReadOwner | QFile::WriteOwner
+                                | QFile::ExeOwner | QFile::ReadGroup
+                                | QFile::ExeGroup | QFile::ReadOther
+                                | QFile::ExeOther);
+            return true;
+        };
+        write(costFile, costDoc);
+        write(forecastFile, forecastDoc);
+#if defined(Q_OS_WIN)
+        const QString awsName = bin + QStringLiteral("/aws.cmd");
+        const QByteArray script =
+            "@echo off\r\n"
+            "powershell -NoProfile -ExecutionPolicy Bypass -File "
+            "\"%~dp0fake.ps1\" %*\r\n";
+        const QByteArray ps1 =
+            "$out = if ($args.Count -ge 2 -and $args[1] -eq "
+            "'get-cost-forecast') { $env:SPEND_FORECAST } else { "
+            "$env:SPEND_COST }\r\n"
+            "Add-Content -Path $env:SPEND_ARGV_LOG -Value ($args -join ' ')\r\n"
+            "[Console]::Out.Write([IO.File]::ReadAllText($out))\r\n"
+            "exit 0\r\n";
+#else
+        const QString awsName = bin + QStringLiteral("/aws");
+        const QByteArray script =
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$SPEND_ARGV_LOG\"\n"
+            "case \"$2\" in get-cost-forecast) cat \"$SPEND_FORECAST\";; "
+            "*) cat \"$SPEND_COST\";; esac\n";
+#endif
+        bool wrote = write(awsName, script);
+#if defined(Q_OS_WIN)
+        wrote = wrote && write(bin + QStringLiteral("/fake.ps1"), ps1);
+#endif
+        check(wrote, "spend: the fake aws CLI is executable");
+        const QString oldPath = qEnvironmentVariable("PATH");
+        const auto fakePath = [](const QString &dir, const QString &base) {
+#if defined(Q_OS_WIN)
+            QStringList keep;
+            const QString root = qEnvironmentVariable("SystemRoot");
+            for (const QString &entry : base.split(QLatin1Char(';'))) {
+                if (entry.contains(QStringLiteral("System32"),
+                                   Qt::CaseInsensitive)
+                    || (!root.isEmpty()
+                        && entry.compare(root, Qt::CaseInsensitive) == 0)) {
+                    keep.append(entry);
+                }
+            }
+            return dir + QLatin1Char(';') + keep.join(QLatin1Char(';'));
+#else
+            return dir + QLatin1Char(':') + base;
+#endif
+        };
+        qputenv("PATH", fakePath(bin, oldPath).toUtf8());
+        qputenv("SPEND_ARGV_LOG", argvLog.toUtf8());
+        qputenv("SPEND_COST", costFile.toUtf8());
+        qputenv("SPEND_FORECAST", forecastFile.toUtf8());
+
+        CloudIdentity identity;
+        identity.provider = CloudProvider::Aws;
+        identity.instanceId = QStringLiteral("i-0aaa");
+        identity.accountId = QStringLiteral("123456789012");
+        CloudSpendOptions options;
+        options.timeoutMs = 10000;
+        const qint64 nowMs = 1'760'000'000'000LL;   // 2025-10-09 UTC
+
+        const CloudSpendStatus spend = probeCloudSpend(identity, options, nowMs);
+        QStringList calls;
+        {
+            QFile log(argvLog);
+            if (log.open(QIODevice::ReadOnly)) {
+                calls = QString::fromUtf8(log.readAll())
+                            .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            }
+        }
+        check(calls.size() == 2
+                  && calls.at(0).startsWith(
+                      QStringLiteral("ce get-cost-and-usage --time-period "
+                                     "Start=2025-10-01,End=2025-10-10 "))
+                  && calls.at(0).contains(
+                      QStringLiteral("--group-by Type=DIMENSION,Key=SERVICE"))
+                  && calls.at(0).contains(
+                      QStringLiteral("--metrics UnblendedCost"))
+                  && calls.at(1).startsWith(
+                      QStringLiteral("ce get-cost-forecast --time-period "
+                                     "Start=2025-10-10,End=2025-11-01 "))
+                  && calls.at(1).contains(
+                      QStringLiteral("--metric UNBLENDED_COST")),
+              "spend: aws runs cost-and-usage then the month-end forecast");
+        check(spend.available
+                  && qAbs(spend.monthToDateUsd - 100.0) < 1e-9
+                  && qAbs(spend.forecastUsd - 218.33) < 1e-9
+                  && spend.scope == QStringLiteral("account 123456789012")
+                  && spend.source.startsWith(
+                      QStringLiteral("aws ce get-cost-and-usage")),
+              "spend: the two answers fold into billed + month-end");
+
+        // A provider whose CLI has no cost API never spawns anything.
+        QFile::remove(argvLog);
+        CloudIdentity gcpIdentity;
+        gcpIdentity.provider = CloudProvider::Gcp;
+        const CloudSpendStatus gcp = probeCloudSpend(gcpIdentity, options, nowMs);
+        check(!gcp.attempted
+                  && gcp.note.contains(QStringLiteral("BigQuery"))
+                  && !QFile::exists(argvLog),
+              "spend: a gated provider issues no query at all");
+
+        // The polled runner, on the same fake CLI.
+        {
+            QFile::remove(argvLog);
+            CloudSpendRunner runner;
+            runner.setOptions(options);
+            QElapsedTimer clock;
+            clock.start();
+            qint64 worstUpdateMs = 0;
+            for (int i = 0; i < 400; ++i) {
+                QElapsedTimer one;
+                one.start();
+                runner.update(identity, QDateTime::currentMSecsSinceEpoch());
+                worstUpdateMs = qMax(worstUpdateMs, one.elapsed());
+                if (runner.status().available
+                    && runner.status().forecastUsd >= 0.0) {
+                    break;
+                }
+                app.processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            check(runner.status().available
+                      && qAbs(runner.status().monthToDateUsd - 100.0) < 1e-9
+                      && qAbs(runner.status().forecastUsd - 218.33) < 1e-9,
+                  "spend: the polled runner walks both steps and ends with the "
+                  "full picture");
+            check(worstUpdateMs < 1200,
+                  "spend: no runner update blocks the sampler thread");
+            runner.stop();
+        }
+
+        qputenv("PATH", oldPath.toUtf8());
+        for (const char *name : {"SPEND_ARGV_LOG", "SPEND_COST", "SPEND_FORECAST"}) {
+            qunsetenv(name);
+        }
     }
 
     std::printf("%d failure(s)\n", failures);

@@ -546,6 +546,53 @@ int main(int argc, char *argv[]) {
               "cloud: an absurd listing budget clamps to the ceiling");
     }
 
+    {
+        // M85: the billed-spend query is a BILLABLE provider call, so it has
+        // its own switch and budget, independent of the listing.
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+            "[cloud]\n"
+            "spend = false\n"
+            "spend_timeout_ms = 9000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.cloud.spend,
+              "cloud: spend=false stops every cost query");
+        check(c.cloud.spendTimeoutMs == 9000,
+              "cloud: the cost query budget loads");
+        check(c.cloud.inventory && c.cloud.enabled,
+              "cloud: untouched neighbours keep inventory and the metadata read");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral("[cloud]\n"
+                                     "spend_timeout_ms = 100\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.spendTimeoutMs == 5000,
+              "cloud: a tiny cost budget clamps to the floor");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral("[cloud]\n"
+                                     "spend_timeout_ms = 600000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.spendTimeoutMs == 180000,
+              "cloud: an absurd cost budget clamps to the ceiling");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArray());
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.spend && c.cloud.spendTimeoutMs == 30000,
+              "cloud: billed spend is on by default with a 30 s budget");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
