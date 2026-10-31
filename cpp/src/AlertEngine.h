@@ -12,6 +12,10 @@ struct AlertRule {
     bool above = true; // breach when value > threshold (else <)
     int sustained = 1; // consecutive breaches required
     QString unit;
+    // M87: grouping key (group_by) and owner for correlation.
+    // If group is empty, each rule generates its own incident (backward-compatible).
+    QString group;       // group_by key — alerts sharing this key fold into one incident
+    QString owner;       // incident owner; "unowned" if empty, displayed on the incident row
 };
 
 struct Alert {

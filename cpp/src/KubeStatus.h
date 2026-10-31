@@ -180,3 +180,49 @@ QString kubeDeploymentsText(const KubeSnapshot &snapshot);
 QString kubeDiagnosisText(const QList<KubeDiagnosis> &diagnoses);
 QString kubeTimelineText(const QList<KubeChange> &changes);
 QString kubeNodesText(const QList<KubeNode> &nodes);
+
+// Right-sizing recommendation per pod
+struct KubeRightSizing {
+    double usageRatioCpu = 0.0;       // cpu used / requested
+    double usageRatioMem = 0.0;       // mem used / requested
+    double suggestedRequestCores = 0.0;  // usage × 1.2 (OpenCost buffer)
+    double suggestedRequestBytes = 0.0;  // mem suggested
+    double monthlySavings = 0.0;      // wasted monthly
+    bool hasRequests = false;         // pod has cpu/mem requests
+    QString detail;                   // human-readable explanation
+};
+
+// Right-size a single pod
+KubeRightSizing kubeRightSizing(const KubePod &pod);
+
+// Right-size all pods, sorted by savings descending
+QList<KubeRightSizing> kubeRightSizingAll(const QList<KubePod> &pods);
+
+// OpenCost's EfficiencyBufferMultiplier (1.2 headroom)
+static const double OPENCOST_BUFFER = 1.2;
+
+// Context tracking for multi-cluster
+struct KubeContext {
+    QString name;
+    QString clusterName;
+    QString namespace_;
+    QList<QString> pods;       // pods in this context
+    QList<QString> deployments;// deployments in this context
+    bool operator==(const KubeContext &o) const {
+        return name == o.name && clusterName == o.clusterName && namespace_ == o.namespace_;
+    }
+};
+
+QDebug operator<<(QDebug dbg, const KubeContext &c);
+
+// All known contexts from kubeconfig
+QList<KubeContext> kubeAllContexts();
+
+// Current context index
+int kubeCurrentContextIndex();
+
+// Context-aware pod listing (filters by current context)
+QList<KubePod> kubePodsByContext(const QList<KubePod> &all, int contextIdx);
+
+// Context-aware node listing
+QList<KubeNode> kubeNodesByContext(const QList<KubeNode> &all, int contextIdx);

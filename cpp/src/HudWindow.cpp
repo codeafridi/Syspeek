@@ -1114,7 +1114,7 @@ void HudWindow::evaluateAlerts() {
     }
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
-        m_incidents.update(loudActive, now);
+        m_incidents.update(loudActive, m_alerts.rules(), now);
         m_panel->setIncidents(m_incidents.incidents());
     }
 

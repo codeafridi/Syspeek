@@ -312,3 +312,53 @@ QString watchdogInsightsText(const QList<WatchdogMetric> &metrics,
     }
     return lines.join(QLatin1Char('\n'));
 }
+
+// Burn rate per window (dollars/hour from rate × time)
+BurnRate burnRate(qint64 windowSeconds, double ratePerHour, double thresholdPerHour) {
+    BurnRate result;
+    result.ratePerHour = ratePerHour;
+    // Calculate severity: critical if rate > threshold, warning if above 50% of threshold
+    if (ratePerHour > thresholdPerHour) {
+        result.severity = 2; // critical
+    } else if (ratePerHour > thresholdPerHour * 0.5) {
+        result.severity = 1; // warning
+    } else {
+        result.severity = 0; // ok
+    }
+    // Format text
+    if (result.severity == 2) {
+        result.text = QStringLiteral("burn rate %1/hour (critical)").arg(QString::number(ratePerHour, 'f', 2));
+    } else if (result.severity == 1) {
+        result.text = QStringLiteral("burn rate %1/hour (warning)").arg(QString::number(ratePerHour, 'f', 2));
+    } else {
+        result.text = QStringLiteral("burn rate %1/hour (ok)").arg(QString::number(ratePerHour, 'f', 2));
+    }
+    return result;
+}
+
+// Idle metric per container/process
+IdleMetric idleMetric(double cpuPct, double netBps, qint64 idleSeconds,
+                                      double cpuThresholdPct, int windowMinutes) {
+    IdleMetric result;
+    result.cpuPct = cpuPct;
+    result.netBps = netBps;
+    result.idleSeconds = idleSeconds;
+    
+    // Determine if idle: cpu below threshold for the window duration
+    bool isCpuIdle = cpuPct < cpuThresholdPct;
+    bool isTimeIdle = idleSeconds >= (windowMinutes * 60);
+    result.isIdle = isCpuIdle && isTimeIdle;
+    
+    // Format text
+    if (result.isIdle) {
+        result.text = QStringLiteral("idle CPU %1%%, net %2 B/s, idle %3 min")
+            .arg(QString::number(cpuPct, 'f', 1))
+            .arg(QString::number(netBps, 'f', 1))
+            .arg(QString::number(idleSeconds / 60, 'f', 1));
+    } else {
+        result.text = QStringLiteral("active CPU %1%%, net %2 B/s")
+            .arg(QString::number(cpuPct, 'f', 1))
+            .arg(QString::number(netBps, 'f', 1));
+    }
+    return result;
+}

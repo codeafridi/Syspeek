@@ -23,6 +23,22 @@ struct WatchdogMetric {
     AnomalyResult result;
 };
 
+// Burn rate per window (0=ok, 1=warning, 2=critical)
+struct BurnRate {
+    double ratePerHour = 0.0;   // dollars per hour
+    int severity = 0;           // 0=ok, 1=warning, 2=critical
+    QString text;               // formatted text
+};
+
+// Idle metric per container/process
+struct IdleMetric {
+    bool isIdle = false;
+    double cpuPct = 0.0;
+    double netBps = 0.0;
+    qint64 idleSeconds = 0;
+    QString text;
+};
+
 struct ForecastResult {
     QString name;
     double predicted = 0.0;   // next value
@@ -45,6 +61,16 @@ AnomalyResult holtWinters(const QList<double> &series, int season,
                           double band);
 QString watchdogText(const QList<WatchdogMetric> &metrics);
 QString forecastText(const ForecastResult &cpu, const ForecastResult &hostCpu);
+// Narrative insights from anomalies + forecasts, with correlation.
+QString watchdogInsightsText(const QList<WatchdogMetric> &metrics,
+                             const QList<ForecastResult> &forecasts);
+
+// Burn rate per window (dollars/hour from rate × time)
+BurnRate burnRate(qint64 windowSeconds, double ratePerHour, double thresholdPerHour);
+// Idle metric per container/process
+IdleMetric idleMetric(double cpuPct, double netBps, qint64 idleSeconds,
+                      double cpuThresholdPct, int windowMinutes);
+
 // Narrative insights from anomalies + forecasts, with correlation.
 QString watchdogInsightsText(const QList<WatchdogMetric> &metrics,
                              const QList<ForecastResult> &forecasts);

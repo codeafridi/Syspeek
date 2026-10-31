@@ -1378,7 +1378,7 @@ int main(int argc, char *argv[]) {
     }
 
     {
-        IncidentTracker tracker(5000, 10);
+        IncidentTracker tracker(5000, 10, 6, 600000);
         Alert cpu;
         cpu.id = QStringLiteral("app_cpu");
         cpu.title = QStringLiteral("Focused app CPU high");
@@ -1386,14 +1386,14 @@ int main(int argc, char *argv[]) {
         cpu.detail = QStringLiteral("95%");
         QList<Alert> alerts{cpu};
 
-        tracker.update(alerts, 100000);
+        tracker.update(alerts, defaultAlertRules(), 100000);
         QList<Incident> incidents = tracker.incidents();
         check(incidents.size() == 1
                   && incidents.first().status == QStringLiteral("open")
                   && incidents.first().count == 1,
               "incident: opened from alert");
 
-        tracker.update(alerts, 101000);
+        tracker.update(alerts, defaultAlertRules(), 101000);
         incidents = tracker.incidents();
         check(incidents.size() == 1 && incidents.first().count == 2,
               "incident: repeated alert grouped");
@@ -1404,11 +1404,11 @@ int main(int argc, char *argv[]) {
         mem.severity = QStringLiteral("warning");
         mem.detail = QStringLiteral("90%");
         alerts.append(mem);
-        tracker.update(alerts, 102000);
+        tracker.update(alerts, defaultAlertRules(), 102000);
         incidents = tracker.incidents();
         check(incidents.size() == 2, "incident: separate groups by alert id");
 
-        tracker.update({}, 102000 + 6000);
+        tracker.update({}, defaultAlertRules(), 102000 + 6000);
         incidents = tracker.incidents();
         bool allResolved = true;
         for (const Incident &incident : incidents) {
