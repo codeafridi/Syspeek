@@ -45,6 +45,7 @@
 #include "CloudFleetSource.h"
 #include "CloudSpendStatus.h"
 #include "CloudSpendSource.h"
+#include "TimelineStatus.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
 #include "ServicesSource.h"
@@ -5606,6 +5607,185 @@ int main(int argc, char *argv[]) {
         for (const char *name : {"SPEND_ARGV_LOG", "SPEND_COST", "SPEND_FORECAST"}) {
             qunsetenv(name);
         }
+    }
+
+    // --- M86 event stream -------------------------------------------------
+    {
+        check(timelineKindName(TimelineKind::Alert) == QStringLiteral("alert")
+                  && timelineKindName(TimelineKind::FileChange)
+                      == QStringLiteral("file")
+                  && timelineKindName(TimelineKind::Kubernetes)
+                      == QStringLiteral("kube")
+                  && timelineKindName(TimelineKind::ServiceAction)
+                      == QStringLiteral("restart"),
+              "timeline: every kind has a short lowercase name");
+        check(timelineKindFromName(QStringLiteral("Kube"))
+                      == TimelineKind::Kubernetes
+                  && timelineKindFromName(QStringLiteral("fim"))
+                      == TimelineKind::FileChange
+                  && timelineKindFromName(QStringLiteral("any"))
+                      == TimelineKind::Other
+                  && timelineKindFromName(QStringLiteral("nonsense"))
+                      == TimelineKind::Other,
+              "timeline: a kind name round-trips and unknown names mean any");
+
+        check(timelineSeverityFromText(QStringLiteral("critical"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("HIGH"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("warning"))
+                      == TimelineSeverity::Warning
+                  && timelineSeverityFromText(QStringLiteral("warn"))
+                      == TimelineSeverity::Warning
+                  && timelineSeverityFromText(QStringLiteral("ok"))
+                      == TimelineSeverity::Ok
+                  && timelineSeverityFromText(QStringLiteral("resolved"))
+                      == TimelineSeverity::Ok
+                  && timelineSeverityFromText(QStringLiteral("down"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("something"))
+                      == TimelineSeverity::Info,
+              "timeline: alert severities map onto the four-level scale");
+        check(timelineSeverityRank(TimelineSeverity::Error) > timelineSeverityRank(
+                  TimelineSeverity::Warning)
+                  && timelineSeverityRank(TimelineSeverity::Warning)
+                      > timelineSeverityRank(TimelineSeverity::Info)
+                  && timelineSeverityRank(TimelineSeverity::Ok)
+                      < timelineSeverityRank(TimelineSeverity::Info),
+              "timeline: severity ranks order error above warn above info");
+
+        auto makeEvent = [](qint64 atMs, TimelineKind kind,
+                            TimelineSeverity severity, const QString &subject,
+                            const QString &title) {
+            TimelineEvent event;
+            event.atMs = atMs;
+            event.kind = kind;
+            event.severity = severity;
+            event.subject = subject;
+            event.title = title;
+            return event;
+        };
+
+        QList<TimelineEvent> ring;
+        for (int i = 0; i < 10; ++i) {
+            timelineAppend(ring, makeEvent(1000 + i, TimelineKind::Alert,
+                                           TimelineSeverity::Info,
+                                           QStringLiteral("monitor:app_cpu"),
+                                           QStringLiteral("e%1").arg(i)),
+                           4);
+        }
+        check(ring.size() == 4 && ring.constFirst().title == QStringLiteral("e6")
+                  && ring.constLast().title == QStringLiteral("e9"),
+              "timeline: the ring keeps the newest events and drops the oldest");
+        QList<TimelineEvent> unbounded;
+        timelineAppend(unbounded, makeEvent(1, TimelineKind::Other,
+                                            TimelineSeverity::Info,
+                                            QString(), QString()), 0);
+        check(unbounded.size() == 1,
+              "timeline: a zero cap is the test-shaped unbounded ring");
+
+        QList<TimelineEvent> window;
+        window.append(makeEvent(10000, TimelineKind::Alert,
+                                TimelineSeverity::Error,
+                                QStringLiteral("monitor:app_cpu"),
+                                QStringLiteral("cpu high")));
+        window.append(makeEvent(20000, TimelineKind::FileChange,
+                                TimelineSeverity::Warning,
+                                QStringLiteral("file:/etc/passwd"),
+                                QStringLiteral("modified /etc/passwd")));
+        window.append(makeEvent(60000, TimelineKind::Kubernetes,
+                                TimelineSeverity::Info,
+                                QStringLiteral("kube:web/pod-1"),
+                                QStringLiteral("pod restarted")));
+        const QList<TimelineEvent> near =
+            timelineNear(window, 21000, 12000, 10);
+        check(near.size() == 2 && near.at(0).atMs == 20000
+                  && near.at(1).atMs == 10000,
+              "timeline: a spike window returns the nearest events first");
+        check(timelineNear(window, 21000, 12000, 1).size() == 1,
+              "timeline: the spike window respects its limit");
+        check(timelineNear(window, 400000, 5000, 10).isEmpty(),
+              "timeline: a window with nothing in it comes back empty");
+        // Same distance from the anchor: the more severe event wins.
+        QList<TimelineEvent> tie;
+        tie.append(makeEvent(4000, TimelineKind::Alert, TimelineSeverity::Info,
+                             QStringLiteral("a"), QStringLiteral("info")));
+        tie.append(makeEvent(6000, TimelineKind::Alert, TimelineSeverity::Error,
+                             QStringLiteral("b"), QStringLiteral("error")));
+        const QList<TimelineEvent> tieHit = timelineNear(tie, 5000, 2000, 10);
+        check(tieHit.size() == 2 && tieHit.at(0).title == QStringLiteral("error"),
+              "timeline: an equidistant pair orders the severe event first");
+
+        const QList<TimelineEvent> byKind =
+            timelineFilter(window, TimelineKind::FileChange, QString());
+        check(byKind.size() == 1
+                  && byKind.at(0).kind == TimelineKind::FileChange,
+              "timeline: the kind filter keeps one kind");
+        const QList<TimelineEvent> byText =
+            timelineFilter(window, TimelineKind::Other, QStringLiteral("PASSWD"));
+        check(byText.size() == 1,
+              "timeline: the text filter is case-insensitive over subject/body");
+        const QList<TimelineEvent> all =
+            timelineFilter(window, TimelineKind::Other, QString());
+        check(all.size() == 3 && all.at(0).atMs == 60000
+                  && all.at(2).atMs == 10000,
+              "timeline: an unfiltered list is newest first");
+        check(timelineFilter(window, TimelineKind::Other,
+                             QStringLiteral("no-such-thing")).isEmpty(),
+              "timeline: a filter that matches nothing returns nothing");
+
+        const QStringList subjects = timelineSubjects(window);
+        check(subjects.size() == 3
+                  && subjects.at(0) == QStringLiteral("monitor:app_cpu"),
+              "timeline: subjects are unique and keep first-seen order");
+        check(timelineCountWith(window, TimelineSeverity::Error) == 1
+                  && timelineCountWith(window, TimelineSeverity::Ok) == 0,
+              "timeline: severity counting is exact");
+
+        check(timelineAgeText(400) == QStringLiteral("now")
+                  && timelineAgeText(12000) == QStringLiteral("12s")
+                  && timelineAgeText(4 * 60000) == QStringLiteral("4m")
+                  && timelineAgeText(3 * 3600000) == QStringLiteral("3h")
+                  && timelineAgeText(50 * 3600000) == QStringLiteral("2d")
+                  && timelineAgeText(-5) == QStringLiteral("now"),
+              "timeline: ages read as s/m/h/d and never go negative");
+
+        const QString row = timelineRowText(window.at(0), 10000);
+        check(row.contains(QStringLiteral("error"))
+                  && row.contains(QStringLiteral("alert"))
+                  && row.contains(QStringLiteral("monitor:app_cpu"))
+                  && row.contains(QStringLiteral("cpu high")),
+              "timeline: a row carries time, severity, kind, subject and title");
+        const QString detail = timelineDetailText(window.at(0), 40000);
+        check(detail.contains(QStringLiteral("subject  monitor:app_cpu"))
+                  && detail.contains(QStringLiteral("event    cpu high"))
+                  && detail.contains(QStringLiteral("age      30s")),
+              "timeline: the detail block carries subject, title and age");
+
+        const QString summary = timelineSummaryText(window, 62000, 2000, true);
+        check(summary.contains(QStringLiteral("3 events"))
+                  && summary.contains(QStringLiteral("1 errors"))
+                  && summary.contains(QStringLiteral("1 warnings"))
+                  && summary.contains(QStringLiteral("3 subjects"))
+                  && summary.contains(QStringLiteral("ring 2,000")),
+              "timeline: the summary counts severities and names the ring");
+        check(timelineSummaryText(window, 62000, 2000, false)
+                  .contains(QStringLiteral("disabled in [timeline]")),
+              "timeline: a disabled stream says so instead of counting");
+        check(timelineSummaryText(QList<TimelineEvent>(), 1, 10, true)
+                  .contains(QStringLiteral("waiting for the first event")),
+              "timeline: an empty stream says what will land there");
+        check(timelineWindowText(5000, 90000, 3)
+                  .contains(QStringLiteral("+-90s"))
+                  && timelineWindowText(5000, 90000, 3)
+                         .contains(QStringLiteral("3 events in this window")),
+              "timeline: the spike window states its radius and hit count");
+        check(timelineWindowText(5000, 90000, 0)
+                  .contains(QStringLiteral("no events in this window")),
+              "timeline: an empty spike window says so");
+        check(timelineNoEventText(false)
+                  .contains(QStringLiteral("disabled in [timeline]")),
+              "timeline: the empty-state text honours the switch");
     }
 
     std::printf("%d failure(s)\n", failures);

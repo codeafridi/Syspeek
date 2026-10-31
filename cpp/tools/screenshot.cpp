@@ -730,6 +730,89 @@ KubeSnapshot demoKube() {
     return kube;
 }
 
+// M86: one plausible evening on this machine, spread across the demo
+// window so the stream grows as the fixture advances and the chart ticks
+// appear where the story says they should.
+QList<TimelineEvent> demoTimelineEvents(qint64 baseMs) {
+    auto at = [baseMs](int tick) { return baseMs + qint64(tick) * 2000; };
+    auto make = [](qint64 atMs, TimelineKind kind, TimelineSeverity severity,
+                   const QString &subject, const QString &title,
+                   const QString &detail = QString(),
+                   const QStringList &tags = QStringList()) {
+        TimelineEvent event;
+        event.atMs = atMs;
+        event.kind = kind;
+        event.severity = severity;
+        event.subject = subject;
+        event.title = title;
+        event.detail = detail;
+        event.tags = tags;
+        return event;
+    };
+    return {
+        make(at(30), TimelineKind::Alert, TimelineSeverity::Warning,
+             QStringLiteral("monitor:app_mem"),
+             QStringLiteral("Focused app memory high"),
+             QStringLiteral("rss 612 MB > 512 MB for 3 samples"),
+             {QStringLiteral("monitor:app_mem"),
+              QStringLiteral("severity:warning")}),
+        make(at(62), TimelineKind::Kubernetes, TimelineSeverity::Info,
+             QStringLiteral("kube:default/web-5f8d"),
+             QStringLiteral("pod restarted (backoff 0s)"),
+             QStringLiteral("container web terminated with exit 0"),
+             {QStringLiteral("kind:Pod"), QStringLiteral("ns:default")}),
+        make(at(88), TimelineKind::Kubernetes, TimelineSeverity::Warning,
+             QStringLiteral("kube:default/api-7f9c"),
+             QStringLiteral("CrashLoopBackOff (4 restarts)"),
+             QStringLiteral("back-off restarting failed container api"),
+             {QStringLiteral("kind:Pod"), QStringLiteral("ns:default")}),
+        make(at(90), TimelineKind::Synthetic, TimelineSeverity::Error,
+             QStringLiteral("check:https://api.internal/health"),
+             QStringLiteral("https://api.internal/health down"),
+             QStringLiteral("connection refused after 5002 ms"),
+             {QStringLiteral("status:503")}),
+        make(at(100), TimelineKind::Alert, TimelineSeverity::Error,
+             QStringLiteral("monitor:host_cpu"),
+             QStringLiteral("Host CPU high"),
+             QStringLiteral("94.2% > 90.0% for 5 samples"),
+             {QStringLiteral("monitor:host_cpu"),
+              QStringLiteral("severity:critical")}),
+        make(at(110), TimelineKind::Synthetic, TimelineSeverity::Ok,
+             QStringLiteral("check:https://api.internal/health"),
+             QStringLiteral("https://api.internal/health up again (41 ms)")),
+        make(at(118), TimelineKind::Service, TimelineSeverity::Warning,
+             QStringLiteral("unit:postgresql.service"),
+             QStringLiteral("failed (exit-code 1)"),
+             QStringLiteral("pg_ctl: could not start server"),
+             {QStringLiteral("unit:postgresql.service")}),
+        make(at(120), TimelineKind::Kubernetes, TimelineSeverity::Ok,
+             QStringLiteral("kube:default/api-7f9c"),
+             QStringLiteral("Running (ready 1/1)")),
+        make(at(143), TimelineKind::FileChange, TimelineSeverity::Warning,
+             QStringLiteral("file:/etc/pam.d/login"),
+             QStringLiteral("modified /etc/pam.d/login"),
+             QStringLiteral("sha256 9be2c41f -> 1d77a0b6"),
+             {QStringLiteral("sha:1d77a0b6")}),
+        make(at(155), TimelineKind::ContainerAction, TimelineSeverity::Info,
+             QStringLiteral("container:api-7f9c2e10b4a8"),
+             QStringLiteral("docker restart"),
+             QStringLiteral("docker restart 7f9c2e10b4a8 ok"),
+             {QStringLiteral("result:ok")}),
+        make(at(170), TimelineKind::Alert, TimelineSeverity::Ok,
+             QStringLiteral("monitor:app_mem"),
+             QStringLiteral("app_mem recovered")),
+        make(at(201), TimelineKind::FileChange, TimelineSeverity::Warning,
+             QStringLiteral("file:/usr/local/bin/syspeek-agent"),
+             QStringLiteral("created /usr/local/bin/syspeek-agent"),
+             QStringLiteral("sha256 4c1e8f20")),
+        make(at(212), TimelineKind::Cloud, TimelineSeverity::Info,
+             QStringLiteral("cloud:aws/i-0a1b2c3d"),
+             QStringLiteral("fleet grew to 5 running instances"),
+             QStringLiteral("new instance launched in eu-west-1c"),
+             {QStringLiteral("provider:aws")}),
+    };
+}
+
 void tracePhase(const char *what) {
     std::fprintf(stderr, "[shot] %s\n", what);
     std::fflush(stderr);
@@ -762,6 +845,7 @@ int main(int argc, char *argv[]) {
         // resolve -> clear -> refire, so tiles/chart/timeline all move.
         const qint64 baseMs = QDateTime::currentMSecsSinceEpoch()
                               - 241 * 2000;
+        const QList<TimelineEvent> timelineEvents = demoTimelineEvents(baseMs);
         auto alertsFor = [baseMs](int tick) {
             QList<Alert> list;
             auto add = [&](const QString &id, const QString &title,
@@ -1063,6 +1147,26 @@ int main(int argc, char *argv[]) {
             panel.setFimSnapshot(fim);
             panel.setAlerts(alertsFor(i));
             panel.setIncidents(tracker.incidents());
+            {
+                const QList<TimelineEvent> all = timelineEvents;
+                TimelineViewInfo tl;
+                tl.enabled = true;
+                tl.markers = true;
+                tl.capacity = 2000;
+                const qint64 nowMs = baseMs + qint64(i) * 2000;
+                for (const TimelineEvent &event : all) {
+                    if (event.atMs > nowMs) {
+                        break;
+                    }
+                    tl.events.prepend(event);
+                }
+                tl.count = int(tl.events.size());
+                if (!tl.events.isEmpty()) {
+                    tl.newestMs = tl.events.constFirst().atMs;
+                    tl.oldestMs = tl.events.constLast().atMs;
+                }
+                panel.setTimeline(tl);
+            }
             app.processEvents();
         }
         tracker.update(alertsFor(240), baseMs + 240 * 2000);
@@ -1085,6 +1189,17 @@ int main(int argc, char *argv[]) {
         panel.setFimSnapshot(fim);
         panel.setAlerts(alertsFor(240));
         panel.setIncidents(tracker.incidents());
+        {
+            TimelineViewInfo tl;
+            tl.enabled = true;
+            tl.markers = true;
+            tl.capacity = 2000;
+            tl.events = timelineEvents;
+            tl.count = int(tl.events.size());
+            tl.newestMs = tl.events.constFirst().atMs;
+            tl.oldestMs = tl.events.constLast().atMs;
+            panel.setTimeline(tl);
+        }
     };
     StatsdSnapshot statsd;
     auto driveStatsd = [&app, &panel, &statsd]() -> void {

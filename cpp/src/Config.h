@@ -73,6 +73,16 @@ struct HistoryConfig {
     int samples = 3600;
 };
 
+// M86: the event stream. `events` is the ring size, `windowSeconds` the
+// radius of the "why did this spike" view a chart tick opens, and `markers`
+// whether charts draw the ticks at all.
+struct TimelineConfig {
+    bool enabled = true;
+    int events = 2000;
+    int windowSeconds = 90;
+    bool markers = true;
+};
+
 struct MetricsConfig {
     bool enabled = true;
     int port = 9107;
@@ -213,6 +223,7 @@ struct Config {
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
     HistoryConfig history;
+    TimelineConfig timeline;
     SilencesConfig silences;
     ActionsConfig actions;
     OverlayConfig overlay;

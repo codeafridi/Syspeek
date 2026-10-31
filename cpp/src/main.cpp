@@ -548,6 +548,15 @@ int main(int argc, char *argv[]) {
                 ? metricsEndpointText(resolveMetricsEndpoint(config.metrics))
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
+        settingsInfo.timelineLine =
+            config.timeline.enabled
+                ? QStringLiteral("on - ring %1 events, window +-%2 s, "
+                                 "chart markers %3")
+                      .arg(config.timeline.events)
+                      .arg(config.timeline.windowSeconds)
+                      .arg(config.timeline.markers ? QStringLiteral("on")
+                                                  : QStringLiteral("off"))
+                : QStringLiteral("disabled ([timeline] enabled=false)");
         settingsInfo.historyLine =
             config.history.enabled
                 ? QStringLiteral("%1 samples max - %2")
@@ -584,6 +593,9 @@ int main(int argc, char *argv[]) {
         hud.setExportIntervalMs(config.sampleIntervalMs);
         hud.setHistoryStore(historyDefaultPath(),
                             config.history.enabled ? config.history.samples : 0);
+        hud.setTimelineConfig(config.timeline.enabled, config.timeline.events,
+                              config.timeline.markers,
+                              config.timeline.windowSeconds);
         hud.setOverlayConfig(config.overlay, defaultConfigPath());
     }
 
@@ -671,6 +683,10 @@ int main(int argc, char *argv[]) {
                                 : QStringLiteral("docker %1 %2 failed: %3")
                                       .arg(verb, id.left(12), error);
                          hud.setContainerActionStatus(text, ok);
+                         hud.noteActionEvent(TimelineKind::ContainerAction,
+                                             QStringLiteral("container:") + id,
+                                             QStringLiteral("docker %1").arg(verb),
+                                             text, ok);
                      });
     dockerThread->start();
 
@@ -709,6 +725,9 @@ int main(int argc, char *argv[]) {
                                 : QStringLiteral("%1 %2 failed: %3")
                                       .arg(verb, unit, error);
                          hud.setServiceActionStatus(text, ok);
+                         hud.noteActionEvent(TimelineKind::ServiceAction,
+                                             QStringLiteral("unit:") + unit,
+                                             text, QString(), ok);
                      });
     servicesThread->start();
 

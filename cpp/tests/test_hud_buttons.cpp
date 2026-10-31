@@ -20,6 +20,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMouseEvent>
 #include <QListWidget>
 #include <QSlider>
 #include <QElapsedTimer>
@@ -537,8 +539,10 @@ int main(int argc, char *argv[]) {
                   && railForHistory->item(27)->text()
                          == QStringLiteral("History")
                   && railForHistory->item(28)->text()
+                         == QStringLiteral("Timeline")
+                  && railForHistory->item(29)->text()
                          == QStringLiteral("Cost"),
-              "rail inserts the History page before Cost");
+              "rail inserts Timeline between History and Cost");
 
         auto *histSamples =
             hud.findChild<QLabel *>(QStringLiteral("ddHistTileSamples"));
@@ -693,6 +697,184 @@ int main(int argc, char *argv[]) {
         lastButton->click();
         check(!seeks.isEmpty() && seeks.last() == 899,
               "latest jumps back to the live sample");
+    }
+
+    {
+        // M86: the event stream page and its "why did this spike" window.
+        auto *tlEvents =
+            hud.findChild<QLabel *>(QStringLiteral("ddTlTileEvents"));
+        auto *tlErrors =
+            hud.findChild<QLabel *>(QStringLiteral("ddTlTileErrors"));
+        auto *tlWarnings =
+            hud.findChild<QLabel *>(QStringLiteral("ddTlTileWarnings"));
+        auto *tlSubjects =
+            hud.findChild<QLabel *>(QStringLiteral("ddTlTileSubjects"));
+        auto *tlSummary =
+            hud.findChild<QLabel *>(QStringLiteral("ddTlSummary"));
+        auto *tlWindow = hud.findChild<QLabel *>(QStringLiteral("ddTlWindow"));
+        auto *tlEmpty = hud.findChild<QLabel *>(QStringLiteral("ddTlEmpty"));
+        auto *tlDetail = hud.findChild<QLabel *>(QStringLiteral("ddTlDetail"));
+        auto *tlKind = hud.findChild<QComboBox *>(QStringLiteral("ddTlKind"));
+        auto *tlSearch = hud.findChild<QLineEdit *>(QStringLiteral("ddTlSearch"));
+        auto *tlClear = hud.findChild<QPushButton *>(QStringLiteral("ddTlClear"));
+        auto *tlTable = hud.findChild<QTreeWidget *>(QStringLiteral("ddTlTable"));
+        check(tlEvents != nullptr && tlErrors != nullptr && tlWarnings != nullptr
+                  && tlSubjects != nullptr && tlSummary != nullptr
+                  && tlWindow != nullptr && tlEmpty != nullptr
+                  && tlDetail != nullptr && tlKind != nullptr
+                  && tlSearch != nullptr && tlClear != nullptr
+                  && tlTable != nullptr,
+              "panel builds the timeline tiles, filters, table and detail");
+        check(tlTable->columnCount() == 5
+                  && tlTable->headerItem()->text(0) == QStringLiteral("TIME")
+                  && tlTable->headerItem()->text(1) == QStringLiteral("SEV")
+                  && tlTable->headerItem()->text(3) == QStringLiteral("SUBJECT"),
+              "timeline table carries time, severity, kind, subject and event");
+
+        const qint64 tlNow = 1800000000000LL;
+        TimelineViewInfo tlView;
+        tlView.enabled = true;
+        tlView.markers = true;
+        tlView.capacity = 2000;
+        tlView.count = 3;
+        auto tlMake = [](qint64 atMs, TimelineKind kind,
+                         TimelineSeverity severity, const QString &subject,
+                         const QString &title) {
+            TimelineEvent event;
+            event.atMs = atMs;
+            event.kind = kind;
+            event.severity = severity;
+            event.subject = subject;
+            event.title = title;
+            return event;
+        };
+        tlView.events = {
+            tlMake(tlNow - 3000, TimelineKind::Kubernetes,
+                   TimelineSeverity::Info, QStringLiteral("kube:web/pod-1"),
+                   QStringLiteral("pod restarted")),
+            tlMake(tlNow - 2000, TimelineKind::FileChange,
+                   TimelineSeverity::Warning, QStringLiteral("file:/etc/passwd"),
+                   QStringLiteral("modified /etc/passwd")),
+            tlMake(tlNow - 1000, TimelineKind::Alert, TimelineSeverity::Error,
+                   QStringLiteral("monitor:app_cpu"),
+                   QStringLiteral("Focused app CPU high"))};
+        tlView.oldestMs = tlNow - 3000;
+        tlView.newestMs = tlNow - 1000;
+        panel->showTimeline();
+        panel->setTimeline(tlView);
+        check(tlEvents->text() == QStringLiteral("3")
+                  && tlErrors->text() == QStringLiteral("1")
+                  && tlWarnings->text() == QStringLiteral("1")
+                  && tlSubjects->text() == QStringLiteral("3"),
+              "timeline tiles count events, errors, warnings and subjects");
+        check(tlSummary->text().contains(QStringLiteral("3 events"))
+                  && tlSummary->text().contains(QStringLiteral("ring 2,000")),
+              "timeline summary states the ring and the severity split");
+        check(tlTable->topLevelItemCount() == 3
+                  && tlTable->topLevelItem(0)->text(2) == QStringLiteral("alert")
+                  && tlTable->topLevelItem(0)->text(1).contains(
+                         QStringLiteral("error")),
+              "timeline rows are newest first with severity and kind");
+        check(tlEmpty->isHidden(),
+              "timeline hides the empty state once it has rows");
+        check(tlDetail->text().contains(QStringLiteral("monitor:app_cpu"))
+                  && tlDetail->text().contains(
+                         QStringLiteral("Focused app CPU high")),
+              "timeline detail follows the selected row");
+
+        tlKind->setCurrentIndex(tlKind->findData(QStringLiteral("file")));
+        check(tlTable->topLevelItemCount() == 1
+                  && tlTable->topLevelItem(0)->text(2)
+                         == QStringLiteral("file"),
+              "the kind picker narrows the stream to one kind");
+        tlKind->setCurrentIndex(0);
+        tlSearch->setText(QStringLiteral("POD"));
+        check(tlTable->topLevelItemCount() == 1
+                  && tlTable->topLevelItem(0)->text(2)
+                         == QStringLiteral("kube"),
+              "the search box narrows the stream by subject or title");
+        tlSearch->clear();
+        check(tlTable->topLevelItemCount() == 3,
+              "clearing the search restores the whole stream");
+
+        TimelineViewInfo tlFocus = tlView;
+        tlFocus.focus = true;
+        tlFocus.focusMs = tlNow - 1000;
+        tlFocus.focusWindowMs = 1000;
+        tlFocus.focusEvents = timelineNear(tlView.events, tlFocus.focusMs,
+                                           1000, 50);
+        panel->setTimeline(tlFocus);
+        check(!tlWindow->isHidden()
+                  && tlWindow->text().contains(QStringLiteral("+-1s"))
+                  && !tlClear->isHidden(),
+              "a focused window states its radius and offers a clear");
+        check(tlTable->topLevelItemCount() == 2,
+              "a focused window lists only the events inside it");
+
+        QList<qint64> cleared;
+        QObject::connect(panel, &DashboardPanel::timelineFocusCleared,
+                         [&cleared]() { cleared.append(1); });
+        tlClear->click();
+        check(!cleared.isEmpty(),
+              "clearing the window asks the owner to drop the focus");
+
+        panel->setTimeline(tlView);
+        check(tlWindow->isHidden() && tlClear->isHidden(),
+              "leaving the window hides its chrome again");
+
+        TimelineViewInfo tlDisabled;
+        tlDisabled.enabled = false;
+        panel->setTimeline(tlDisabled);
+        check(!tlEmpty->isHidden()
+                  && tlEmpty->text().contains(QStringLiteral("[timeline]"))
+                  && tlSummary->text().contains(
+                         QStringLiteral("disabled in [timeline]")),
+              "a disabled stream says so on the page and in the summary");
+
+        panel->setTimeline(tlView);
+
+        // Markers: the same ring reaches the live charts as annotation ticks.
+        int markedCharts = 0;
+        for (TimeseriesChart *chart : hud.findChildren<TimeseriesChart *>()) {
+            if (chart->eventCount() > 0) {
+                ++markedCharts;
+            }
+        }
+        check(markedCharts > 0,
+              "the event ring reaches the charts as annotation ticks");
+
+        TimelineViewInfo tlNoMarkers = tlView;
+        tlNoMarkers.markers = false;
+        panel->setTimeline(tlNoMarkers);
+        int stillMarked = 0;
+        for (TimeseriesChart *chart : hud.findChildren<TimeseriesChart *>()) {
+            stillMarked += chart->eventCount() > 0 ? 1 : 0;
+        }
+        check(stillMarked == 0 && markedCharts > 0,
+              "markers=false clears the ticks the charts were carrying");
+
+        panel->setTimeline(tlView);
+
+    }
+
+    {
+        // The Settings page names the stream's config next to the other
+        // collection rows, so "why is nothing here" has an answer on the page.
+        DashboardPanel settingsPanel;
+        SettingsInfo info;
+        info.timelineLine = QStringLiteral(
+            "on - ring 2,000 events, window +-90 s, chart markers on");
+        settingsPanel.setSettingsInfo(info);
+        bool sawTimelineRow = false;
+        for (QLabel *label : settingsPanel.findChildren<QLabel *>(
+                 QStringLiteral("ddSettingsInfo"))) {
+            if (label->text().contains(QStringLiteral("timeline&nbsp;"))
+                && label->text().contains(QStringLiteral("ring 2,000 events"))) {
+                sawTimelineRow = true;
+            }
+        }
+        check(sawTimelineRow,
+              "settings states the timeline ring, window and marker switch");
     }
 
     {
@@ -1645,7 +1827,7 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 31;
+            constexpr int kRailCount = 32;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
             allPagesReachable = allPagesReachable
@@ -2156,6 +2338,124 @@ int main(int argc, char *argv[]) {
         check(window.x() != 9000 && reachable,
               "overlay: a frame dragged off every screen is pulled back");
         window.hide();
+    }
+
+    {
+        // End to end: a monitor breach becomes one event, and a chart tick
+        // exists for it.
+        QList<AlertRule> hotRules = defaultAlertRules();
+        for (AlertRule &rule : hotRules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.threshold = 5.0;
+                rule.sustained = 1;
+            }
+        }
+        hud.setMonitors(hotRules);
+        DisplaySnapshot warmSnap = withProcs;
+        warmSnap.cpuPercent = 42.0;
+        warmSnap.cpuValid = true;
+        hud.setSnapshot(warmSnap);
+        hud.setSnapshot(warmSnap);
+        bool sawBreach = false;
+        for (const TimelineEvent &event : hud.timelineEvents()) {
+            if (event.kind == TimelineKind::Alert
+                && event.subject == QStringLiteral("monitor:app_cpu")
+                && event.severity == TimelineSeverity::Error) {
+                sawBreach = true;
+            }
+        }
+        check(sawBreach,
+              "a monitor breach lands in the event stream as one event");
+        int breachMarkers = 0;
+        for (TimeseriesChart *chart : hud.findChildren<TimeseriesChart *>()) {
+            breachMarkers += chart->eventCount() > 0 ? 1 : 0;
+        }
+        check(breachMarkers > 0,
+              "the breach tick reaches a chart");
+        hud.setMonitors(defaultAlertRules());
+        for (int i = 0; i < 3; ++i) {
+            hud.setSnapshot(withProcs);
+        }
+    }
+
+    {
+        // The marker hit test: a click anywhere over the tick reports the
+        // instant it stands for, and a click away from it reports nothing.
+        TimeseriesChart chart;
+        chart.resize(420, 150);
+        chart.show();
+        for (int i = 0; i < 24; ++i) {
+            chart.push(10.0 + i);
+        }
+        QList<qint64> hits;
+        QObject::connect(&chart, &TimeseriesChart::eventActivated,
+                         [&hits](qint64 atMs) { hits.append(atMs); });
+        const qint64 markMs = QDateTime::currentMSecsSinceEpoch();
+        QList<ChartEvent> ticks;
+        ChartEvent tick;
+        tick.atMs = markMs;
+        tick.severity = 3;
+        tick.label = QStringLiteral("error alert - Focused app CPU high");
+        ticks.append(tick);
+        chart.setEvents(ticks);
+        QApplication::processEvents();
+        check(chart.eventCount() == 1 && chart.lastSampleMs() > 0,
+              "a chart keeps its event ticks and its own sample clock");
+
+        auto clickAt = [&chart](int x, int y) {
+            QMouseEvent press(QEvent::MouseButtonPress, QPointF(x, y),
+                              chart.mapToGlobal(QPoint(x, y)), Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(&chart, &press);
+        };
+        const int probeY = chart.height() - 40;
+        for (int x = 0; x < chart.width() && hits.isEmpty(); ++x) {
+            clickAt(x, probeY);
+        }
+        check(hits.size() == 1 && hits.first() == markMs,
+              "clicking a chart tick reports the instant it stands for");
+    }
+
+    {
+        // A chart tick reaches the HUD, which rows the console on the
+        // timeline and narrows it to the window around that instant.
+        auto *railNow = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
+        TimeseriesChart *marked = nullptr;
+        for (TimeseriesChart *chart :
+             hud.findChildren<TimeseriesChart *>()) {
+            if (chart->eventCount() > 0) {
+                marked = chart;
+                break;
+            }
+        }
+        check(railNow != nullptr && marked != nullptr,
+              "the console charts carry the event ticks");
+        if (railNow != nullptr && marked != nullptr) {
+            int timelineRow = -1;
+            for (int i = 0; i < railNow->count(); ++i) {
+                if (railNow->item(i)->text() == QStringLiteral("Timeline")) {
+                    timelineRow = i;
+                }
+            }
+            railNow->setCurrentRow(0);
+            const qint64 at = marked->events().first().atMs;
+            marked->eventActivated(at);
+            QApplication::processEvents();
+            auto *window = hud.findChild<QLabel *>(QStringLiteral("ddTlWindow"));
+            auto *clear = hud.findChild<QPushButton *>(QStringLiteral("ddTlClear"));
+            check(timelineRow >= 0 && railNow->currentRow() == timelineRow,
+                  "clicking a chart tick opens the timeline page");
+            check(window != nullptr && !window->isHidden()
+                      && clear != nullptr && !clear->isHidden(),
+                  "the click narrows the timeline to a window");
+            if (clear != nullptr) {
+                clear->click();
+            }
+            QApplication::processEvents();
+            check(window != nullptr && window->isHidden(),
+                  "clearing the window returns the stream to everything");
+            railNow->setCurrentRow(0);
+        }
     }
 
     std::printf("%d failure(s)\n", failures);

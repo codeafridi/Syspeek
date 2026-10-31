@@ -720,14 +720,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 30); do
+          for i in $(seq 0 31); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 31, files
+          assert len(files) == 32, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",

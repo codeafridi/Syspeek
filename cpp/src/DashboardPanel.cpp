@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QDoubleSpinBox>
@@ -365,10 +366,16 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Instrumentation"),
                       QStringLiteral("Traces"), QStringLiteral("Profiles"),
                       QStringLiteral("Databases"), QStringLiteral("Security"),
-                      QStringLiteral("History"), QStringLiteral("Cost"),
+                      QStringLiteral("History"), QStringLiteral("Timeline"),
+                      QStringLiteral("Cost"),
                       QStringLiteral("Cloud"),
                       QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
+    for (int i = 0; i < m_rail->count(); ++i) {
+        if (m_rail->item(i)->text() == QStringLiteral("Timeline")) {
+            m_tlRowIndex = i;
+        }
+    }
 
     m_views = new QStackedWidget(body);
     m_views->setObjectName(QStringLiteral("ddViews"));
@@ -400,12 +407,20 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildDatabasesView());
     m_views->addWidget(buildSecurityView());
     m_views->addWidget(buildHistoryView());
+    m_views->addWidget(buildTimelineView());
     m_views->addWidget(buildCostView());
     m_views->addWidget(buildCloudView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
             &QStackedWidget::setCurrentIndex);
+
+    // "Why did this spike": every live chart carries the event tick overlay;
+    // clicking one narrows the timeline to that instant.
+    for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+        connect(chart, &TimeseriesChart::eventActivated, this,
+                &DashboardPanel::timelineFocusRequested);
+    }
 
     bodyLayout->addWidget(m_rail);
     bodyLayout->addWidget(m_views, 1);
@@ -478,6 +493,24 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,"
         " #ddHistDetail, #ddSilenceSummary, #ddSilenceList { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
+        "#ddTlSummary, #ddTlWindow, #ddTlEmpty, #ddTlDetail { color: %MUTED%; }"
+        "#ddTlTileEvents, #ddTlTileErrors, #ddTlTileWarnings,"
+        " #ddTlTileSubjects { color: %TEXT%; }"
+        "#ddTlKind, #ddTlSearch { background-color: %SURFACE%; color: %TEXT%;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 3px 6px;"
+        "  font-size: 10px; }"
+        "#ddTlClear { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 3px 10px;"
+        "  font-size: 9px; }"
+        "#ddTlClear:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddTlTable { background-color: transparent; border: none;"
+        "  color: %TEXT%; }"
+        "#ddTlTable::item { padding: 1px 2px; }"
+        "#ddTlTable::item:selected { background-color: %HOVER%;"
+        "  color: %TEXT%; }"
+        "#ddTlTable QHeaderView::section { background-color: transparent;"
+        "  color: %MUTED%; border: none; border-bottom: 1px solid %BORDER%;"
+        "  padding: 3px 2px; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
         "#ddSecuritySummary { color: %DIM%; }"
@@ -3406,6 +3439,11 @@ void DashboardPanel::applySettingsInfo() {
             ? muted(QStringLiteral("--"))
             : muted(m_settings.historyLine));
     general += row(
+        QStringLiteral("timeline"),
+        m_settings.timelineLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(m_settings.timelineLine));
+    general += row(
         QStringLiteral("overlay"),
         m_settings.overlayLine.isEmpty()
             ? muted(QStringLiteral("--"))
@@ -4008,6 +4046,358 @@ QWidget *DashboardPanel::buildHistoryView() {
     outer->setSpacing(0);
     outer->addWidget(scroll);
     return view;
+}
+
+QWidget *DashboardPanel::buildTimelineView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Tiles. COUNT is the ring, ERRORS/WARNINGS are the two severity
+    // levels that ever need action, SUBJECTS says how many things are
+    // involved (the aggregation keys, not the events).
+    m_tlTileEvents = new QLabel(QStringLiteral("--"), view);
+    m_tlTileEvents->setObjectName(QStringLiteral("ddTlTileEvents"));
+    m_tlTileErrors = new QLabel(QStringLiteral("--"), view);
+    m_tlTileErrors->setObjectName(QStringLiteral("ddTlTileErrors"));
+    m_tlTileWarnings = new QLabel(QStringLiteral("--"), view);
+    m_tlTileWarnings->setObjectName(QStringLiteral("ddTlTileWarnings"));
+    m_tlTileSubjects = new QLabel(QStringLiteral("--"), view);
+    m_tlTileSubjects->setObjectName(QStringLiteral("ddTlTileSubjects"));
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("EVENTS"), m_tlTileEvents,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ERRORS"), m_tlTileErrors,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WARNINGS"), m_tlTileWarnings,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SUBJECTS"), m_tlTileSubjects,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_tlSummary = new QLabel(QStringLiteral("--"), view);
+    m_tlSummary->setObjectName(QStringLiteral("ddTlSummary"));
+    m_tlSummary->setFont(monoFont(9));
+    m_tlSummary->setMinimumWidth(1);
+    m_tlSummary->setWordWrap(true);
+    layout->addWidget(m_tlSummary);
+
+    layout->addWidget(makeBanner(QStringLiteral("EVENT STREAM"),
+                                 ui_theme::banner(), view));
+
+    auto *stream = new QWidget(view);
+    auto *streamLayout = new QVBoxLayout(stream);
+    streamLayout->setContentsMargins(0, 0, 0, 0);
+    streamLayout->setSpacing(6);
+
+    auto *filters = new QHBoxLayout();
+    filters->setSpacing(6);
+    m_tlKind = new QComboBox(stream);
+    m_tlKind->setObjectName(QStringLiteral("ddTlKind"));
+    m_tlKind->addItem(QStringLiteral("any kind"), QStringLiteral("any"));
+    for (TimelineKind kind :
+         {TimelineKind::Alert, TimelineKind::Incident, TimelineKind::ProcessAction,
+          TimelineKind::ContainerAction, TimelineKind::ServiceAction,
+          TimelineKind::FileChange, TimelineKind::Kubernetes,
+          TimelineKind::Service, TimelineKind::Synthetic, TimelineKind::Cloud}) {
+        m_tlKind->addItem(timelineKindName(kind), timelineKindName(kind));
+    }
+    connect(m_tlKind, &QComboBox::currentIndexChanged, this,
+            [this](int) { rebuildTimelineRows(); });
+    m_tlSearch = new QLineEdit(stream);
+    m_tlSearch->setObjectName(QStringLiteral("ddTlSearch"));
+    m_tlSearch->setPlaceholderText(
+        QStringLiteral("filter subject, title or tag"));
+    m_tlSearch->setClearButtonEnabled(true);
+    connect(m_tlSearch, &QLineEdit::textChanged, this,
+            [this](const QString &) { rebuildTimelineRows(); });
+    m_tlClear = new QPushButton(QStringLiteral("CLEAR WINDOW"), stream);
+    m_tlClear->setObjectName(QStringLiteral("ddTlClear"));
+    m_tlClear->setVisible(false);
+    connect(m_tlClear, &QPushButton::clicked, this,
+            [this]() { emit timelineFocusCleared(); });
+    filters->addWidget(m_tlKind);
+    filters->addWidget(m_tlSearch, 1);
+    filters->addWidget(m_tlClear);
+    streamLayout->addLayout(filters);
+
+    m_tlWindow = new QLabel(QString(), stream);
+    m_tlWindow->setObjectName(QStringLiteral("ddTlWindow"));
+    m_tlWindow->setFont(monoFont(9));
+    m_tlWindow->setMinimumWidth(1);
+    m_tlWindow->setVisible(false);
+    streamLayout->addWidget(m_tlWindow);
+
+    m_tlTable = new QTreeWidget(stream);
+    m_tlTable->setObjectName(QStringLiteral("ddTlTable"));
+    m_tlTable->setColumnCount(5);
+    m_tlTable->setHeaderLabels({QStringLiteral("TIME"),
+                                QStringLiteral("SEV"),
+                                QStringLiteral("KIND"),
+                                QStringLiteral("SUBJECT"),
+                                QStringLiteral("EVENT")});
+    m_tlTable->setRootIsDecorated(false);
+    m_tlTable->setUniformRowHeights(true);
+    m_tlTable->setAlternatingRowColors(false);
+    m_tlTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tlTable->setMinimumHeight(240);
+    m_tlTable->setFont(monoFont(9));
+    m_tlTable->headerItem()->setFont(0, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(1, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(2, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(3, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(4, monoFont(8, true));
+    m_tlTable->setColumnWidth(0, 74);
+    m_tlTable->setColumnWidth(1, 52);
+    m_tlTable->setColumnWidth(2, 82);
+    m_tlTable->setColumnWidth(3, 190);
+    m_tlTable->header()->setStretchLastSection(true);
+    connect(m_tlTable, &QTreeWidget::itemSelectionChanged, this,
+            [this]() { updateTimelineDetail(); });
+    streamLayout->addWidget(m_tlTable, 1);
+
+    m_tlEmpty = new QLabel(timelineNoEventText(true), stream);
+    m_tlEmpty->setObjectName(QStringLiteral("ddTlEmpty"));
+    m_tlEmpty->setFont(monoFont(9));
+    m_tlEmpty->setMinimumWidth(1);
+    m_tlEmpty->setWordWrap(true);
+    streamLayout->addWidget(m_tlEmpty);
+    layout->addWidget(makeCard(QStringLiteral("STREAM"), stream, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("SELECTED EVENT"),
+                                 ui_theme::warn(), view));
+    m_tlDetail = new QLabel(QStringLiteral("--"), view);
+    m_tlDetail->setObjectName(QStringLiteral("ddTlDetail"));
+    m_tlDetail->setFont(monoFont(9));
+    m_tlDetail->setMinimumWidth(1);
+    m_tlDetail->setTextFormat(Qt::PlainText);
+    m_tlDetail->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_tlDetail->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    layout->addWidget(makeCard(QStringLiteral("DETAIL"), m_tlDetail, view));
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+void DashboardPanel::showTimeline() {
+    if (m_tlRowIndex >= 0 && m_rail != nullptr) {
+        m_rail->setCurrentRow(m_tlRowIndex);
+    }
+}
+
+void DashboardPanel::setTimeline(const TimelineViewInfo &info) {
+    m_timelineInfo = info;
+    if (m_tlSummary == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const QList<TimelineEvent> &source =
+        info.focus ? info.focusEvents : info.events;
+    const int errors = timelineCountWith(source, TimelineSeverity::Error);
+    const int warnings = timelineCountWith(source, TimelineSeverity::Warning);
+    if (m_tlTileEvents != nullptr) {
+        m_tlTileEvents->setText(QString::number(source.size()));
+    }
+    if (m_tlTileErrors != nullptr) {
+        m_tlTileErrors->setText(QString::number(errors));
+        m_tlTileErrors->setStyleSheet(errors > 0
+            ? QStringLiteral("color:%1;").arg(ui_theme::crit())
+            : QString());
+    }
+    if (m_tlTileWarnings != nullptr) {
+        m_tlTileWarnings->setText(QString::number(warnings));
+        m_tlTileWarnings->setStyleSheet(warnings > 0
+            ? QStringLiteral("color:%1;").arg(ui_theme::warn())
+            : QString());
+    }
+    if (m_tlTileSubjects != nullptr) {
+        m_tlTileSubjects->setText(
+            QString::number(timelineSubjects(source).size()));
+    }
+    m_tlSummary->setText(timelineSummaryText(info.focus ? info.focusEvents
+                                                        : info.events,
+                                             now, info.capacity, info.enabled));
+    if (m_tlWindow != nullptr) {
+        m_tlWindow->setVisible(info.focus);
+        if (info.focus) {
+            m_tlWindow->setText(timelineWindowText(
+                info.focusMs, info.focusWindowMs, int(info.focusEvents.size())));
+        }
+    }
+    if (m_tlClear != nullptr) {
+        m_tlClear->setVisible(info.focus);
+    }
+    if (m_tlEmpty != nullptr) {
+        m_tlEmpty->setText(timelineNoEventText(info.enabled));
+        m_tlEmpty->setVisible(source.isEmpty());
+    }
+    rebuildTimelineRows();
+    applyChartEvents();
+}
+
+void DashboardPanel::rebuildTimelineRows() {
+    if (m_tlTable == nullptr) {
+        return;
+    }
+    const TimelineViewInfo &info = m_timelineInfo;
+    const QList<TimelineEvent> &source =
+        info.focus ? info.focusEvents : info.events;
+    TimelineKind kind = TimelineKind::Other;
+    if (m_tlKind != nullptr) {
+        kind = timelineKindFromName(m_tlKind->currentData().toString());
+    }
+    const QString needle = m_tlSearch != nullptr ? m_tlSearch->text()
+                                                 : QString();
+    // The page is republished on a slow cadence so the ages stay true; the
+    // rows only rebuild when something actually changed, otherwise a rebuild
+    // every fifth tick would keep stealing the user's selection.
+    const QString signature =
+        QStringLiteral("%1|%2|%3|%4|%5|%6")
+            .arg(source.size())
+            .arg(info.newestMs)
+            .arg(info.focus ? info.focusMs : 0)
+            .arg(int(kind))
+            .arg(needle)
+            .arg(info.enabled ? 1 : 0);
+    if (signature == m_tlSignature) {
+        return;
+    }
+    m_tlSignature = signature;
+    qint64 keepMs = 0;
+    QString keepSubject;
+    if (auto *selected = m_tlTable->currentItem()) {
+        keepMs = selected->data(0, Qt::UserRole).toLongLong();
+        keepSubject = selected->text(3);
+    }
+    m_tlRows = timelineFilter(source, kind, needle);
+    if (m_tlEmpty != nullptr) {
+        m_tlEmpty->setVisible(m_tlRows.isEmpty());
+        if (m_tlRows.isEmpty() && (!source.isEmpty())
+            && !(m_tlSearch != nullptr && m_tlSearch->text().trimmed().isEmpty()
+                 && kind == TimelineKind::Other)) {
+            m_tlEmpty->setText(QStringLiteral("no event matches this filter"));
+        } else if (m_tlRows.isEmpty()) {
+            m_tlEmpty->setText(timelineNoEventText(info.enabled));
+        }
+    }
+
+    QSignalBlocker blocker(m_tlTable);
+    m_tlTable->clear();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (const TimelineEvent &event : m_tlRows) {
+        auto *row = new QTreeWidgetItem(m_tlTable);
+        const QString clock = QDateTime::fromMSecsSinceEpoch(event.atMs)
+                                  .toString(QStringLiteral("HH:mm:ss"));
+        row->setText(0, clock);
+        row->setText(1, timelineSeverityName(event.severity));
+        row->setText(2, timelineKindName(event.kind));
+        row->setText(3, event.subject.isEmpty() ? QStringLiteral("-")
+                                                : event.subject);
+        row->setText(4, event.title.isEmpty() ? event.detail : event.title);
+        QColor ink = ui_theme::text();
+        if (event.severity == TimelineSeverity::Error) {
+            ink = ui_theme::crit();
+        } else if (event.severity == TimelineSeverity::Warning) {
+            ink = ui_theme::warn();
+        } else if (event.severity == TimelineSeverity::Ok) {
+            ink = ui_theme::ok();
+        }
+        row->setForeground(1, ink);
+        row->setForeground(0, QColor(ui_theme::dim()));
+        row->setForeground(3, QColor(ui_theme::dim()));
+        row->setData(0, Qt::UserRole, event.atMs);
+        row->setToolTip(0, timelineDetailText(event, now));
+        row->setToolTip(4, timelineDetailText(event, now));
+    }
+    QTreeWidgetItem *restore = nullptr;
+    if (keepMs != 0) {
+        for (int i = 0; i < m_tlTable->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = m_tlTable->topLevelItem(i);
+            if (item->data(0, Qt::UserRole).toLongLong() == keepMs
+                && item->text(3) == keepSubject) {
+                restore = item;
+                break;
+            }
+        }
+    }
+    if (restore != nullptr) {
+        m_tlTable->setCurrentItem(restore);
+    } else if (!m_tlRows.isEmpty()) {
+        m_tlTable->setCurrentItem(m_tlTable->topLevelItem(0));
+    }
+    blocker.unblock();
+    updateTimelineDetail();
+}
+
+void DashboardPanel::updateTimelineDetail() {
+    if (m_tlDetail == nullptr) {
+        return;
+    }
+    auto *row = m_tlTable != nullptr ? m_tlTable->currentItem() : nullptr;
+    if (row == nullptr) {
+        m_tlDetail->setText(QStringLiteral("--"));
+        return;
+    }
+    const int index = m_tlTable->indexOfTopLevelItem(row);
+    if (index < 0 || index >= m_tlRows.size()) {
+        m_tlDetail->setText(QStringLiteral("--"));
+        return;
+    }
+    m_tlDetail->setText(timelineDetailText(
+        m_tlRows.at(index), QDateTime::currentMSecsSinceEpoch()));
+}
+
+// Hand the event ring to every live chart as annotation ticks. Charts with a
+// replaced series (the stored-window panels) carry no sample clock and skip
+// them; charts whose window does not reach an event skip that event. The ring
+// is already bounded, so this stays a paint-time loop over <256 items.
+void DashboardPanel::applyChartEvents() {
+    if (!m_timelineInfo.markers) {
+        // Switching markers off clears the ticks that are already drawn;
+        // leaving them behind would make the switch look broken.
+        for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+            chart->setEvents(QList<ChartEvent>());
+        }
+        return;
+    }
+    const QList<TimelineEvent> &source =
+        m_timelineInfo.focus ? m_timelineInfo.focusEvents
+                             : m_timelineInfo.events;
+    QList<ChartEvent> markers;
+    const int start = qMax(0, int(source.size()) - 160);
+    markers.reserve(source.size() - start);
+    for (int i = start; i < source.size(); ++i) {
+        ChartEvent marker;
+        marker.atMs = source.at(i).atMs;
+        marker.severity = timelineSeverityRank(source.at(i).severity);
+        marker.label = QStringLiteral("%1 %2 - %3")
+                           .arg(timelineSeverityName(source.at(i).severity),
+                                timelineKindName(source.at(i).kind),
+                                source.at(i).title.isEmpty()
+                                    ? source.at(i).detail
+                                    : source.at(i).title);
+        markers.append(marker);
+    }
+    for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+        chart->setEvents(markers);
+    }
 }
 
 QWidget *DashboardPanel::buildCloudView() {

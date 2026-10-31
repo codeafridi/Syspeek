@@ -24,11 +24,29 @@ struct ChartBand {
 
 enum class ChartBandStyle { Off, Line, LineAndArea };
 
+// A point in time that something happened, drawn as a hairline tick over the
+// plot: Grafana's annotation overlay (an annotation carries epoch/epochEnd)
+// reduced to what a HUD can render. severity: 1 info, 2 warning, 3 error.
+struct ChartEvent {
+    qint64 atMs = 0;
+    int severity = 1;
+    QString label;
+};
+
 class TimeseriesChart : public QWidget {
     Q_OBJECT
 
 public:
     explicit TimeseriesChart(QWidget *parent = nullptr);
+
+    // Event ticks. The panel replaces the whole set on each tick, so the
+    // chart never accumulates history it does not need to paint.
+    void setEvents(const QList<ChartEvent> &events);
+    QList<ChartEvent> events() const { return m_events; }
+    int eventCount() const { return int(m_events.size()); }
+    qint64 lastSampleMs() const {
+        return m_sampleMs.isEmpty() ? 0 : m_sampleMs.constLast();
+    }
 
     void setUnit(const QString &unit);
     void setSeriesName(const QString &name);
@@ -64,10 +82,21 @@ public:
     // sample with "now" marked (img4 "Forecast (1h)").
     void setForecast(const QList<double> &low, const QList<double> &high);
 
+signals:
+    // A tick was clicked: "why did this spike" narrows the timeline to it.
+    void eventActivated(qint64 atMs);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
+    // Pixel position of a sample index inside the plot (the same mapping the
+    // series path uses) and back, for hit testing event ticks.
+    int eventIndexAtX(qreal x) const;
+    int nearestSampleForMs(qint64 atMs) const;
     QList<double> m_valuesA;
     QList<double> m_valuesB;
     QList<double> m_forecastLow;
@@ -87,4 +116,10 @@ private:
     double m_overlay = 0.0;
     QColor m_overlayColor{225, 95, 80};
     bool m_barMode = false;
+    // One wall-clock stamp per plotted sample (the x axis is index based, so
+    // this is what lets an event at a given instant land on the right pixel).
+    QList<qint64> m_sampleMs;
+    QList<ChartEvent> m_events;
+    QRectF m_plotRect;
+    int m_hoverEvent = -1;
 };

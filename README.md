@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A local-first HUD that follows the app you're focused on — and a 31-view Datadog-style console for everything your kernel, containers and apps are doing.
+### A local-first HUD that follows the app you're focused on — and a 32-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -255,6 +255,42 @@ matrix.
 - **`HIDE` / `SHOW`** — collapse to a single line or expand.
 - **Click `docker:` or `k8s:`** — expand that badge's details.
 - **`Ctrl+C`** in the terminal — quit.
+
+## Event timeline &mdash; "why did this spike"
+
+Charts say *what* the machine did. They cannot say *what changed* at the same
+moment, which is the question everybody actually asks at a spike. The
+**Timeline** page is one append-only stream of that: monitors firing and
+recovering, process / container / unit actions, file-integrity changes,
+Kubernetes and service changes, synthetic-check transitions, cloud fleet
+changes. One row per event: instant, severity, kind, the subject it happened
+to, and the detail.
+
+Every chart carries the same events as **annotation ticks** &mdash; a hairline
+where something happened, coloured by severity (error / warning / info / ok,
+nothing decorative). Hover one to read it, click one and the console opens the
+Timeline narrowed to that instant:
+
+```
+12:41:03 +-90s: 3 events in this window
+```
+
+That is the feature: a spike on the graph and the events around it, on one
+screen, with no query language and no round trip.
+
+```ini
+[timeline]
+enabled = true      ; record events at all
+events = 2000       ; ring size, in memory (100..20000)
+window_s = 90       ; radius of the window a chart tick opens (10..3600)
+markers = true      ; draw the ticks on the charts
+```
+
+The ring is bounded and lives in memory, so a long run costs a fixed amount
+and a restart starts a fresh stream &mdash; the numeric rewind on the History
+page is what persists. Events are recorded locally; nothing is sent anywhere.
+A collector that is gated on this OS simply produces no events, and the page
+says so rather than showing an empty box.
 
 ## GNOME / KDE setup
 

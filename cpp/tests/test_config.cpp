@@ -634,6 +634,57 @@ int main(int argc, char *argv[]) {
               "path: a comma-separated hop list survives QSettings");
     }
 
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArray());
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.timeline.enabled && c.timeline.markers
+                  && c.timeline.events == 2000
+                  && c.timeline.windowSeconds == 90,
+              "timeline: on by default with a 2000-event ring and a 90 s window");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[timeline]\n"
+                                   "enabled = false\n"
+                                   "markers = false\n"
+                                   "events = 500\n"
+                                   "window_s = 45\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.timeline.enabled && !c.timeline.markers
+                  && c.timeline.events == 500
+                  && c.timeline.windowSeconds == 45,
+              "timeline: the switches and the ring size load");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[timeline]\n"
+                                   "events = 5\n"
+                                   "window_s = 2\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.timeline.events == 100 && c.timeline.windowSeconds == 10,
+              "timeline: a tiny ring and window clamp to their floors");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[timeline]\n"
+                                   "events = 999999\n"
+                                   "window_s = 99999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.timeline.events == 20000 && c.timeline.windowSeconds == 3600,
+              "timeline: an absurd ring and window clamp to their ceilings");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

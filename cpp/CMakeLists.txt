@@ -200,6 +200,8 @@ add_library(syspeek_core STATIC
     src/ProcessActions.h
     src/SensorStatus.cpp
     src/SensorStatus.h
+    src/TimelineStatus.cpp
+    src/TimelineStatus.h
     src/CloudStatus.cpp
     src/CloudStatus.h
     src/CloudProvider.h

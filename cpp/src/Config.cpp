@@ -441,6 +441,27 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("timeline"));
+    {
+        config.timeline.enabled =
+            settings.value(QStringLiteral("enabled"), true).toBool();
+        config.timeline.markers =
+            settings.value(QStringLiteral("markers"), true).toBool();
+        bool ok = false;
+        const int events =
+            settings.value(QStringLiteral("events")).toString().toInt(&ok);
+        if (ok) {
+            config.timeline.events = clampInt(events, 100, 20000);
+        }
+        ok = false;
+        const int window =
+            settings.value(QStringLiteral("window_s")).toString().toInt(&ok);
+        if (ok) {
+            config.timeline.windowSeconds = clampInt(window, 10, 3600);
+        }
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("silences"));
     for (const QString &key : settings.childKeys()) {
         if (key.endsWith(QStringLiteral("_comment"))

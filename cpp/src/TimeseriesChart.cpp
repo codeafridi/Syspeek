@@ -4,8 +4,10 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QPainter>
+#include <QMouseEvent>
 #include <QPainterPath>
 #include <QPen>
+#include <QToolTip>
 
 #include <algorithm>
 #include <cmath>
@@ -51,6 +53,7 @@ TimeseriesChart::TimeseriesChart(QWidget *parent)
     : QWidget(parent) {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMinimumHeight(96);
+    setMouseTracking(true);
     m_lastPush = QDateTime::currentDateTime();
 }
 
@@ -78,6 +81,9 @@ void TimeseriesChart::setSeriesColors(const QColor &a, const QColor &b) {
 void TimeseriesChart::setCapacity(int capacity) {
     while (m_valuesA.size() > capacity) {
         m_valuesA.removeFirst();
+        if (!m_sampleMs.isEmpty()) {
+            m_sampleMs.removeFirst();
+        }
     }
     while (m_valuesB.size() > capacity) {
         m_valuesB.removeFirst();
@@ -91,6 +97,107 @@ void TimeseriesChart::setBands(const QList<ChartBand> &bands,
     update();
 }
 
+void TimeseriesChart::setEvents(const QList<ChartEvent> &events) {
+    m_events = events;
+    while (!m_events.isEmpty() && m_events.size() > 256) {
+        m_events.removeFirst();
+    }
+    update();
+}
+
+// The x axis is index based (rect.left() + width * i / (n - 1)); map the
+// event instant onto the sample that was taken closest to it.
+int TimeseriesChart::nearestSampleForMs(qint64 atMs) const {
+    if (m_sampleMs.isEmpty() || atMs <= 0) {
+        return -1;
+    }
+    if (atMs < m_sampleMs.constFirst()) {
+        return -1;
+    }
+    if (atMs >= m_sampleMs.constLast()) {
+        // An event that just happened lands a few milliseconds after the last
+        // sample: pin it to the newest sample rather than hiding it for a
+        // tick (Grafana clamps an annotation to the visible range the same way).
+        return int(m_sampleMs.size()) - 1;
+    }
+    int best = -1;
+    qint64 bestDelta = 0;
+    for (int i = 0; i < m_sampleMs.size(); ++i) {
+        const qint64 delta = m_sampleMs.at(i) > atMs ? m_sampleMs.at(i) - atMs
+                                                     : atMs - m_sampleMs.at(i);
+        if (best < 0 || delta < bestDelta) {
+            best = i;
+            bestDelta = delta;
+        }
+    }
+    return best;
+}
+
+int TimeseriesChart::eventIndexAtX(qreal x) const {
+    if (m_events.isEmpty() || !m_plotRect.isValid()
+        || m_valuesA.size() < 2) {
+        return -1;
+    }
+    const int n = m_valuesA.size();
+    int best = -1;
+    qreal bestDelta = 0.0;
+    for (int i = 0; i < m_events.size(); ++i) {
+        const int index = nearestSampleForMs(m_events.at(i).atMs);
+        if (index < 0) {
+            continue;
+        }
+        const qreal ex = m_plotRect.left()
+            + m_plotRect.width() * index / (n - 1);
+        const qreal delta = std::abs(ex - x);
+        if (delta <= 4.0 && (best < 0 || delta < bestDelta)) {
+            best = i;
+            bestDelta = delta;
+        }
+    }
+    return best;
+}
+
+void TimeseriesChart::mouseMoveEvent(QMouseEvent *event) {
+    const int hit = eventIndexAtX(event->position().x());
+    if (hit == m_hoverEvent) {
+        QWidget::mouseMoveEvent(event);
+        return;
+    }
+    m_hoverEvent = hit;
+    if (hit >= 0) {
+        const ChartEvent &item = m_events.at(hit);
+        const QString when = QDateTime::fromMSecsSinceEpoch(item.atMs).toString(
+            QStringLiteral("HH:mm:ss"));
+        setCursor(Qt::PointingHandCursor);
+        QToolTip::showText(event->globalPosition().toPoint(),
+                           QStringLiteral("%1  %2\nclick to see what else "
+                                          "happened around this instant")
+                               .arg(when, item.label),
+                           this);
+    } else {
+        unsetCursor();
+        QToolTip::hideText();
+    }
+    update();
+    QWidget::mouseMoveEvent(event);
+}
+
+void TimeseriesChart::leaveEvent(QEvent *event) {
+    m_hoverEvent = -1;
+    unsetCursor();
+    QToolTip::hideText();
+    QWidget::leaveEvent(event);
+}
+
+void TimeseriesChart::mousePressEvent(QMouseEvent *event) {
+    const int hit = eventIndexAtX(event->position().x());
+    if (hit >= 0) {
+        emit eventActivated(m_events.at(hit).atMs);
+        return;
+    }
+    QWidget::mousePressEvent(event);
+}
+
 void TimeseriesChart::setPaused(bool paused) {
     m_paused = paused;
     if (paused) {
@@ -102,6 +209,7 @@ void TimeseriesChart::setPaused(bool paused) {
 void TimeseriesChart::clear() {
     m_valuesA.clear();
     m_valuesB.clear();
+    m_sampleMs.clear();
     m_forecastLow.clear();
     m_forecastHigh.clear();
     update();
@@ -117,6 +225,10 @@ void TimeseriesChart::setValues(const QList<double> &valuesA,
     while (m_valuesB.size() > kMaxSamples) {
         m_valuesB.removeFirst();
     }
+    // A replaced series has no sample clock of its own (the stored-window
+    // charts are rendered from records, not from live ticks).
+    m_sampleMs.clear();
+    m_events.clear();
     m_lastPush = QDateTime::currentDateTime();
     update();
 }
@@ -126,8 +238,12 @@ void TimeseriesChart::push(double value) {
         return;
     }
     m_valuesA.append(value);
-    if (m_valuesA.size() > kMaxSamples) {
+    m_sampleMs.append(QDateTime::currentMSecsSinceEpoch());
+    while (m_valuesA.size() > kMaxSamples) {
         m_valuesA.removeFirst();
+        if (!m_sampleMs.isEmpty()) {
+            m_sampleMs.removeFirst();
+        }
     }
     m_lastPushedA = value;
     m_lastPush = QDateTime::currentDateTime();
@@ -411,6 +527,37 @@ void TimeseriesChart::paintEvent(QPaintEvent *event) {
         }
         return path;
     };
+
+    // Event ticks (Grafana annotation overlay): a hairline through the plot
+    // plus a cap on the baseline, drawn before the series so the data stays
+    // readable. Colour is the semantic severity, never a decorative hue.
+    m_plotRect = plot;
+    if (!m_events.isEmpty() && m_valuesA.size() >= 2) {
+        const int n = m_valuesA.size();
+        for (const ChartEvent &event : m_events) {
+            const int index = nearestSampleForMs(event.atMs);
+            if (index < 0) {
+                continue;
+            }
+            const qreal x = plot.left() + plot.width() * index / (n - 1);
+            QColor ink = ui_theme::dim();
+            if (event.severity >= 3) {
+                ink = ui_theme::crit();
+            } else if (event.severity == 2) {
+                ink = ui_theme::warn();
+            } else if (event.severity <= 0) {
+                ink = ui_theme::ok();
+            }
+            QColor hair = ink;
+            hair.setAlpha(64);
+            painter.setPen(QPen(hair, 1.0));
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(ink);
+            painter.drawRect(QRectF(x - 1.0, plot.bottom() - 2.5, 2.0, 2.5));
+            painter.setBrush(Qt::NoBrush);
+        }
+    }
 
     const QRectF seriesRect = plot;
     QColor fillA = colorA;
