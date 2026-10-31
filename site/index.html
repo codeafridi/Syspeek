@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Syspeek. A focused process HUD for Linux, macOS and Windows</title>
-    <meta name="description" content="Syspeek is a small overlay HUD that live tracks the CPU and memory of the app you are using, with optional Docker and Kubernetes health. Linux, macOS and Windows. C++ and Qt 6, fully open source." />
+    <meta name="description" content="Syspeek is a small overlay HUD that follows the app you are using, then opens into a 31-view console for the host, disks, GPU, sensors, containers, Kubernetes, databases, traces and cloud cost. Linux, macOS and Windows. C++ and Qt 6, local only, fully open source." />
     <meta name="theme-color" content="#f4f5f8" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311151b'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23d9a441'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=4" />
     <script>
       (function () {
         var t = 'light';
@@ -25,10 +25,11 @@
         </a>
         <nav class="nav-mid">
           <a href="#features">Features</a>
+          <a href="#screens">Screenshots</a>
           <a href="#install">Install</a>
         </nav>
         <div class="nav-right">
-          <a class="ver" href="https://github.com/codeafridi/Syspeek/releases" rel="noopener" title="Releases">v0.8.9</a>
+          <a class="ver" href="https://github.com/codeafridi/Syspeek/releases/tag/v0.10.0" rel="noopener" title="Release notes for 0.10.0">v0.10.0</a>
           <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
             <svg class="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.7 17.7l1.41 1.41M2 12h2M20 12h2M6.34 17.7l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
             <svg class="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
@@ -44,46 +45,160 @@
     <main id="top">
       <section class="hero">
         <div class="wrap">
-          <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6.</p>
+          <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6. Version 0.10.0.</p>
           <h1>The HUD that follows the app you are using.</h1>
           <p class="lede">
-            Pick any window and Syspeek shows that app's CPU, memory, threads and file descriptors live, in a small panel that floats over your desktop.
+            Pick any window and Syspeek puts that app's CPU, memory, threads, file descriptors, disk and network throughput in a small panel that floats over your desktop. Click once and the same binary opens a full console for the whole machine: host, disks, GPU, sensors, containers, Kubernetes, databases, traces and what the cloud is billing you.
           </p>
           <div class="actions">
             <a class="btn primary" href="#install">Install now</a>
             <a class="btn" href="https://github.com/codeafridi/Syspeek" rel="noopener">View on GitHub</a>
           </div>
-          <div class="shot-frame">
+
+          <div class="shot-frame wide">
             <div class="shot-bar">
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="shot-title">syspeek</span>
+              <span class="shot-title">syspeek console &mdash; Overview</span>
             </div>
-            <img src="hud.png" width="430" height="196" alt="Syspeek HUD showing the focused app name, PID, CPU and RSS, with Docker and Kubernetes badges and MORE / HIDE buttons." />
+            <a href="shots/overview.webp" target="_blank" rel="noopener">
+              <img src="shots/overview.webp" width="1200" height="920" alt="Syspeek Overview console: focused app CPU, RSS and process count tiles, CPU, memory and process count charts, host CPU, memory available and load charts, network, disk and utilisation charts, and the watchdog and forecast cards." />
+            </a>
           </div>
+          <div class="hud">
+            <figure class="hud-figure">
+              <img src="hud.png" width="430" height="207" alt="The compact Syspeek overlay: focused app cursor, its PID, CPU and RSS, and one line each for Docker containers and Kubernetes pods." />
+              <figcaption>
+                <b>And this is the overlay.</b>
+                430 pixels wide, always on top, refreshed every second. Focus follows the window you are actually using.
+              </figcaption>
+            </figure>
+          </div>
+
+          <p class="shot-note">
+            Every panel on this page is a live capture &mdash; except the two Cloud panels, marked in the <a href="#screens">screenshot notes</a>.
+          </p>
         </div>
       </section>
 
       <section class="section" id="features">
         <div class="wrap">
           <p class="section-kicker">What it shows</p>
-          <h2>One panel. The numbers that matter.</h2>
+          <h2>One panel over your app. Thirty-one views behind it.</h2>
           <div class="grid">
             <article class="card">
-              <h3>Focused application</h3>
-              <p>PID, CPU percent and resident memory of the window you are using, plus threads, open files and context switches. Refreshed every second.</p>
+              <h3>The app you are using</h3>
+              <p>PID, CPU, RSS, threads, open files and context switches, added up over the app's whole process tree, not one PID. Disk read and write rates, TCP throughput and listening ports per process, sampled from the kernel once a second.</p>
             </article>
             <article class="card">
-              <h3>Docker</h3>
-              <p>Container count at a glance, with unhealthy, restarting and recently exited containers flagged.</p>
+              <h3>The machine under it</h3>
+              <p>Host CPU and steal, memory, load, per-device disk throughput and utilisation, network interfaces, hwmon temperatures, fans and power, battery health, and GPU utilisation with the process holding it. Anything an OS cannot report is labelled as such, never left blank.</p>
             </article>
             <article class="card">
-              <h3>Kubernetes</h3>
-              <p>Problem pods and deployments short on ready replicas, from your current kubectl context.</p>
+              <h3>The services you run</h3>
+              <p>Docker containers with live CPU, memory, network and PIDs through the Engine API. Kubernetes pods, deployments, nodes and metrics-server usage. systemd units, launchd jobs and Windows services. A local PostgreSQL client for cache hit rate, commits, deadlocks and the slowest statements.</p>
             </article>
             <article class="card">
-              <h3>Runs where you work</h3>
-              <p>Real focus tracking on GNOME, KDE, Hyprland, Sway, niri and plain X11. Native collectors on macOS and Windows. Anything an OS cannot provide is labelled not supported on this OS.</p>
+              <h3>The bills and the pager</h3>
+              <p>OTLP traces, DogStatsD metrics, synthetic HTTP checks and a Prometheus endpoint on the receiving end. Cloud instance identity, accrued cost and the provider's own billed spend. Alerts, incidents, SLO burn and webhooks to the receiver you already own.</p>
             </article>
+          </div>
+
+          <ul class="truth">
+            <li><strong>Local only.</strong> No account, no telemetry, no phone home. The only outbound calls are ones you switch on: cloud metadata, your own webhook, your own Prometheus scraper.</li>
+            <li><strong>Honest about the gaps.</strong> A surface the OS will not give up says so on the panel. macOS TCP counters need root, Windows has no load average, and the console prints those sentences instead of a zero.</li>
+            <li><strong>One static binary.</strong> C++20 and Qt 6. Started from a .deb, a DMG, an MSI, an AppImage, Homebrew, Scoop or a single shell line.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" id="screens">
+        <div class="wrap">
+          <p class="section-kicker">Screenshots</p>
+          <h2>Everything below is Syspeek on one laptop.</h2>
+          <p class="section-lede">
+            A 12-core HP laptop running Linux, with three Docker containers, a local PostgreSQL, a single-node Kubernetes cluster, and local OTLP and DogStatsD clients feeding the console. Click any panel for the full frame.
+          </p>
+
+          <div class="gallery">
+            <figure class="tile">
+              <a href="shots/processes.webp" target="_blank" rel="noopener"><img src="shots/processes.webp" width="1200" height="920" loading="lazy" alt="Processes page: grouped process tree with CPU, memory, threads, file descriptors, per-process disk read and write rates, TCP throughput and listening ports." /></a>
+              <figcaption><b>Processes</b> Each row carries CPU, RSS, threads, fds, block I/O and TCP throughput, plus the ports it listens on.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/sensors.webp" target="_blank" rel="noopener"><img src="shots/sensors.webp" width="1200" height="920" loading="lazy" alt="Sensors page: hottest temperature, fan RPM, power draw and battery charge tiles, hwmon readings per chip, hottest sensor and power charts, and a battery detail card." /></a>
+              <figcaption><b>Sensors</b> Every hwmon chip, the battery's health and cycles, and the AC adapter state, sampled from sysfs.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/gpu.webp" target="_blank" rel="noopener"><img src="shots/gpu.webp" width="1200" height="920" loading="lazy" alt="GPU page: utilisation, VRAM, temperature and process count tiles, a utilisation chart, the device card and a per-process table of GPU engines and memory." /></a>
+              <figcaption><b>GPU</b> Device busy, VRAM, clocks and temperature, with the processes currently using the GPU.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/network.webp" target="_blank" rel="noopener"><img src="shots/network.webp" width="1200" height="920" loading="lazy" alt="Network page: connection counts, established sockets, retransmit percentage and transmit throughput tiles, a throughput chart, and the connection and interface tables." /></a>
+              <figcaption><b>Network</b> Sockets by state, retransmits, per-interface throughput and top talkers.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/disks.webp" target="_blank" rel="noopener"><img src="shots/disks.webp" width="1200" height="920" loading="lazy" alt="Disks page: read and write throughput, busiest device utilisation and I/O pressure tiles, a summary card, a per-device table and read, write and utilisation charts." /></a>
+              <figcaption><b>Disks</b> iostat-style per-device rates, await and utilisation, plus the processes doing the writing.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/host.webp" target="_blank" rel="noopener"><img src="shots/host.webp" width="1200" height="920" loading="lazy" alt="Host page: host CPU, load, memory available and disk free tiles, a load chart, the host inventory summary and the platform, CPU, filesystem and network cards." /></a>
+              <figcaption><b>Host</b> CPU topology, memory, load, kernel limits and every mounted filesystem with free space.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/metrics.webp" target="_blank" rel="noopener"><img src="shots/metrics.webp" width="1200" height="920" loading="lazy" alt="Metrics page: received, events, service checks and parse error tiles, a DogStatsD receiver card, ingestion and error charts and a series explorer table." /></a>
+              <figcaption><b>Metrics</b> A DogStatsD receiver on 8125, with counters, gauges, histograms, sets, events and service checks.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/traces.webp" target="_blank" rel="noopener"><img src="shots/traces.webp" width="1200" height="920" loading="lazy" alt="Traces page: trace, span, error and service tiles, a latency chart, the service map and recent traces." /></a>
+              <figcaption><b>Traces</b> An OTLP/HTTP receiver on 4318, with per-service latency, p95 and the cross-service map.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/containers.webp" target="_blank" rel="noopener"><img src="shots/containers.webp" width="1200" height="920" loading="lazy" alt="Containers page: running, issues, container count and cgroup memory tiles, a container table with CPU, memory, network and PIDs, and lifecycle buttons." /></a>
+              <figcaption><b>Containers</b> Engine API stats per container &mdash; CPU, memory against the limit, I/O, PIDs &mdash; and start, stop, restart.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/kubernetes.webp" target="_blank" rel="noopener"><img src="shots/kubernetes.webp" width="1200" height="920" loading="lazy" alt="Kubernetes page: pod, issue, deployment and monthly cost tiles, the cluster summary, pod and deployment tables, a pods-over-time chart and the cluster health, node and event cards." /></a>
+              <figcaption><b>Kubernetes</b> Pods and deployments with metrics-server usage, node capacity, warning events, deprecated APIs and cost.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/databases.webp" target="_blank" rel="noopener"><img src="shots/databases.webp" width="1200" height="920" loading="lazy" alt="Databases page: cache hit ratio, commits per second, rollbacks and deadlock tiles, a throughput chart, and the statements and application connection cards." /></a>
+              <figcaption><b>Databases</b> PostgreSQL cache hit rate, commits, rollbacks, deadlocks and the slowest statements.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/logs.webp" target="_blank" rel="noopener"><img src="shots/logs.webp" width="1200" height="852" loading="lazy" alt="Logs page: log line, error, level and parse rate tiles, a journal summary, the parsed-fields card, a log volume chart, a sensitive data scan result and a tail of recent journal entries." /></a>
+              <figcaption><b>Logs</b> journald, unified logging or the Windows event log, parsed into fields, scanned for secrets, and kept local.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/history.webp" target="_blank" rel="noopener"><img src="shots/history.webp" width="1200" height="920" loading="lazy" alt="History page: samples, span, on-disk size and interval tiles, a rewind card with a scrubber and record lines, and stored-window CPU and memory charts." /></a>
+              <figcaption><b>History</b> A bounded on-disk ring of every sample, with a scrubber to rewind the console an hour.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/cost.webp" target="_blank" rel="noopener"><img src="shots/cost.webp" width="1200" height="920" loading="lazy" alt="Cost page: monthly, hourly, CPU efficiency and memory efficiency tiles, a cost allocation card, a right-sizing card, a cost chart and namespace and workload breakdown tables." /></a>
+              <figcaption><b>Cost</b> OpenCost-style cluster cost from declared requests, efficiency, right-sizing and per-namespace share.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/cloud.webp" target="_blank" rel="noopener"><img src="shots/cloud.webp" width="1200" height="920" loading="lazy" alt="Cloud page: provider, age, accrued and monthly cost tiles, the instance identity card, a running-instances chart and the fleet inventory table." /></a>
+              <figcaption><b>Cloud</b> Instance identity from the metadata service, age and accrued cost, and the account's fleet from your own CLI.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/cloud-spend.webp" target="_blank" rel="noopener"><img src="shots/cloud-spend.webp" width="1200" height="800" loading="lazy" alt="Billed spend section of the Cloud page: a daily spend chart, month to date and forecast, the query it came from, and a per-service breakdown." /></a>
+              <figcaption><b>Billed spend</b> What the provider actually charged this month, straight from Cost Explorer, with a month-end forecast.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/security.webp" target="_blank" rel="noopener"><img src="shots/security.webp" width="1200" height="920" loading="lazy" alt="Security page: exposure, findings, threats and file change tiles, the sandbox exposure card, threat rows and file integrity entries." /></a>
+              <figcaption><b>Security</b> Sandbox exposure per process, log-based threat detection, and file integrity with hashes.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/settings.webp" target="_blank" rel="noopener"><img src="shots/settings.webp" width="1200" height="920" loading="lazy" alt="Settings page: version, refresh, monitors and silenced tiles, software and runtime paths, the collection scope matrix, monitor editors and the diagnostics card." /></a>
+              <figcaption><b>Settings</b> Every path, every switch, which collection surfaces are live on this OS, and the monitor editors.</figcaption>
+            </figure>
+          </div>
+
+          <div class="notes">
+            <h3 id="screenshot-notes">Notes on these captures</h3>
+            <p>
+              These are live captures of Syspeek 0.10.0 on one machine &mdash; not mock-ups and not a designer's render. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD. There is no cloud provider behind this laptop, so the two <b>Cloud</b> panels are rendered from the application's own screenshot fixtures with a synthetic AWS identity and spend document; every other panel is the running binary. Treat the Cloud panels as a layout reference, and the release notes for what CI proves about that path against a real metadata service.
+            </p>
           </div>
         </div>
       </section>
@@ -108,8 +223,8 @@
                 <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
               </div>
             </div>
-            <p>Installs for your user only, puts syspeek on PATH and starts it at login. Runs on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and other 64 bit distros with glibc 2.34 or newer. No curl? The README has a wget version.</p>
-            <p class="alts">Prefer a package file? Download the .deb or the AppImage from Releases.</p>
+            <p>Installs for your user only, puts syspeek on PATH and starts it at login. Runs on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and other 64 bit distros with glibc 2.34 or newer. No curl? The installer falls back to wget, busybox, or your package manager.</p>
+            <p class="alts">Prefer a package file? Download the .deb or the AppImage from Releases. The AppImage updates itself over zsync.</p>
           </div>
 
           <div class="ospanel" data-os="macos" role="tabpanel" hidden>
@@ -123,7 +238,7 @@
               </div>
             </div>
             <p>Downloads the latest DMG, copies the app into Applications and turns on login autostart. Needs macOS 12 Monterey or newer. No permissions asked, and the installer clears Gatekeeper for you.</p>
-            <p class="alts">Prefer a package file? Download the DMG from Releases.</p>
+            <p class="alts">Prefer a package file? Download the DMG from Releases. TCP health is gated on macOS: the kernel will not hand those counters to an unprivileged reader, and the panel says so.</p>
           </div>
 
           <div class="ospanel" data-os="windows" role="tabpanel" hidden>
@@ -140,14 +255,14 @@
             <p class="alts">Prefer a setup wizard? Download the MSI from Releases. SmartScreen may ask once, choose Run anyway.</p>
           </div>
 
-          <p class="muted small">After install: syspeek to run it, syspeek status to check it, syspeek stop to quit it, syspeek update to upgrade.</p>
+          <p class="muted small">After install: <code>syspeek</code> to run it, <code>syspeek status</code> to check it, <code>syspeek stop</code> to quit it, <code>syspeek update</code> to upgrade.</p>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="wrap footer-inner">
-        <span>Syspeek. MIT license.</span>
+        <span>Syspeek 0.10.0. MIT license.</span>
         <span class="footer-links">
           <a href="https://github.com/codeafridi/Syspeek" rel="noopener">GitHub</a>
           <a href="https://github.com/codeafridi/Syspeek/releases" rel="noopener">Releases</a>
@@ -176,7 +291,6 @@
           });
         });
       });
-
-      </script>
+    </script>
   </body>
 </html>

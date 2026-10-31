@@ -608,6 +608,128 @@ DisplaySnapshot demoSnapshot(int tick) {
     return s;
 }
 
+KubeSnapshot demoKube() {
+    KubeSnapshot kube;
+    kube.state = KubeState::Ok;
+    kube.totalPods = 18;
+    kube.issueCount = 4;
+
+    auto mkPod = [](const char *ns, const char *name, const char *phase,
+                    const char *reason, int restarts, double cpuMillis,
+                    long long memBytes) {
+        KubePod pod;
+        pod.ns = QString::fromUtf8(ns);
+        pod.name = QString::fromUtf8(name);
+        pod.phase = QString::fromUtf8(phase);
+        pod.reason = QString::fromUtf8(reason);
+        pod.restarts = restarts;
+        pod.cpuMillis = cpuMillis;
+        pod.memBytes = memBytes;
+        return pod;
+    };
+    kube.pods = {
+        mkPod("default", "api-7f9c", "Running", "CrashLoopBackOff", 7, 512.0,
+              503LL * 1024 * 1024),
+        mkPod("default", "web-5f8d", "Running", "", 0, 22.0,
+              64LL * 1024 * 1024),
+        mkPod("staging", "worker-2b1a", "Running", "", 0, 310.0,
+              288LL * 1024 * 1024),
+        mkPod("prod", "cache-redis-0", "Running", "", 0, 41.0,
+              96LL * 1024 * 1024),
+        mkPod("batch", "nightly-rollup-6x2", "Pending", "Insufficient cpu", 2,
+              -1.0, -1),
+        mkPod("monitoring", "metrics-agent-9dk4p", "Running", "", 0, 7.0,
+              48LL * 1024 * 1024)};
+
+    auto mkDeploy = [](const char *ns, const char *name, int desired,
+                       int available) {
+        KubeDeployment deploy;
+        deploy.ns = QString::fromUtf8(ns);
+        deploy.name = QString::fromUtf8(name);
+        deploy.desired = desired;
+        deploy.available = available;
+        deploy.unavailable = desired - available;
+        return deploy;
+    };
+    kube.deployments = {mkDeploy("default", "api", 3, 2),
+                        mkDeploy("default", "web", 2, 2),
+                        mkDeploy("staging", "worker", 2, 2),
+                        mkDeploy("monitoring", "metrics-agent", 1, 1)};
+
+    auto mkEvent = [](const char *ns, const char *name, const char *reason,
+                      const char *message, qint64 agoMs, int count) {
+        KubeEvent event;
+        event.ns = QString::fromUtf8(ns);
+        event.involvedName = QString::fromUtf8(name);
+        event.type = QStringLiteral("Warning");
+        event.reason = QString::fromUtf8(reason);
+        event.message = QString::fromUtf8(message);
+        event.lastTimestampMs = QDateTime::currentMSecsSinceEpoch() - agoMs;
+        event.count = count;
+        return event;
+    };
+    kube.events = {
+        mkEvent("default", "api-7f9c", "BackOff",
+                "Back-off restarting failed container api", 120000, 7),
+        mkEvent("batch", "nightly-rollup-6x2", "FailedScheduling",
+                "0/2 nodes are available: 2 Insufficient cpu", 400000, 3)};
+    kube.eventCount = kube.events.size();
+
+    auto mkNode = [](const char *name, double capacityCores,
+                     unsigned long long capacityKiB, int running,
+                     double cpuMillis, long long memBytes) {
+        KubeNode node;
+        node.name = QString::fromUtf8(name);
+        node.ready = true;
+        node.roles = QStringLiteral("worker");
+        node.kubeletVersion = QStringLiteral("v1.31.4");
+        node.runtime = QStringLiteral("containerd://2.0.4");
+        node.osImage = QStringLiteral("Ubuntu 24.04.1 LTS");
+        node.instanceType = QStringLiteral("m7g.2xlarge");
+        node.zone = QStringLiteral("eu-west-1a");
+        node.region = QStringLiteral("eu-west-1");
+        node.cpuCapacityCores = capacityCores;
+        node.cpuAllocatableCores = capacityCores - 0.1;
+        node.memCapacityBytes = capacityKiB * 1024;
+        node.memAllocatableBytes = (capacityKiB - 300000) * 1024;
+        node.podsCapacity = 110;
+        node.podsAllocatable = 110;
+        node.podsRunning = running;
+        node.cpuMillis = cpuMillis;
+        node.memBytes = memBytes;
+        return node;
+    };
+    kube.nodes = {
+        mkNode("ip-10-0-1-11", 8.0, 16384000ULL, 7, 1890.0,
+               6200LL * 1024 * 1024),
+        mkNode("ip-10-0-2-24", 4.0, 8192000ULL, 5, 610.0,
+               2400LL * 1024 * 1024)};
+    kube.metricsOk = true;
+    kube.podsWithUsage = 5;
+    kube.nodesWithUsage = 2;
+    kube.podsCpuMillis = 892.0;
+    kube.podsMemBytes = 999LL * 1024 * 1024;
+
+    kube.costPods = 18;
+    kube.costMissingRequests = 1;
+    kube.costMonthly = 1180.0;
+    kube.costCpuPerCoreHour = 0.031611;
+    kube.costMemPerGbHour = 0.004237;
+    kube.costCpuMonthly = 864.0;
+    kube.costMemMonthly = 316.0;
+    kube.costCpuEfficiency = 0.42;
+    kube.costMemEfficiency = 0.61;
+    kube.costWastedMonthly = 512.40;
+    kube.costEfficiencyPods = 9;
+    kube.costByNamespace = {{QStringLiteral("prod"), 712.0},
+                            {QStringLiteral("staging"), 268.0},
+                            {QStringLiteral("dev"), 200.0}};
+    kube.costTopWorkloads = {{QStringLiteral("prod/api-7f9c"), 486.20},
+                             {QStringLiteral("prod/web-5f8d"), 226.10},
+                             {QStringLiteral("staging/worker-2b1a"), 148.60}};
+    return kube;
+}
+
 void tracePhase(const char *what) {
     std::fprintf(stderr, "[shot] %s\n", what);
     std::fflush(stderr);
@@ -721,66 +843,7 @@ int main(int argc, char *argv[]) {
         web.depth.hasBlk = true;
         web.depth.pids = 6;
         docker.containers = {db, web};
-        KubeSnapshot kube;
-        kube.state = KubeState::Ok;
-        KubePod pod;
-        pod.ns = QStringLiteral("default");
-        pod.name = QStringLiteral("api-7f9c");
-        pod.phase = QStringLiteral("Running");
-        pod.reason = QStringLiteral("CrashLoopBackOff");
-        pod.restarts = 7;
-        pod.cpuMillis = 512.0;
-        pod.memBytes = 503LL * 1024 * 1024;
-        KubePod kubeIdle;
-        kubeIdle.ns = QStringLiteral("default");
-        kubeIdle.name = QStringLiteral("web-5f8d");
-        kubeIdle.phase = QStringLiteral("Running");
-        kubeIdle.restarts = 0;
-        kubeIdle.cpuMillis = 22.0;
-        kubeIdle.memBytes = 64LL * 1024 * 1024;
-        KubeNode kubeNode;
-        kubeNode.name = QStringLiteral("node-1");
-        kubeNode.ready = true;
-        kubeNode.kubeletVersion = QStringLiteral("v1.31.4");
-        kubeNode.cpuAllocatableCores = 11.8;
-        kubeNode.cpuCapacityCores = 12.0;
-        kubeNode.memAllocatableBytes = 15400000000ULL;
-        kubeNode.memCapacityBytes = 15800000000ULL;
-        kubeNode.podsAllocatable = 110;
-        kubeNode.podsRunning = 2;
-        kubeNode.cpuMillis = 1890.0;
-        kubeNode.memBytes = 6200LL * 1024 * 1024;
-        kube.pods = {pod, kubeIdle};
-        kube.totalPods = 2;
-        kube.nodes = {kubeNode};
-        kube.metricsOk = true;
-        kube.podsWithUsage = 2;
-        kube.nodesWithUsage = 1;
-        pod.cpuMillis = 512.0;
-        kube.podsCpuMillis = 534.0;
-        kube.podsMemBytes = 567LL * 1024 * 1024;
-        // Cost story (M81): a priced cluster whose usage sits below the
-        // declared requests, so the Cost page renders the split, the
-        // right-sizing card and the per-namespace shares with real numbers.
-        kube.costPods = 12;
-        kube.costMissingRequests = 1;
-        kube.costMonthly = 1180.0;
-        kube.costCpuPerCoreHour = 0.031611;
-        kube.costMemPerGbHour = 0.004237;
-        kube.costCpuMonthly = 864.0;
-        kube.costMemMonthly = 316.0;
-        kube.costCpuEfficiency = 0.42;
-        kube.costMemEfficiency = 0.61;
-        kube.costWastedMonthly = 512.40;
-        kube.costEfficiencyPods = 9;
-        kube.costByNamespace = {
-            {QStringLiteral("prod"), 712.0},
-            {QStringLiteral("staging"), 268.0},
-            {QStringLiteral("dev"), 200.0}};
-        kube.costTopWorkloads = {
-            {QStringLiteral("prod/api-7f9c"), 486.20},
-            {QStringLiteral("prod/web-5f8d"), 226.10},
-            {QStringLiteral("staging/worker-2b1a"), 148.60}};
+        KubeSnapshot kube = demoKube();
         // Services story (M61n): three units, one crash-looping, so the
         // FAILED tile flaps🗴 and the timeline carries a restart row.
         ServicesSnapshot svc;
@@ -984,6 +1047,9 @@ int main(int argc, char *argv[]) {
             }
             fim.sampledAtMs = baseMs + i * 2000;
             DisplaySnapshot snap = demoSnapshot(i);
+            // The fleet chart needs movement: a constant series sits on the
+            // top gridline and reads as an empty plot box.
+            snap.cloud.fleet.running = 4 + (i % 37 < 9 ? 1 : 0);
             snap.slo = sloTracker.report(SloSpec{});
             panel.setSnapshot(snap);
             panel.setDockerSnapshot(docker);
@@ -1132,61 +1198,7 @@ int main(int argc, char *argv[]) {
     docker.containers = {db, web};
     panel.setDockerSnapshot(docker);
 
-    KubeSnapshot kube;
-    kube.state = KubeState::Ok;
-    kube.totalPods = 12;
-    kube.issueCount = 2;
-    KubePod pod;
-    pod.ns = QStringLiteral("default");
-    pod.name = QStringLiteral("api-7f9c");
-    pod.phase = QStringLiteral("Running");
-    pod.reason = QStringLiteral("CrashLoopBackOff");
-    pod.restarts = 7;
-    pod.cpuMillis = 512.0;
-    pod.memBytes = 503LL * 1024 * 1024;
-    KubePod kubeWorking;
-    kubeWorking.ns = QStringLiteral("default");
-    kubeWorking.name = QStringLiteral("web-5f8d");
-    kubeWorking.phase = QStringLiteral("Running");
-    kubeWorking.restarts = 0;
-    kubeWorking.cpuMillis = 22.0;
-    kubeWorking.memBytes = 64LL * 1024 * 1024;
-    kube.pods = {pod, kubeWorking};
-    kube.metricsOk = true;
-    kube.podsWithUsage = 2;
-    kube.nodesWithUsage = 1;
-    kube.podsCpuMillis = 534.0;
-    kube.podsMemBytes = 567LL * 1024 * 1024;
-    kube.costPods = 12;
-    kube.costMissingRequests = 1;
-    kube.costMonthly = 1180.0;
-    kube.costCpuPerCoreHour = 0.031611;
-    kube.costMemPerGbHour = 0.004237;
-    kube.costCpuMonthly = 864.0;
-    kube.costMemMonthly = 316.0;
-    kube.costCpuEfficiency = 0.42;
-    kube.costMemEfficiency = 0.61;
-    kube.costWastedMonthly = 512.40;
-    kube.costEfficiencyPods = 9;
-    kube.costByNamespace = {{QStringLiteral("prod"), 712.0},
-                            {QStringLiteral("staging"), 268.0},
-                            {QStringLiteral("dev"), 200.0}};
-    kube.costTopWorkloads = {{QStringLiteral("prod/api-7f9c"), 486.20},
-                             {QStringLiteral("prod/web-5f8d"), 226.10},
-                             {QStringLiteral("staging/worker-2b1a"), 148.60}};
-    KubeNode kubeNode;
-    kubeNode.name = QStringLiteral("node-1");
-    kubeNode.ready = true;
-    kubeNode.kubeletVersion = QStringLiteral("v1.31.4");
-    kubeNode.cpuAllocatableCores = 7.9;
-    kubeNode.cpuCapacityCores = 8.0;
-    kubeNode.memAllocatableBytes = 15000000ULL * 1024;
-    kubeNode.memCapacityBytes = 16384000ULL * 1024;
-    kubeNode.podsAllocatable = 110;
-    kubeNode.podsRunning = 12;
-    kubeNode.cpuMillis = 1890.0;
-    kubeNode.memBytes = 6200LL * 1024 * 1024;
-    kube.nodes = {kubeNode};
+    KubeSnapshot kube = demoKube();
     panel.setKubeSnapshot(kube);
 
     QList<Alert> alerts;
@@ -1359,6 +1371,19 @@ int main(int argc, char *argv[]) {
             grabScroll = panel.findChild<QScrollArea *>(
                 QStringLiteral("ddScroll"));
         }
+    }
+    if (grabScroll && grabScroll->widget()) {
+        if (auto *stack = panel.findChild<QStackedWidget *>()) {
+            if (QWidget *page = stack->currentWidget()) {
+                page->resize(1460, 1240);
+            }
+        }
+        panel.resize(1460, 1240);
+        app.processEvents();
+        QWidget *content = grabScroll->widget();
+        content->setMinimumHeight(qMax(1700, content->sizeHint().height()));
+        content->resize(1440, content->minimumHeight());
+        app.processEvents();
     }
     const QPixmap shot =
         grabScroll && grabScroll->widget()
