@@ -1,4 +1,5 @@
 #include "HudWindow.h"
+#include "Theme.h"
 
 #include "Config.h"
 #include "DockerSource.h"
@@ -28,6 +29,7 @@
 #include "platform/PlatformFactory.h"
 
 #include <QApplication>
+#include <QStyleFactory>
 #include <QSettings>
 #include <QCoreApplication>
 #include <QLocalServer>
@@ -449,6 +451,15 @@ int main(int argc, char *argv[]) {
     QApplication::setApplicationName(QStringLiteral("Syspeek"));
     QApplication::setApplicationVersion(
         QString::fromLatin1(SYSPEEK_APP_VERSION));
+
+    // Fusion honours a palette on every platform; the platform styles only
+    // do so partially. The palette is what makes the widgets the stylesheet
+    // cannot reach (combo popups, tooltips, menus, scrollbars) dark instead of
+    // falling back to a white system theme.
+    if (QStyle *fusion = QStyleFactory::create(QStringLiteral("Fusion"))) {
+        QApplication::setStyle(fusion);
+    }
+    QApplication::setPalette(ui_theme::darkPalette());
 
 #if defined(Q_OS_WIN)
     if (!g_windowsCtrlHandlerInstalled) {

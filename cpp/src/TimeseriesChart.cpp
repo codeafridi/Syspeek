@@ -51,6 +51,8 @@ constexpr int kMaxSamples = 1800;
 
 TimeseriesChart::TimeseriesChart(QWidget *parent)
     : QWidget(parent) {
+    m_colorA = QColor(ui_theme::seriesA());
+    m_colorB = QColor(ui_theme::seriesB());
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMinimumHeight(96);
     setMouseTracking(true);

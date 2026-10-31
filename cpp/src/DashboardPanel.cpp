@@ -601,10 +601,24 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "QComboBox, QSpinBox, QDoubleSpinBox { color: %TEXT%;"
         "  background-color: %SURFACE%; border: 1px solid %BORDER%;"
         "  border-radius: 2px; padding: 2px 5px; font-size: 10px; }"
-        "QComboBox::drop-down { border: 0px; width: 14px; }"
+        "QComboBox::drop-down { border: 0px; width: 16px; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid"
+        "  transparent; border-right: 4px solid transparent;"
+        "  border-top: 5px solid %DIM%; width: 0px; height: 0px;"
+        "  margin-right: 5px; }"
+        "QComboBox::down-arrow:on { border-top-color: %TEXT%; }"
         "QComboBox QAbstractItemView { background-color: %SURFACE%;"
         "  color: %TEXT%; selection-background-color: %HOVER%;"
+        "  selection-color: %TEXT%; outline: none;"
         "  border: 1px solid %BORDER%; }"
+        "QComboBox QAbstractItemView::item { padding: 4px 8px;"
+        "  min-height: 16px; }"
+        "QComboBox QAbstractItemView::item:hover"
+        " { background-color: %HOVER%; color: %TEXT%; }"
+        "QComboBox QAbstractItemView::item:selected"
+        " { background-color: %HOVER%; color: %ACCENT%; }"
+        "QToolTip { background-color: #1f2229; color: %TEXT%;"
+        "  border: 1px solid %BORDER%; padding: 4px 6px; }"
         "QCheckBox { color: %DIM%; font-size: 9px; }"
         "QCheckBox::indicator { width: 11px; height: 11px;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
@@ -1261,7 +1275,7 @@ QWidget *DashboardPanel::buildAlertsView() {
     silenceLayout->addWidget(m_silenceList);
 
     layout->addWidget(makeBanner(QStringLiteral("SILENCES"),
-        ui_theme::ok(), view));
+        ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("QUIET WINDOWS"),
                                silenceBox, view), 1);
 
@@ -1624,8 +1638,10 @@ QWidget *DashboardPanel::buildProcessesView() {
     actionLayout->addLayout(signalRow);
     actionLayout->addLayout(niceRow);
     actionLayout->addWidget(m_actionStatus);
+    // A section label is not an error: red belongs to a failing state, not to
+    // the header over the buttons that would fix it.
     layout->addWidget(makeBanner(QStringLiteral("ACTIONS"),
-                                 ui_theme::crit(), view));
+                                 ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("SIGNALS / PRIORITY"),
                                actionBox, view));
 
@@ -2464,7 +2480,7 @@ QWidget *DashboardPanel::buildServicesView() {
     serviceActionLayout->addWidget(m_serviceStatus);
 
     layout->addWidget(makeBanner(QStringLiteral("UNIT ACTIONS"),
-                                 ui_theme::crit(), view));
+                                 ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("RESTART UNIT"),
                                serviceActionBox, view));
 
@@ -4018,7 +4034,8 @@ QWidget *DashboardPanel::buildHistoryView() {
     m_chartHistMem = new TimeseriesChart(view);
     m_chartHistMem->setUnit(QStringLiteral("GB"));
     m_chartHistMem->setSeriesName(QStringLiteral("syspeek.history.mem"));
-    m_chartHistMem->setSeriesColors(QColor(60, 202, 170), QColor(127, 92, 255));
+    m_chartHistMem->setSeriesColors(QColor(ui_theme::seriesB()),
+                                    QColor(ui_theme::seriesA()));
 
     auto *charts = new QHBoxLayout();
     charts->setSpacing(10);
@@ -7221,7 +7238,7 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     "&nbsp;&nbsp;<span style=\"color:%3;\">[%4]</span>"
                     "&nbsp;%5&nbsp;%6")
                     .arg(stamp,
-                         QStringLiteral("#3ccaaa"),
+                         ui_theme::seriesB(),
                          ui_theme::statusColor(sev),
                          sev,
                          alert.title,

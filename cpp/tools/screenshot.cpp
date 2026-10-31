@@ -4,8 +4,10 @@
 #include "SensorStatus.h"
 #include "CloudStatus.h"
 #include "TickBudget.h"
+#include "Theme.h"
 
 #include <QApplication>
+#include <QStyleFactory>
 #include <QListWidget>
 #include <QLabel>
 #include <QPixmap>
@@ -822,6 +824,10 @@ void tracePhase(const char *what) {
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+    if (QStyle *fusion = QStyleFactory::create(QStringLiteral("Fusion"))) {
+        QApplication::setStyle(fusion);
+    }
+    QApplication::setPalette(ui_theme::darkPalette());
 
     const bool panelMode = argc > 2
         && QString::fromUtf8(argv[2]) == QStringLiteral("panel");

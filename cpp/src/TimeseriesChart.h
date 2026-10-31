@@ -104,8 +104,8 @@ private:
     QString m_unit;
     QString m_nameA;
     QString m_nameB;
-    QColor m_colorA{127, 92, 255};
-    QColor m_colorB{60, 202, 170};
+    QColor m_colorA{77, 143, 214};
+    QColor m_colorB{79, 157, 111};
     QDateTime m_lastPush;
     QList<ChartBand> m_bands;
     ChartBandStyle m_bandStyle = ChartBandStyle::LineAndArea;
