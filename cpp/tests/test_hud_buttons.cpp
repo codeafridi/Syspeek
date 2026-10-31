@@ -36,6 +36,7 @@
 #include <QTreeWidgetItem>
 
 #include <cstdio>
+#include <memory>
 
 static DisplaySnapshot makeSnapshot(const char *app,
                                     const char *pid,
@@ -811,11 +812,13 @@ int main(int argc, char *argv[]) {
         check(tlTable->topLevelItemCount() == 2,
               "a focused window lists only the events inside it");
 
-        QList<qint64> cleared;
-        QObject::connect(panel, &DashboardPanel::timelineFocusCleared,
-                         [&cleared]() { cleared.append(1); });
+        // The panel outlives this block, so the receiver must not capture a
+        // stack local by reference: it fires again on the next clear.
+        auto cleared = std::make_shared<int>(0);
+        QObject::connect(panel, &DashboardPanel::timelineFocusCleared, panel,
+                         [cleared]() { ++*cleared; });
         tlClear->click();
-        check(!cleared.isEmpty(),
+        check(*cleared == 1,
               "clearing the window asks the owner to drop the focus");
 
         panel->setTimeline(tlView);
