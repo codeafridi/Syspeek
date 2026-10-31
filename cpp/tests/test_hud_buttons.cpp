@@ -29,6 +29,7 @@
 #include <QGuiApplication>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollArea>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QTreeWidget>
@@ -878,6 +879,54 @@ int main(int argc, char *argv[]) {
         }
         check(sawTimelineRow,
               "settings states the timeline ring, window and marker switch");
+    }
+
+    {
+        // Every page must be a scroll-wrapped page. The Logs view shipped
+        // without the wrapper, so its content widget was never managed by a
+        // layout: it sized itself to its own hint and rendered as a narrow
+        // column pinned to the top-left, with the KPI tiles squeezed until
+        // their values clipped - worse the shorter the text.
+        DashboardPanel pagesPanel;
+        pagesPanel.resize(900, 700);
+        pagesPanel.show();
+        QApplication::processEvents();
+        auto *stack = pagesPanel.findChild<QStackedWidget *>(
+            QStringLiteral("ddViews"));
+        auto *rail = pagesPanel.findChild<QListWidget *>(
+            QStringLiteral("ddRail"));
+        check(stack != nullptr && rail != nullptr,
+              "the pages panel builds a rail and a stack");
+        QStringList broken;
+        if (stack != nullptr && rail != nullptr) {
+            for (int row = 0; row < rail->count(); ++row) {
+                rail->setCurrentRow(row);
+                QApplication::processEvents();
+                QWidget *page = stack->currentWidget();
+                auto *scroll = page == nullptr
+                    ? nullptr
+                    : page->findChild<QScrollArea *>(
+                          QStringLiteral("ddScroll"));
+                if (scroll == nullptr || scroll->widget() == nullptr) {
+                    broken.append(rail->item(row)->text()
+                                  + QStringLiteral(": no scroll"));
+                    continue;
+                }
+                if (scroll->widget()->width() + 4 < scroll->viewport()->width()) {
+                    broken.append(QStringLiteral("%1: %2 of %3 px")
+                                      .arg(rail->item(row)->text())
+                                      .arg(scroll->widget()->width())
+                                      .arg(scroll->viewport()->width()));
+                }
+            }
+        }
+        if (!broken.isEmpty()) {
+            std::printf("   pages that do not fill their viewport: %s\n",
+                        qPrintable(broken.join(QStringLiteral(", "))));
+        }
+        check(broken.isEmpty(),
+              "every page fills its viewport through a scroll area");
+        pagesPanel.hide();
     }
 
     {

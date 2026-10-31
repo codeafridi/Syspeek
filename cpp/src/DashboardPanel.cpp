@@ -2911,7 +2911,8 @@ QWidget *DashboardPanel::buildLogsView() {
     m_logPipeline->setFont(monoFont(10));
     m_logPipeline->setWordWrap(false);
     layout->addWidget(
-        makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline, view), 1);
+        makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline,
+                 view));
 
     // --- Per-tick line volume (Syspeek-own counter).
     m_chartLog = new TimeseriesChart(view);
@@ -2937,13 +2938,34 @@ QWidget *DashboardPanel::buildLogsView() {
     sensLayout->addWidget(m_sensitiveSummary);
     sensLayout->addWidget(m_sensitive);
     layout->addWidget(
-        makeCard(QStringLiteral("SENSITIVE DATA"), sensBox, view), 1);
+        makeCard(QStringLiteral("SENSITIVE DATA"), sensBox, view));
 
     m_logs = new QLabel(QStringLiteral("--"), view);
     m_logs->setObjectName(QStringLiteral("ddLogs"));
     m_logs->setFont(monoFont(10));
     m_logs->setWordWrap(false);
     layout->addWidget(makeCard(QStringLiteral("RECENT LOGS"), m_logs, view), 1);
+
+    // Every other page wraps its content in a scroll area; this one returned
+    // the bare page, so the content widget was never managed by a layout. It
+    // then sized itself to its own size hint - a narrow column pinned to the
+    // top-left, with the tiles squeezed until their values clipped - and the
+    // narrower the text (a failed journalctl leaves one short line), the worse
+    // it looked.
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 

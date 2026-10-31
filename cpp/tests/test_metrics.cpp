@@ -5609,6 +5609,29 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // --- journal failure text ---------------------------------------------
+    {
+        check(journalFailureText(1, QString())
+                  == QStringLiteral("journalctl failed (exit 1)"),
+              "journal: a silent failure still reports the exit code");
+        check(journalFailureText(1, QStringLiteral(
+                  "No journal files were found.\nsecond line"))
+                  == QStringLiteral("journalctl failed (exit 1): "
+                                    "No journal files were found."),
+              "journal: the first stderr line becomes the reason");
+        const QString permissionHint = journalFailureText(
+            3, QStringLiteral("Hint: You are currently not seeing "
+                              "messages from other users."));
+        check(permissionHint.contains(QStringLiteral("exit 3"))
+                  && permissionHint.contains(QStringLiteral("not seeing")),
+              "journal: a permission hint survives into the card");
+        const QString longReason(400, QLatin1Char('x'));
+        const QString capped = journalFailureText(2, longReason);
+        check(capped.size() <= 150
+                  && capped.endsWith(QStringLiteral("...")),
+              "journal: an absurd stderr line is capped, not pasted");
+    }
+
     // --- M86 event stream -------------------------------------------------
     {
         check(timelineKindName(TimelineKind::Alert) == QStringLiteral("alert")

@@ -79,6 +79,23 @@ int journalErrorCount(const QList<JournalEntry> &entries) {
     return count;
 }
 
+QString journalFailureText(int exitCode, const QString &standardError) {
+    QString reason = standardError.trimmed();
+    const int newline = reason.indexOf(QLatin1Char('\n'));
+    if (newline > 0) {
+        reason = reason.left(newline).trimmed();
+    }
+    if (reason.size() > 120) {
+        reason = reason.left(117) + QStringLiteral("...");
+    }
+    if (reason.isEmpty()) {
+        return QStringLiteral("journalctl failed (exit %1)").arg(exitCode);
+    }
+    return QStringLiteral("journalctl failed (exit %1): %2")
+        .arg(exitCode)
+        .arg(reason);
+}
+
 QString journalSummaryText(const JournalSnapshot &snapshot) {
     if (!snapshot.available) {
         return snapshot.errorMessage.isEmpty()
