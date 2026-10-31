@@ -154,6 +154,7 @@ private:
     QSet<QString> m_activeIncidentIds;
     QHash<QString, QString> m_checkStates;
     int m_timelineTick = 0;
+    bool m_timelineDirty = false;
     int m_eventCapacity = 2000;
     bool m_eventsEnabled = true;
     bool m_eventMarkers = true;

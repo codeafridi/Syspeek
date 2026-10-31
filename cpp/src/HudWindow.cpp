@@ -340,9 +340,12 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
         publishHistory();
     }
     // The event page is republished on a slow cadence so "12s ago" stays
-    // true without rebuilding rows on every tick.
-    if (++m_timelineTick % 5 == 0) {
+    // true without rebuilding rows on every tick; new events pull that
+    // forward exactly once.
+    ++m_timelineTick;
+    if (m_timelineDirty || m_timelineTick % 5 == 0) {
         publishTimeline();
+        m_timelineDirty = false;
     }
 
     if (m_appValue->text() != snapshot.appName) {
@@ -898,7 +901,10 @@ void HudWindow::recordEvent(const TimelineEvent &event) {
         qInfo().noquote() << QStringLiteral("[timeline]")
                           << timelineRowText(copy, copy.atMs);
     }
-    publishTimeline();
+    // Publishes are coalesced into the tick: a FIM burst can produce a dozen
+    // events at once, and each publish rebuilds the row list and re-pushes
+    // the chart ticks for every chart.
+    m_timelineDirty = true;
 }
 
 void HudWindow::noteActionEvent(TimelineKind kind, const QString &subject,
@@ -938,7 +944,7 @@ void HudWindow::publishTimeline() {
         info.newestMs = m_events.constLast().atMs;
     }
     // Newest first for the list; the ring itself stays in arrival order.
-    const int displayCap = 400;
+    const int displayCap = 240;
     for (int i = m_events.size() - 1;
          i >= 0 && info.events.size() < displayCap; --i) {
         info.events.append(m_events.at(i));

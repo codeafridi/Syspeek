@@ -4398,7 +4398,7 @@ void DashboardPanel::applyChartEvents() {
         m_timelineInfo.focus ? m_timelineInfo.focusEvents
                              : m_timelineInfo.events;
     QList<ChartEvent> markers;
-    const int start = qMax(0, int(source.size()) - 160);
+    const int start = qMax(0, int(source.size()) - 96);
     markers.reserve(source.size() - start);
     for (int i = start; i < source.size(); ++i) {
         ChartEvent marker;
