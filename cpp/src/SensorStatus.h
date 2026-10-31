@@ -92,6 +92,7 @@ QString sensorUnit(SensorKind kind);
 double sensorScale(SensorKind kind);
 QString sensorValueText(const SensorReading &reading);
 int sensorSeverity(const SensorReading &reading);
+bool sensorLimitPlausible(SensorKind kind, double value);
 QString sensorChipText(const SensorChip &chip);
 QString sensorsSummaryText(const SensorsSnapshot &snapshot);
 QString sensorsThermalText(const SensorsSnapshot &snapshot);

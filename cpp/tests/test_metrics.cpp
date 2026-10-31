@@ -3585,6 +3585,8 @@ int main(int argc, char *argv[]) {
                          QStringLiteral("43850\n"))
             && writeFile(hwmon + QStringLiteral("/hwmon1/temp1_label"),
                          QStringLiteral("Composite\n"))
+            && writeFile(hwmon + QStringLiteral("/hwmon1/temp1_max"),
+                         QStringLiteral("65261850\n"))
             && writeFile(hwmon + QStringLiteral("/hwmon2/name"),
                          QStringLiteral("BAT0\n"))
             && writeFile(hwmon + QStringLiteral("/hwmon2/in0_input"),
@@ -3701,6 +3703,17 @@ int main(int argc, char *argv[]) {
                       == QStringLiteral("fan2")
                   && collected.chips.value(3).readings.value(1).value == 0.0,
               "sensors: an unlabeled sensor falls back to its key");
+
+        const SensorReading &nvmeReading =
+            collected.chips.value(1).readings.value(0);
+        check(!nvmeReading.hasWarn && qAbs(nvmeReading.value - 43.85) < 0.001,
+              "sensors: an implausible firmware limit (65261.8 C) is dropped");
+        check(sensorLimitPlausible(SensorKind::Temperature, 95.0)
+                  && !sensorLimitPlausible(SensorKind::Temperature, 65261.85)
+                  && !sensorLimitPlausible(SensorKind::Temperature, -273.15)
+                  && sensorLimitPlausible(SensorKind::Fan, 3500.0)
+                  && !sensorLimitPlausible(SensorKind::Fan, 0.0),
+              "sensors: limit plausibility is per physical quantity");
 
         check(sensorsSummaryText(collected)
                       .contains(QStringLiteral("4 chips"))

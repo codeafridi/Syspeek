@@ -193,6 +193,30 @@ QString sensorValueText(const SensorReading &reading) {
                           : QStringLiteral("%1 %2").arg(number, unit);
 }
 
+// Firmware occasionally ships nonsense limits (an nvme drive reports
+// temp*_max = 65261850 millidegrees, i.e. 65,261 °C). A threshold nobody
+// can reach is not a threshold: treat it as absent so the UI does not
+// print a limit that discredits every other number on the card.
+bool sensorLimitPlausible(SensorKind kind, double value) {
+    switch (kind) {
+    case SensorKind::Temperature:
+        return value > -100.0 && value < 200.0;
+    case SensorKind::Fan:
+        return value > 0.0 && value < 100000.0;
+    case SensorKind::Power:
+        return value > 0.0 && value < 10000.0;
+    case SensorKind::Current:
+        return value > 0.0 && value < 10000.0;
+    case SensorKind::Energy:
+        return value > 0.0 && value < 10000000.0;
+    case SensorKind::Voltage:
+        return value > 0.0 && value < 1000.0;
+    case SensorKind::Other:
+        break;
+    }
+    return true;
+}
+
 int sensorSeverity(const SensorReading &reading) {
     if (reading.hasCrit && reading.value >= reading.crit) {
         return 2;
@@ -531,12 +555,14 @@ SensorsSnapshot collectSensorsLinux(const QString &hwmonRoot,
             }
             double threshold = 0.0;
             if (readDouble(scale + QStringLiteral("crit"), &threshold)) {
-                reading.hasCrit = true;
                 reading.crit = threshold * sensorScale(reading.kind);
+                reading.hasCrit =
+                    sensorLimitPlausible(reading.kind, reading.crit);
             }
             if (readDouble(scale + QStringLiteral("max"), &threshold)) {
-                reading.hasWarn = true;
                 reading.warn = threshold * sensorScale(reading.kind);
+                reading.hasWarn =
+                    sensorLimitPlausible(reading.kind, reading.warn);
             }
             chip.readings.append(reading);
         }
