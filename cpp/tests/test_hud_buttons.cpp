@@ -583,7 +583,7 @@ int main(int argc, char *argv[]) {
         view.bytes = 97264;
         view.spanMs = 900000;
         view.intervalMs = 1000;
-        view.newestMs = 1793000900000LL;
+        view.newestMs = 1799000000000LL;
         for (int i = 0; i < 4; ++i) {
             ExportRow row;
             row.atMs = 1793009000000LL + i * 1000;
@@ -591,6 +591,30 @@ int main(int argc, char *argv[]) {
             row.hostMemAvailableKb = 4194304;
             view.window.append(row);
         }
+        // publishHistory() re-reads the ring only every fifth tick; the
+        // empty-window ticks must leave the stored charts alone.
+        railForHistory->setCurrentRow(27);
+        panel->setHistoryView(view);
+        QList<QPair<TimeseriesChart *, int>> before;
+        for (TimeseriesChart *chart :
+             hud.findChildren<TimeseriesChart *>()) {
+            before.append({chart, chart->sampleCount()});
+        }
+        HistoryViewInfo emptyWindow = view;
+        emptyWindow.window.clear();
+        emptyWindow.newestMs = 0;
+        panel->setHistoryView(emptyWindow);
+        bool kept = false;
+        bool dropped = false;
+        for (const auto &entry : before) {
+            const int now = entry.first->sampleCount();
+            kept = kept || (entry.second == 4 && now == 4);
+            dropped = dropped || now < entry.second;
+        }
+        check(kept && !dropped,
+              "an empty history window does not blank the stored charts");
+        panel->setHistoryView(view);
+
         panel->setHistoryView(view);
         check(histSamples->text().contains(QStringLiteral("900"))
                   && histSamples->text().contains(QStringLiteral("/3600"))
@@ -897,6 +921,37 @@ int main(int argc, char *argv[]) {
             qputenv("SYSPEEK_CONFIG", previousConfig);
         }
         hud.setSnapshot(withProcs);
+    }
+
+    {
+        // The thresholds loaded from [alerts] must reach the engine, not just
+        // the editors: a restart used to quietly revert every persisted
+        // monitor to its built-in default.
+        auto alertsText = [&hud]() {
+            auto *label = hud.findChild<QLabel *>(QStringLiteral("ddAlerts"));
+            return label == nullptr ? QString() : label->text();
+        };
+        QList<AlertRule> tuned = defaultAlertRules();
+        for (AlertRule &rule : tuned) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.threshold = 5.0;
+                rule.sustained = 1;
+            }
+        }
+        hud.setMonitors(tuned);
+        DisplaySnapshot warm = withProcs;
+        warm.cpuPercent = 12.0;
+        warm.cpuValid = true;
+        hud.setSnapshot(warm);
+        hud.setSnapshot(warm);
+        check(alertsText().contains(QStringLiteral("Focused app CPU high")),
+              "monitor thresholds passed to the HUD reach the alert engine");
+        hud.setMonitors(defaultAlertRules());
+        for (int i = 0; i < 3; ++i) {
+            hud.setSnapshot(withProcs);
+        }
+        check(!alertsText().contains(QStringLiteral("Focused app CPU high")),
+              "restoring the default monitors clears the tuned breach");
     }
 
     auto *focusDetail = hud.findChild<QLabel *>(QStringLiteral("ddFocusDetail"));

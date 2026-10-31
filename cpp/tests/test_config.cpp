@@ -593,6 +593,47 @@ int main(int argc, char *argv[]) {
               "cloud: billed spend is on by default with a 30 s budget");
     }
 
+    {
+        // QSettings hands a comma-separated value back as a QStringList, so
+        // the old toString() read dropped every synthetic target.
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[synthetic]\n"
+                                   "targets = https://a.test/health, "
+                                   "https://b.test/api/items\n"
+                                   "interval_ms = 15000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.synthetic.targets.size() == 2
+                  && c.synthetic.targets.at(1)
+                      == QStringLiteral("https://b.test/api/items")
+                  && c.synthetic.intervalMs == 15000,
+              "synthetic: a comma-separated target list survives QSettings");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(dir, QByteArrayLiteral(
+                                                "[synthetic]\n"
+                                                "targets = https://only.test\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.synthetic.targets.size() == 1,
+              "synthetic: a single target still loads");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[path]\n"
+                                   "targets = 1.1.1.1, 9.9.9.9\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.path.targets.size() == 2
+                  && c.path.targets.at(0) == QStringLiteral("1.1.1.1"),
+              "path: a comma-separated hop list survives QSettings");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

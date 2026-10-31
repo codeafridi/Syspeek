@@ -20,6 +20,18 @@ int clampInt(int value, int low, int high) {
     return std::clamp(value, low, high);
 }
 
+// QSettings splits a comma-separated INI value into a QStringList on read, so
+// reading `key = a, b` through toString() yields nothing at all. Accept both
+// shapes for every whitespace/comma separated target list.
+QStringList readList(QSettings &settings, const QString &key) {
+    const QVariant raw = settings.value(key);
+    if (raw.typeId() == QMetaType::QStringList) {
+        return raw.toStringList();
+    }
+    return raw.toString().split(
+        QRegularExpression(QStringLiteral("[\\s,]+")), Qt::SkipEmptyParts);
+}
+
 void validate(Config &config) {
     config.health.cpuWarnPercent =
         clampDouble(config.health.cpuWarnPercent, 0.0, 100.0);
@@ -341,11 +353,8 @@ Config loadConfig(const QString &path, QString *errorMessage) {
 
     settings.beginGroup(QStringLiteral("synthetic"));
     {
-        const QString targets =
-            settings.value(QStringLiteral("targets")).toString();
         config.synthetic.targets =
-            targets.split(QRegularExpression(QStringLiteral("[\\s,]+")),
-                          Qt::SkipEmptyParts);
+            readList(settings, QStringLiteral("targets"));
         const int interval =
             settings.value(QStringLiteral("interval_ms")).toInt();
         if (interval > 0) {
@@ -392,11 +401,7 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             config.path.enabled =
                 settings.value(QStringLiteral("enabled")).toBool();
         }
-        const QString targets =
-            settings.value(QStringLiteral("targets")).toString();
-        config.path.targets =
-            targets.split(QRegularExpression(QStringLiteral("[\\s,]+")),
-                          Qt::SkipEmptyParts);
+        config.path.targets = readList(settings, QStringLiteral("targets"));
         const int interval = settings.value(QStringLiteral("interval_ms")).toInt();
         if (interval > 0) {
             config.path.intervalMs = interval;

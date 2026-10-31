@@ -3662,6 +3662,12 @@ void DashboardPanel::setHistoryView(const HistoryViewInfo &view) {
         m_histSlider->setEnabled(view.enabled && view.count > 1);
     }
 
+    // publishHistory() only re-reads the ring every fifth tick, so most ticks
+    // arrive without a window. Never redraw from an empty list: that blanked
+    // the charts four ticks out of five.
+    if (view.window.isEmpty()) {
+        return;
+    }
     const qint64 step = qMax<qint64>(1000, view.intervalMs);
     const bool rebuild = m_histWindowNewest == 0
         || view.newestMs < m_histWindowNewest
