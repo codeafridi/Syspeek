@@ -127,6 +127,10 @@ private:
     int m_cloudSweepRequests = 0;
     int m_cloudTicks = 0;
     bool m_cloudProbed = false;
+    // M91: terraform state, re-read only when the file's mtime changes.
+    qint64 m_iacMtimeMs = -1;
+    QList<IacResource> m_iacState;
+    QString m_iacError;
     // M83: one polled CLI listing per 10 min; the sampler never waits on it.
     CloudFleetRunner *m_cloudFleet = nullptr;
     // M85: one polled cost query per 6 h (Cost Explorer requests are billable).

@@ -940,29 +940,71 @@ QString kubeNodesText(const QList<KubeNode> &nodes) {
     return text.trimmed();
 }
 
-// Context tracking for multi-cluster
-QList<KubeContext> kubeAllContexts() {
-    // In a real implementation, this would parse kubeconfig
-    // For now, return empty — the REA grounding is from kubectl config schema
-    return {};
-}
-
-int kubeCurrentContextIndex() {
-    // Return 0 for single-context mode
-    return 0;
-}
-
-QList<KubePod> kubePodsByContext(const QList<KubePod> &all, int contextIdx) {
-    // Filter pods by current context
-    QList<KubePod> result;
-    for (const KubePod &pod : all) {
-        // If no context filtering, return all
-        result.append(pod);
+QList<KubeContext> kubeParseContexts(const QByteArray &json, QString *error) {
+    if (error != nullptr) {
+        error->clear();
     }
-    return result;
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        if (error != nullptr) {
+            *error = parseError.error != QJsonParseError::NoError
+                         ? parseError.errorString()
+                         : QStringLiteral("not a JSON object");
+        }
+        return {};
+    }
+    const QJsonObject root = doc.object();
+    const QString current =
+        root.value(QStringLiteral("current-context")).toString();
+    QList<KubeContext> contexts;
+    for (const QJsonValue &value :
+         root.value(QStringLiteral("contexts")).toArray()) {
+        const QJsonObject entry = value.toObject();
+        const QJsonObject inner =
+            entry.value(QStringLiteral("context")).toObject();
+        KubeContext context;
+        context.name = entry.value(QStringLiteral("name")).toString();
+        if (context.name.isEmpty()) {
+            continue;
+        }
+        context.cluster = inner.value(QStringLiteral("cluster")).toString();
+        context.user = inner.value(QStringLiteral("user")).toString();
+        context.namespace_ =
+            inner.value(QStringLiteral("namespace")).toString();
+        context.current = !current.isEmpty() && context.name == current;
+        contexts.append(context);
+    }
+    return contexts;
 }
 
-QList<KubeNode> kubeNodesByContext(const QList<KubeNode> &all, int contextIdx) {
-    // Return all nodes (no context filtering in this implementation)
-    return all;
+QString kubeCurrentContextName(const QList<KubeContext> &contexts) {
+    for (const KubeContext &context : contexts) {
+        if (context.current) {
+            return context.name;
+        }
+    }
+    return contexts.isEmpty() ? QString() : contexts.first().name;
+}
+
+QString kubeContextsText(const QList<KubeContext> &contexts,
+                         const QString &selected) {
+    if (contexts.isEmpty()) {
+        return QStringLiteral(
+            "contexts: none in the kubeconfig - `kubectl config get-contexts` "
+            "is empty or kubectl is not installed");
+    }
+    QStringList names;
+    for (const KubeContext &context : contexts) {
+        QString name = context.name;
+        if (context.current) {
+            name += QStringLiteral(" (current)");
+        }
+        names << name;
+    }
+    QString text = QStringLiteral("contexts: %1").arg(names.join(QStringLiteral(", ")));
+    if (!selected.isEmpty()) {
+        text += QStringLiteral("  -  querying %1").arg(selected);
+    }
+    return text;
 }

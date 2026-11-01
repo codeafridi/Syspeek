@@ -52,6 +52,21 @@ struct PodRightSizing {
     bool underMem = false;
 };
 
+// Multi-context support (M90): the kubeconfig is the authority on which
+// clusters a user has, so Syspeek reads it rather than inventing a list.
+//
+// Grounding (shipped kubectl, strings kept /tmp/opencode/m8791/m90/
+// kubectl.strings): the kubeconfig JSON schema kubectl itself emits for
+// `kubectl config view -o json` - `"contexts"`, `"current-context"`,
+// `"clusters"`, `"users"`, and per-context `cluster` / `user` / `namespace`.
+struct KubeContext {
+    QString name;
+    QString cluster;
+    QString user;
+    QString namespace_;
+    bool current = false;
+};
+
 struct KubeDeployment {
     QString ns;
     QString name;
@@ -142,6 +157,9 @@ struct KubeSnapshot {
     QList<KubeDiagnosis> diagnoses;
     QList<KubeChange> timeline;
     QList<DeprecationFinding> deprecations;
+    QList<KubeContext> contexts;
+    QString currentContext;   // as the kubeconfig marks it
+    QString selectedContext;  // what Syspeek is actually querying
     int totalPods = 0;
     int issueCount = 0;
     int eventCount = 0;
@@ -213,28 +231,22 @@ QString kubeTimelineText(const QList<KubeChange> &changes);
 QString kubeNodesText(const QList<KubeNode> &nodes);
 
 // Right-sizing recommendation per pod
-// Context tracking for multi-cluster
-struct KubeContext {
-    QString name;
-    QString clusterName;
-    QString namespace_;
-    QList<QString> pods;       // pods in this context
-    QList<QString> deployments;// deployments in this context
-    bool operator==(const KubeContext &o) const {
-        return name == o.name && clusterName == o.clusterName && namespace_ == o.namespace_;
-    }
-};
+// Parses `kubectl config view -o json`. A malformed document is refused with
+// a reason; a document with no contexts is a valid (empty) kubeconfig.
+QList<KubeContext> kubeParseContexts(const QByteArray &json, QString *error);
 
-QDebug operator<<(QDebug dbg, const KubeContext &c);
+// The name marked current, or the first one when kubectl marked none.
+QString kubeCurrentContextName(const QList<KubeContext> &contexts);
 
-// All known contexts from kubeconfig
-QList<KubeContext> kubeAllContexts();
+// "contexts: dev (current), prod, staging - SELECTED prod"
+QString kubeContextsText(const QList<KubeContext> &contexts,
+                         const QString &selected);
 
-// Current context index
-int kubeCurrentContextIndex();
-
-// Context-aware pod listing (filters by current context)
-QList<KubePod> kubePodsByContext(const QList<KubePod> &all, int contextIdx);
-
-// Context-aware node listing
-QList<KubeNode> kubeNodesByContext(const QList<KubeNode> &all, int contextIdx);
+QString kubeSummaryText(const KubeSnapshot &snapshot);
+QString kubeDetailText(const KubeSnapshot &snapshot);
+QString kubeEventsText(const KubeSnapshot &snapshot);
+QString kubePodsText(const KubeSnapshot &snapshot);
+QString kubeDeploymentsText(const KubeSnapshot &snapshot);
+QString kubeDiagnosisText(const QList<KubeDiagnosis> &diagnoses);
+QString kubeTimelineText(const QList<KubeChange> &changes);
+QString kubeNodesText(const QList<KubeNode> &nodes);

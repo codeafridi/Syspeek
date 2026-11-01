@@ -44,6 +44,7 @@
 #include "CloudPricing.h"
 #include "CloudFleetSource.h"
 #include "CloudSpendStatus.h"
+#include "IacStatus.h"
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
 #include "TickBudget.h"
@@ -2109,6 +2110,137 @@ int main(int argc, char *argv[]) {
             check(!stream.running(), "fim: non-mac stream stub inert");
         }
 #endif
+    }
+
+    // --- M91: terraform state vs the account listing ------------------------
+    {
+        // `terraform show -json` shape: a root resource, a child module, and a
+        // data source that must not be counted as an asset.
+        const QByteArray state = R"({
+          "format_version": "1.0",
+          "terraform_version": "1.9.8",
+          "values": {
+            "root_module": {
+              "resources": [
+                {"address": "aws_instance.web", "mode": "managed",
+                 "type": "aws_instance", "name": "web",
+                 "provider_name": "registry.terraform.io/hashicorp/aws",
+                 "schema_version": 1,
+                 "values": {"id": "i-0aaa"}},
+                {"address": "data.aws_ami.ubuntu", "mode": "data",
+                 "type": "aws_ami", "name": "ubuntu",
+                 "values": {"id": "ami-123"}}
+              ],
+              "child_modules": [
+                {"address": "module.db",
+                 "resources": [
+                   {"address": "module.db.aws_db_instance.main",
+                    "mode": "managed", "type": "aws_db_instance",
+                    "name": "main",
+                    "provider_name": "registry.terraform.io/hashicorp/aws",
+                    "values": {"id": "db-1"}}
+                 ]}
+              ]
+            }
+          }
+        })";
+        QString error;
+        const QList<IacResource> parsed = iacParseTerraformState(state, &error);
+        check(error.isEmpty() && parsed.size() == 2,
+              "iac: the show -json shape parses, data sources excluded");
+        check(parsed.at(0).address == QStringLiteral("aws_instance.web")
+                  && parsed.at(0).id == QStringLiteral("i-0aaa")
+                  && parsed.at(0).provider.contains(QStringLiteral("hashicorp/aws")),
+              "iac: a root resource keeps its address, id and provider");
+        check(parsed.at(1).address
+                      == QStringLiteral("module.db.aws_db_instance.main")
+                  && parsed.at(1).id == QStringLiteral("db-1"),
+              "iac: a child module resource is found and addressed");
+
+        // Raw .tfstate shape.
+        const QByteArray raw = R"({
+          "version": 4, "terraform_version": "1.9.8",
+          "resources": [
+            {"mode": "managed", "type": "aws_instance", "name": "api",
+             "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+             "instances": [{"attributes": {"id": "i-0bbb"}}]}
+          ]
+        })";
+        const QList<IacResource> rawParsed =
+            iacParseTerraformState(raw, &error);
+        check(rawParsed.size() == 1
+                  && rawParsed.first().id == QStringLiteral("i-0bbb")
+                  && rawParsed.first().name == QStringLiteral("api"),
+              "iac: the raw .tfstate shape parses via instances[].attributes");
+
+        QString badError;
+        check(iacParseTerraformState("{ not json", &badError).isEmpty()
+                  && !badError.isEmpty(),
+              "iac: a malformed document is refused with a reason");
+        QString emptyError;
+        check(iacParseTerraformState("{}", &emptyError).isEmpty()
+                  && !emptyError.isEmpty(),
+              "iac: a document with no state is refused");
+
+        // Diff: one resource in both, one deleted out of band, one created.
+        QList<IacResource> cloud;
+        IacResource same;
+        same.id = QStringLiteral("i-0aaa");
+        same.name = QStringLiteral("web");
+        same.type = QStringLiteral("aws_instance");
+        cloud.append(same);
+        IacResource stray;
+        stray.id = QStringLiteral("i-0ccc");
+        stray.name = QStringLiteral("manually-made");
+        stray.type = QStringLiteral("t3.micro");
+        cloud.append(stray);
+
+        IacResource gone;
+        gone.address = QStringLiteral("module.db.aws_db_instance.main");
+        gone.id = QStringLiteral("db-1");
+        gone.name = QStringLiteral("main");
+        gone.type = QStringLiteral("aws_db_instance");
+        const IacDrift drift = iacDiff({parsed.at(0), gone}, cloud);
+        check(drift.available && drift.inSync == 1
+                  && drift.missing.size() == 1
+                  && drift.missing.first().id == QStringLiteral("db-1"),
+              "iac: a state resource absent from the account is missing");
+        check(drift.unmanaged.size() == 1
+                  && drift.unmanaged.first().id == QStringLiteral("i-0ccc"),
+              "iac: an account resource absent from the state is unmanaged");
+
+        const QString summary = iacSummaryText(drift);
+        check(summary.contains(QStringLiteral("2 state resource(s) vs 2 listed"))
+                  && summary.contains(QStringLiteral("1 in sync"))
+                  && summary.contains(QStringLiteral("1 missing"))
+                  && summary.contains(QStringLiteral("1 unmanaged")),
+              "iac: the summary counts every bucket");
+        const QString detail = iacDriftText(drift);
+        check(detail.contains(QStringLiteral("MISSING"))
+                  && detail.contains(QStringLiteral("UNMANAGED"))
+                  && detail.contains(QStringLiteral("deleted out of band")),
+              "iac: the detail names both drift directions");
+
+        // Name fallback for a state that exposes no id.
+        IacResource noId;
+        noId.name = QStringLiteral("web");
+        noId.type = QStringLiteral("aws_instance");
+        const IacDrift byName = iacDiff({noId}, cloud);
+        check(byName.inSync == 1 && byName.missing.isEmpty(),
+              "iac: a state row without an id matches the account by name");
+
+        check(iacDriftText(iacDiff(cloud, cloud))
+                  .contains(QStringLiteral("no drift")),
+              "iac: a clean state says no drift");
+        check(iacGateText(QString()).contains(
+                  QStringLiteral("terraform_state")),
+              "iac: the unset gate names the config key");
+        check(iacGateText(QStringLiteral("/tmp/tf.json"))
+                  .contains(QStringLiteral("terraform show -json")),
+              "iac: the unreadable gate names the command");
+        check(iacSettingsLine(QStringLiteral("/tmp/tf.json"), drift)
+                  .contains(QStringLiteral("1 unmanaged")),
+              "iac: the settings line carries the counts");
     }
 
     // --- M88: cost burn rate against the account's own baseline ------------

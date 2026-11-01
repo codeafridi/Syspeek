@@ -575,6 +575,53 @@ int main() {
               "kube: matched node gains usage depth");
     }
 
+    // --- M90: kubeconfig contexts -----------------------------------------
+    {
+        const QByteArray config = R"({
+          "apiVersion": "v1", "kind": "Config",
+          "current-context": "prod",
+          "clusters": [{"name": "prod", "cluster": {"server": "https://prod"}},
+                       {"name": "dev", "cluster": {"server": "https://dev"}}],
+          "contexts": [
+            {"name": "dev", "context": {"cluster": "dev", "user": "dev-user",
+                                        "namespace": "apps"}},
+            {"name": "prod", "context": {"cluster": "prod", "user": "prod-user"}}
+          ],
+          "users": [{"name": "dev-user"}, {"name": "prod-user"}]
+        })";
+        QString error;
+        const QList<KubeContext> contexts = kubeParseContexts(config, &error);
+        check(error.isEmpty() && contexts.size() == 2,
+              "kube context: the config view parses both contexts");
+        check(contexts.at(0).name == QStringLiteral("dev")
+                  && contexts.at(0).cluster == QStringLiteral("dev")
+                  && contexts.at(0).namespace_ == QStringLiteral("apps")
+                  && !contexts.at(0).current,
+              "kube context: a context carries cluster, user and namespace");
+        check(contexts.at(1).current
+                  && kubeCurrentContextName(contexts) == QStringLiteral("prod"),
+              "kube context: current-context marks the active one");
+
+        const QString text = kubeContextsText(contexts, QStringLiteral("prod"));
+        check(text.contains(QStringLiteral("dev"))
+                  && text.contains(QStringLiteral("prod (current)"))
+                  && text.contains(QStringLiteral("querying prod")),
+              "kube context: the line names the list and the selected context");
+
+        QString emptyError;
+        check(kubeParseContexts("{\"apiVersion\":\"v1\"}", &emptyError)
+                      .isEmpty()
+                  && emptyError.isEmpty(),
+              "kube context: an empty kubeconfig is empty, not an error");
+        QString badError;
+        check(kubeParseContexts("nope", &badError).isEmpty()
+                  && !badError.isEmpty(),
+              "kube context: a malformed config is refused with a reason");
+        check(kubeContextsText({}, QString())
+                  .contains(QStringLiteral("none in the kubeconfig")),
+              "kube context: the empty state says why");
+    }
+
     // --- M89: per-pod right-sizing (OpenCost buffer model) ----------------
     {
         const double cpuRate = 0.031611;   // $/core-hour

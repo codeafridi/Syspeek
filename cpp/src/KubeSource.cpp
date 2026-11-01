@@ -54,7 +54,40 @@ void KubeSource::start() {
     }
 
     resetBackoff();
+    reloadContexts();
     beginQuery();
+}
+
+void KubeSource::reloadContexts() {
+    if (m_kubectlPath.isEmpty()) {
+        return;
+    }
+    if (m_ctxProcess == nullptr) {
+        m_ctxProcess = new QProcess(this);
+        connect(m_ctxProcess,
+                QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this, [this](int exitCode, QProcess::ExitStatus status) {
+                    if (status != QProcess::NormalExit || exitCode != 0) {
+                        return;
+                    }
+                    QString error;
+                    const QList<KubeContext> parsed =
+                        kubeParseContexts(m_ctxProcess->readAllStandardOutput(),
+                                          &error);
+                    m_contextError = error;
+                    if (error.isEmpty()) {
+                        m_contexts = parsed;
+                    }
+                });
+    }
+    if (m_ctxProcess->state() != QProcess::NotRunning) {
+        return;
+    }
+    // Discovery reads the whole kubeconfig on purpose: pinning it to one
+    // context would make the list just that context.
+    m_ctxProcess->start(m_kubectlPath,
+                        {QStringLiteral("config"), QStringLiteral("view"),
+                         QStringLiteral("-o"), QStringLiteral("json")});
 }
 
 void KubeSource::stop() {
@@ -101,6 +134,7 @@ void KubeSource::beginQuery() {
         return;
     }
 
+    reloadContexts();
     m_stdout.clear();
     m_stderr.clear();
     m_running = true;
@@ -120,7 +154,14 @@ void KubeSource::beginQuery() {
 
 void KubeSource::startPhase(int phase, const QStringList &arguments) {
     m_phase = phase;
-    m_process->start(m_kubectlPath, arguments);
+    // M90: every kubectl call targets the selected context; empty means
+    // kubectl's own current-context.
+    QStringList args = arguments;
+    if (!m_config.context.isEmpty()) {
+        args.prepend(m_config.context);
+        args.prepend(QStringLiteral("--context"));
+    }
+    m_process->start(m_kubectlPath, args);
     m_deadlineTimer->start(m_config.timeoutMs);
 }
 
@@ -336,6 +377,11 @@ void KubeSource::emitSnapshot(KubeState state, const QString &message,
         snapshot.eventCount = kubeWarningCount(resources.events);
         snapshot.diagnoses = kubeDiagnose(resources.pods, resources.events);
         snapshot.deprecations = checkDeprecations(resources.objects);
+        snapshot.contexts = m_contexts;
+        snapshot.currentContext = kubeCurrentContextName(m_contexts);
+        snapshot.selectedContext = m_config.context.isEmpty()
+                                       ? snapshot.currentContext
+                                       : m_config.context;
 
         snapshot.metricsOk = m_metricsOk;
         snapshot.metricsNote = m_metricsNote;

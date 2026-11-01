@@ -305,6 +305,8 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (timeout > 0) {
             config.kube.timeoutMs = timeout;
         }
+        config.kube.context =
+            settings.value(QStringLiteral("context")).toString().trimmed();
     }
     settings.endGroup();
 
@@ -388,6 +390,10 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             config.cloud.spendTimeoutMs =
                 qBound(5000, spendTimeout, 180000);
         }
+        config.cloud.terraformStatePath =
+            settings.value(QStringLiteral("terraform_state"))
+                .toString()
+                .trimmed();
     }
     settings.endGroup();
 

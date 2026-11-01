@@ -1802,6 +1802,22 @@ int main(int argc, char *argv[]) {
                                                            QLatin1Char('0')),
                           12.0 + day % 5});
     }
+    // M91: the state fixture rides the same two ticks, so the drift card is
+    // rendered without adding a snapshot the chart would count.
+    cloudSnap.cloud.iac.available = true;
+    cloudSnap.cloud.iac.path = QStringLiteral("/home/dev/tf/terraform.tfstate");
+    cloudSnap.cloud.iac.stateResources = 6;
+    cloudSnap.cloud.iac.cloudResources = 5;
+    cloudSnap.cloud.iac.inSync = 4;
+    {
+        IacResource strayIac;
+        strayIac.name = QStringLiteral("manually-made");
+        strayIac.type = QStringLiteral("t3.micro");
+        strayIac.id = QStringLiteral("i-0ccc");
+        cloudSnap.cloud.iac.unmanaged = {strayIac};
+        cloudSnap.cloud.iac.note = iacSummaryText(cloudSnap.cloud.iac);
+    }
+
     // M88: the burn line rides the spend detail.
     cloudSnap.cloud.burn.valid = true;
     cloudSnap.cloud.burn.currentPerHour = 0.68;
@@ -1980,6 +1996,11 @@ int main(int argc, char *argv[]) {
     check(cloudShare != nullptr
               && cloudShare->text().contains(QStringLiteral("vCPU")),
           "cloud share note states the formula");
+    auto *cloudIac = hud.findChild<QLabel *>(QStringLiteral("ddCloudIac"));
+    check(cloudIac != nullptr
+              && cloudIac->text().contains(QStringLiteral("6 state resource(s)"))
+              && cloudIac->text().contains(QStringLiteral("1 unmanaged")),
+          "M91: the cloud page states the terraform drift");
     check(cloudChart != nullptr && cloudChart->sampleCount() == 2,
           "cloud chart charts one app-cost sample per tick");
 
@@ -1994,6 +2015,9 @@ int main(int argc, char *argv[]) {
               && cloudAge != nullptr
               && cloudAge->text() == QStringLiteral("--"),
           "cloud page falls back to dashes off a cloud instance");
+    check(cloudIac != nullptr
+              && cloudIac->text().contains(QStringLiteral("terraform_state")),
+          "M91: with no state configured the card names the config key");
     check(cloudFleetSummary != nullptr
               && cloudFleetSummary->text().contains(
                   QStringLiteral("no cloud instance identified"))

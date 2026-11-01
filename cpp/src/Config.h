@@ -28,6 +28,9 @@ struct DockerConfig {
 };
 
 struct KubeConfig {
+    // [k8s] context: the kubeconfig context every kubectl call targets. Empty
+    // means kubectl's own current-context.
+    QString context;
     int healthyMs = 30000;
     int issueMs = 10000;
     int backoffStartMs = 15000;
@@ -209,6 +212,9 @@ struct CloudConfig {
     bool spend = true;
     // [cloud] spend_timeout_ms: budget per cost query.
     int spendTimeoutMs = 30000;
+    // [cloud] terraform_state: the file `terraform show -json` wrote (or a raw
+    // .tfstate). Empty means IaC drift is off and nothing is read.
+    QString terraformStatePath;
 };
 
 struct Config {

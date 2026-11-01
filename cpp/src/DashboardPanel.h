@@ -271,6 +271,7 @@ private:
     QLabel *m_cgroup = nullptr;
     QLabel *m_docker = nullptr;
     QLabel *m_kubeSummary = nullptr;
+    QLabel *m_kubeContexts = nullptr;
     QTreeWidget *m_kubePods = nullptr;
     QTreeWidget *m_kubeDeploys = nullptr;
     QLabel *m_kubeEvents = nullptr;
@@ -296,6 +297,7 @@ private:
     QLabel *m_cloudDetail = nullptr;
     QLabel *m_cloudFleetSummary = nullptr;
     QLabel *m_cloudFleetNote = nullptr;
+    QLabel *m_cloudIac = nullptr;
     QTreeWidget *m_cloudFleet = nullptr;
     TimeseriesChart *m_chartCloudFleet = nullptr;
     QLabel *m_cloudCost = nullptr;

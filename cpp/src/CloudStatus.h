@@ -1,11 +1,14 @@
 #pragma once
 
+#include "IacStatus.h"
+
 #include <QHash>
 #include <QList>
 #include <QString>
 #include <QtGlobal>
 
 #include "CloudProvider.h"
+#include "IacStatus.h"
 #include "CloudSpendStatus.h"
 
 // Cloud instance identity + accrued-cost model. Everything here is pure so
@@ -155,6 +158,8 @@ struct CloudSnapshot {
     QList<CloudConsumer> consumers;
     // M88: burn rate against the account's own trailing baseline.
     CloudBurnRate burn;
+    // M91: terraform state diffed against the listing above.
+    IacDrift iac;
     qint64 sampledAtMs = 0;
     // M83: the account inventory, and the instance age it resolves for this
     // box. `accruedLaunchUsd` is the cost since the provider's launch time

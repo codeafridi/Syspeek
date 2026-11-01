@@ -4544,6 +4544,18 @@ QWidget *DashboardPanel::buildCloudView() {
     m_cloudFleetNote->setMinimumWidth(1);
     layout->addWidget(m_cloudFleetNote);
 
+    // --- M91: the terraform state diffed against the listing above. Read-only
+    // both ways: it names drift, it never applies, imports or destroys.
+    m_cloudIac = new QLabel(QStringLiteral("--"), view);
+    m_cloudIac->setObjectName(QStringLiteral("ddCloudIac"));
+    m_cloudIac->setFont(monoFont(10));
+    m_cloudIac->setWordWrap(false);
+    m_cloudIac->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("IAC DRIFT"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("terraform state vs the account"),
+                               m_cloudIac, view));
 
     // --- Rate / accrual / projection, with the import date that decides how
     // much the number is worth.
@@ -6725,6 +6737,10 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
 void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
     const QString summary = kubeSummaryText(snapshot);
     m_kubeSummary->setText(summary.isEmpty() ? QStringLiteral("--") : summary);
+    if (m_kubeContexts != nullptr) {
+        m_kubeContexts->setText(
+            kubeContextsText(snapshot.contexts, snapshot.selectedContext));
+    }
 
     // Cluster-page tiles (M64); issues colored red while nonzero.
     m_kubeTilePods->setText(QString::number(snapshot.totalPods));
@@ -7419,6 +7435,13 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
     const QString fleetText =
         cloud.available ? fleetSummaryText(fleet) : fleetNoProviderText();
     m_cloudFleetSummary->setText(fleetText);
+    if (m_cloudIac != nullptr) {
+        // The sampler sets the note on every tick, so what is shown is exactly
+        // what the last state read produced (gate, parse error, or the diff).
+        m_cloudIac->setText(cloud.iac.note.isEmpty()
+                                ? iacGateText(cloud.iac.path)
+                                : cloud.iac.note);
+    }
     if (m_cloudFleet != nullptr) {
         m_cloudFleet->clear();
         for (const CloudFleetInstance &row : fleet.rows) {
