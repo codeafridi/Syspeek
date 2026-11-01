@@ -105,35 +105,112 @@ pkg_install_curl() { # best-effort distro rescue; 0 iff curl became usable
     "https://github.com/${REPO}" -o /dev/null >/dev/null 2>&1
 }
 
+# Where downloads land. This must be REAL DISK: /tmp is a tmpfs on most
+# desktops, and a 40 MB bundle written into a tmpfs that is nearly full dies
+# with ENOSPC halfway through - which is exactly the failure a user reported as
+# "could not download". A snap-confined curl additionally gets a private /tmp
+# the main mount does not share.
+work_dir() { # -> prints a writable directory with room for the bundle
+  need_kb=131072   # the bundle plus the extracted tree, with slack
+  for base in "${SYSPEEK_TMPDIR:-}" "${XDG_CACHE_HOME:-$HOME/.cache}" "$HOME" "${TMPDIR:-}" /tmp; do
+    [ -n "$base" ] || continue
+    dir="$base/syspeek-install"
+    mkdir -p "$dir" 2>/dev/null || continue
+    [ -w "$dir" ] || continue
+    avail="$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 { print $4 }')"
+    case "$avail" in
+      ''|*[!0-9]*) printf '%s\n' "$dir"; return 0 ;;
+    esac
+    if [ "$avail" -ge "$need_kb" ]; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+  done
+  # Nothing had the room we asked for; use the first writable candidate and let
+  # the download report the truth instead of guessing here.
+  for base in "${SYSPEEK_TMPDIR:-}" "${XDG_CACHE_HOME:-$HOME/.cache}" "$HOME" "${TMPDIR:-}" /tmp; do
+    [ -n "$base" ] || continue
+    dir="$base/syspeek-install"
+    mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ] && { printf '%s\n' "$dir"; return 0; }
+  done
+  return 1
+}
+
+# A write failure is not a missing downloader. Classify it so the installer
+# stops recommending "apt-get install curl" to someone whose disk is full (and
+# stops asking for sudo to re-attempt a download that cannot succeed).
+write_failure() { # <stderr-file> <dest-dir> — 0 when the cause was the write
+  [ -f "$1" ] || return 1
+  if grep -qiE 'no space left|disk quota|short write|failure writing|cannot write to|write error' "$1"; then
+    dir="${2:-.}"
+    avail="$(df -h "$dir" 2>/dev/null | awk 'NR==2 { print $4 " free of " $2 }')"
+    die "the download could not be WRITTEN to $dir (${avail:-no space reported})
+This is a disk-space problem, not a downloader problem: a Syspeek bundle needs
+about 90 MB free while it unpacks. Free some space, or point the installer at a
+larger filesystem:
+  export XDG_CACHE_HOME=/path/with/space     # or SYSPEEK_TMPDIR=/that/path
+  then re-run this installer."
+  fi
+  return 1
+}
+
 fetch() { # <url> <dest> — downloader ladder (M58a), works without native curl
+  # Every attempt records its stderr: the ladder must be able to tell "no
+  # downloader" from "the disk is full", because the remedy is different and
+  # one of them asks for the user's sudo password for nothing.
+  errf="$(dirname "$2")/.syspeek-dl.stderr"
+  { : > "$errf"; } 2>/dev/null || errf=/dev/null
+  attempted=""
+
   if command -v curl >/dev/null 2>&1 && ! under_snap curl; then
-    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
+    attempted="$attempted curl"
+    curl -fsSL --connect-timeout 10 -o "$2" "$1" 2>"$errf" && return 0
+    write_failure "$errf" "$(dirname "$2")" && return 1
   fi
   if command -v wget >/dev/null 2>&1 && ! under_snap wget; then
-    wget -q -T 20 -O "$2" "$1" && return 0
+    attempted="$attempted wget"
+    wget -q -T 20 -O "$2" "$1" 2>"$errf" && return 0
+    write_failure "$errf" "$(dirname "$2")" && return 1
   fi
   if command -v curl >/dev/null 2>&1; then
     log "note: the curl on this machine is a snap (sandbox may block writes)"
-    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
+    attempted="$attempted snap-curl"
+    curl -fsSL --connect-timeout 10 -o "$2" "$1" 2>"$errf" && return 0
     log "snap curl failed - continuing down the ladder"
   fi
   if command -v busybox >/dev/null 2>&1; then
-    busybox wget -q -T 20 -O "$2" "$1" && return 0
+    attempted="$attempted busybox"
+    busybox wget -q -T 20 -O "$2" "$1" 2>"$errf" && return 0
+    write_failure "$errf" "$(dirname "$2")" && return 1
   fi
-  log "no working downloader; trying the distro package manager once more"
-  if pkg_install_curl; then
-    curl -fsSL --connect-timeout 10 -o "$2" "$1" && return 0
-    if command -v wget >/dev/null 2>&1; then
-      wget -q -T 20 -O "$2" "$1" && return 0
+
+  # Only ask for sudo when there is no downloader at all - not when one ran and
+  # failed to write.
+  case "$attempted" in
+    "") log "no downloader found; installing one" ;;
+    *)  log "every downloader present failed; not retrying through the package manager
+   (see the last error below)" ;;
+  esac
+  if [ -z "$attempted" ] || ! command -v curl >/dev/null 2>&1; then
+    if pkg_install_curl; then
+      curl -fsSL --connect-timeout 10 -o "$2" "$1" 2>"$errf" && return 0
+      write_failure "$errf" "$(dirname "$2")" && return 1
+      if command -v wget >/dev/null 2>&1; then
+        wget -q -T 20 -O "$2" "$1" 2>"$errf" && return 0
+        write_failure "$errf" "$(dirname "$2")" && return 1
+      fi
     fi
   fi
-  die "could not download $(basename "$1")
-install a downloader manually, then re-run this installer:
-  debian/ubuntu:  sudo apt-get install -y curl
-  fedora/rhel:    sudo dnf install -y curl
-  arch:           sudo pacman -S curl
-  alpine:         sudo apk add curl
-  or get the bundle directly from https://github.com/${REPO}/releases"
+
+  last="$(head -n 1 "$errf" 2>/dev/null | cut -c1-160)"
+  [ -n "$last" ] && last="
+last error: $last"
+  die "could not download $(basename "$1")${last}
+tried:$attempted
+A downloader is present (or could not be installed). If the message above is a
+network error, check the URL and your connection; if it mentions writes, see
+the space advice above. You can also fetch the bundle yourself from
+https://github.com/${REPO}/releases"
 }
 
 run_priv() { # <cmd...> — passwordless sudo when possible, else interactive
@@ -178,7 +255,8 @@ mac_install() {
     dmg_url="https://github.com/${REPO}/releases/download/${tag}/Syspeek-$(printf '%s' "$tag" | tr -d v)-macos.dmg"
   fi
 
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/syspeek-mac.XXXXXX")" || die "mktemp failed"
+  tmp="$(work_dir)" || die "no writable directory for the download"
+  mkdir -p "$tmp" 2>/dev/null || true
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
   log "Downloading Syspeek for macOS..."
@@ -312,7 +390,8 @@ win_install() {
     zip_url="https://github.com/${REPO}/releases/download/${tag}/Syspeek-$(printf '%s' "$tag" | tr -d v)-windows-portable.zip"
   fi
 
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/syspeek-win.XXXXXX")" || die "mktemp failed"
+  tmp="$(work_dir)" || die "no writable directory for the download"
+  mkdir -p "$tmp" 2>/dev/null || true
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
   log "Downloading Syspeek for Windows..."
@@ -564,7 +643,9 @@ linux_install() {
   arch="$(uname -m 2>/dev/null || echo unknown)"
   [ "$arch" = "x86_64" ] || log "warning: this bundle is built for x86_64; you are on $arch"
 
-  tmp="$(mktemp -d)"
+  # Real disk, not a tmpfs: see work_dir().
+  tmp="$(work_dir)" || die "no writable directory for the download"
+  mkdir -p "$tmp" 2>/dev/null || true
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
   log "Downloading Syspeek..."

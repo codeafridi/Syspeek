@@ -36,11 +36,12 @@ telemetry** — nothing leaves your machine unless you point a scraper at it.
   control, inotify/pid limits, scheduler run-queue state, CPU steal %.
 - **cgroup memory pressure** — peak memory, OOM events/kills, pid limits for
   the focused app's unit.
-- **27-page console** — Overview, Processes, Memory, Network, Network Path,
-  Containers, Kubernetes, Disks, Host, Latency, Metrics (DogStatsD), Logs,
-  Errors, Software, Dependencies, Endpoints, Instrumentation, Synthetic checks,
-  Traces (OTLP), Profiles, Databases (PostgreSQL), Security, Settings, Cost,
-  Incidents, SLO, Alerts.
+- **32-view console**, in rail order — Overview, Metrics (DogStatsD), Alerts,
+  Incidents, SLO, Processes, Memory, Disks, GPU, Sensors, Host, Network,
+  Network Path, Containers, Kubernetes, Services, Logs, Errors, Dependencies,
+  Software, Endpoints, Synthetic checks, Instrumentation, Traces (OTLP),
+  Profiles, Databases (PostgreSQL), Security, History, Timeline, Cost, Cloud,
+  Settings.
 - **Alerts & incidents** — local thresholds (CPU, memory, FD-table, steal,
   failed services, journal errors) shown on the Alerts page with an incident
   timeline. No desktop popups, by design — a HUD that steals focus is worse
@@ -97,6 +98,12 @@ autostart/status are `--autostart=on|off|status` — run the installer with
 | `syspeek status` | is it running? |
 | `syspeek update` | upgrade to the latest version |
 | `syspeek uninstall` | remove everything |
+| `syspeek --new-instance` | start the HUD even though one is already running on this display |
+
+The HUD is single-instance **per display**: a second launch on the same screen
+is refused (two overlays would stack) and says which display and which pid holds
+it, while a HUD on another display — a nested server, an Xvfb, a second seat —
+never blocks your session. `--new-instance` is the explicit override.
 
 <details>
 <summary><strong>Build from source instead</strong></summary>

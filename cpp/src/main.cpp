@@ -68,6 +68,9 @@ int g_signalFd[2] = {-1, -1};
 
 bool g_latencyProbe = false;
 qint64 g_focusRequestedAtMs = 0;
+// --new-instance: skip the single-instance gate (the documented escape hatch
+// when a HUD is running somewhere you cannot see, e.g. another display).
+bool g_newInstance = false;
 qint64 g_guiLastTickMs = 0;
 qint64 g_guiMaxLateMs = 0;
 
@@ -85,6 +88,103 @@ QString instanceUserKey() {
     return QStringLiteral("user");
 #else
     return QString::number(static_cast<qulonglong>(::getuid()));
+#endif
+}
+
+// A HUD is a per-session UI: two sessions on two displays are two HUDs, while
+// one display stays single (two overlays on one screen would stack). Scoping
+// the gate to the user alone meant a HUD on ANOTHER display - a nested server,
+// an Xvfb, a second seat - blocked every later launch, and the message named
+// neither the display nor a way out.
+struct InstanceSession {
+    QString key;    // safe socket suffix
+    QString label;  // what the user is told
+};
+
+// Follows the platform the app will actually use, not whatever is in the
+// environment: an X11 session often still has WAYLAND_DISPLAY set (XWayland),
+// and keying on it would collide two X displays while labelling the message
+// with a display the user is not on.
+InstanceSession instanceSession() {
+    InstanceSession session;
+#if defined(Q_OS_WIN)
+    session.key = QStringLiteral("win");
+    session.label = QStringLiteral("this session");
+    return session;
+#else
+    const QString platform =
+        qEnvironmentVariable("QT_QPA_PLATFORM").trimmed().toLower();
+    const QString waylandDisplay =
+        qEnvironmentVariable("WAYLAND_DISPLAY").trimmed();
+    const QString x11Display = qEnvironmentVariable("DISPLAY").trimmed();
+    const auto sanitized = [](const QString &raw) {
+        QString safe = raw;
+        for (QChar &ch : safe) {
+            if (!ch.isLetterOrNumber()) {
+                ch = QLatin1Char('_');
+            }
+        }
+        return safe;
+    };
+    const bool wantWayland =
+        platform.startsWith(QLatin1String("wayland"))
+        || (platform.isEmpty() && !waylandDisplay.isEmpty());
+    if (wantWayland && !waylandDisplay.isEmpty()) {
+        session.key = QStringLiteral("wl_") + sanitized(waylandDisplay);
+        session.label = QStringLiteral("Wayland %1").arg(waylandDisplay);
+    } else if (!x11Display.isEmpty()) {
+        session.key = QStringLiteral("x_") + sanitized(x11Display);
+        session.label = QStringLiteral("DISPLAY %1").arg(x11Display);
+    } else if (!waylandDisplay.isEmpty()) {
+        session.key = QStringLiteral("wl_") + sanitized(waylandDisplay);
+        session.label = QStringLiteral("Wayland %1").arg(waylandDisplay);
+    } else {
+        session.key = QStringLiteral("headless");
+        session.label = QStringLiteral("this session");
+    }
+    return session;
+#endif
+}
+
+QString instancePidPath(const QString &key) {
+    QString dir = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (dir.isEmpty()) {
+        dir = qEnvironmentVariable("TMPDIR");
+    }
+    if (dir.isEmpty()) {
+        dir = QStringLiteral("/tmp");
+    }
+    return dir + QLatin1Char('/') + key + QStringLiteral(".pid");
+}
+
+qint64 readInstancePid(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return -1;
+    }
+    bool ok = false;
+    const qint64 pid = file.readAll().trimmed().toLongLong(&ok);
+    file.close();
+    return ok && pid > 0 ? pid : -1;
+}
+
+bool instancePidAlive(qint64 pid) {
+    if (pid <= 0) {
+        return false;
+    }
+#if defined(Q_OS_WIN)
+    HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                  static_cast<DWORD>(pid));
+    if (handle == nullptr) {
+        return false;
+    }
+    DWORD code = 0;
+    const bool alive = ::GetExitCodeProcess(handle, &code)
+                       && code == STILL_ACTIVE;
+    ::CloseHandle(handle);
+    return alive;
+#else
+    return ::kill(static_cast<pid_t>(pid), 0) == 0;
 #endif
 }
 
@@ -390,6 +490,10 @@ int main(int argc, char *argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         const QByteArray arg(argv[i]);
+        if (arg == QByteArrayLiteral("--new-instance")) {
+            g_newInstance = true;
+            continue;
+        }
         if (arg == QByteArrayLiteral("--dump")) {
             const QByteArray report = dumpReportJson().toUtf8();
             std::fwrite(report.constData(), 1, report.size(), stdout);
@@ -468,19 +572,46 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    // Single-instance gate: a second HUD would stack two overlays.
+    // Single-instance gate, scoped to THIS display: the same screen stays
+    // single, another session is not blocked.
+    const InstanceSession session = instanceSession();
     const QString instanceKey = QStringLiteral("syspeek-hud-")
-        + instanceUserKey();
+        + instanceUserKey() + QLatin1Char('-') + session.key;
+    const QString instancePidFile = instancePidPath(instanceKey);
     QLocalSocket instanceProbe;
     instanceProbe.connectToServer(instanceKey);
-    if (instanceProbe.waitForConnected(150)) {
-        std::fprintf(stdout, "syspeek: HUD already running\n");
+    if (!g_newInstance && instanceProbe.waitForConnected(150)) {
+        const qint64 holder = readInstancePid(instancePidFile);
+        if (instancePidAlive(holder)) {
+            std::fprintf(stdout,
+                         "syspeek: a HUD is already running on %s (pid %lld)\n"
+                         "  close it, or start a second one with "
+                         "'syspeek --new-instance'\n",
+                         qUtf8Printable(session.label),
+                         static_cast<long long>(holder));
+        } else {
+            std::fprintf(stdout,
+                         "syspeek: a HUD is already running on %s\n"
+                         "  close it, or start a second one with "
+                         "'syspeek --new-instance'\n",
+                         qUtf8Printable(session.label));
+        }
         return 0;
     }
     instanceProbe.abort();
+    // A socket file with no listener is a leftover from a killed instance;
+    // removing it here is what lets the next launch bind cleanly.
     QLocalServer::removeServer(instanceKey);
     auto *instanceLock = new QLocalServer(&app);
-    if (!instanceLock->listen(instanceKey)) {
+    if (instanceLock->listen(instanceKey)) {
+        // Named in the "already running" message, so the user can find it.
+        QFile pidFile(instancePidFile);
+        if (pidFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            pidFile.write(QByteArray::number(
+                static_cast<qlonglong>(QCoreApplication::applicationPid())));
+            pidFile.close();
+        }
+    } else {
         instanceLock->deleteLater();
     }
 
@@ -936,6 +1067,7 @@ int main(int argc, char *argv[]) {
     // reclaims named pipes on process exit, but an explicit removeServer
     // avoids stale-pipe warnings on the next launch.
     QLocalServer::removeServer(instanceKey);
+    QFile::remove(instancePidPath(instanceKey));
 
     logLine(QStringLiteral("stopped"));
 
