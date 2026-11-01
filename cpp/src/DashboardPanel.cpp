@@ -2292,6 +2292,15 @@ QWidget *DashboardPanel::buildKubernetesView() {
     layout->addWidget(
         makeCard(QStringLiteral("CLUSTER"), m_kubeSummary, view));
 
+    // M90: which kubeconfig context the tables describe, and what else the
+    // file offers - the page never pretends there is one cluster.
+    m_kubeContexts = new QLabel(QStringLiteral("--"), view);
+    m_kubeContexts->setObjectName(QStringLiteral("ddKubeContexts"));
+    m_kubeContexts->setFont(monoFont(9));
+    m_kubeContexts->setWordWrap(true);
+    m_kubeContexts->setMinimumWidth(1);
+    layout->addWidget(m_kubeContexts);
+
     m_kubePods->setColumnWidth(0, 150);
     layout->addWidget(
         makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
@@ -4751,7 +4760,7 @@ QWidget *DashboardPanel::buildCostView() {
     m_costWarnings->setObjectName(QStringLiteral("ddCostWarnings"));
     m_costWarnings->setFont(monoFont(10));
     m_costWarnings->setTextFormat(Qt::RichText);
-    m_costWarnings->setWordWrap(false);
+    m_costWarnings->setWordWrap(true);
 
     layout->addWidget(makeBanner(QStringLiteral("RIGHT-SIZING"),
         ui_theme::warn(), view));
@@ -6933,9 +6942,13 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
             costEfficiencyTextFromRatios(
                 snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
                 snapshot.costEfficiencyPods, snapshot.costWastedMonthly)
-            + QStringLiteral("\n")
-            + rightSizingSummaryText(snapshot.costRightSizing,
-                                     snapshot.costRightSizingPods));
+            // Rich text: a plain newline does not break the line in a
+            // QLabel(Qt::RichText), and the summary belongs in the same
+            // label/value column as the rest of the card.
+            + QStringLiteral("<br/>")
+            + line(QStringLiteral("sized"),
+                   rightSizingSummaryText(snapshot.costRightSizing,
+                                          snapshot.costRightSizingPods)));
 
         if (m_costRightSizing != nullptr) {
             m_costRightSizing->clear();

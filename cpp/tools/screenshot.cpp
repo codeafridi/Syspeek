@@ -1044,7 +1044,7 @@ int main(int argc, char *argv[]) {
             return false;
         };
         for (int i = 0; i < 240; ++i) {
-            tracker.update(alertsFor(i), baseMs + i * 2000);
+            tracker.update(alertsFor(i), defaultAlertRules(), baseMs + i * 2000);
             sloTracker.record(!hasCrit(alertsFor(i)), baseMs + i * 2000);
             // Container fleet drifts: one cadence bump + flapping issues;
             // Kubernetes pod count creeps upward with the story.
@@ -1175,7 +1175,7 @@ int main(int argc, char *argv[]) {
             }
             app.processEvents();
         }
-        tracker.update(alertsFor(240), baseMs + 240 * 2000);
+        tracker.update(alertsFor(240), defaultAlertRules(), baseMs + 240 * 2000);
         sloTracker.record(!hasCrit(alertsFor(240)), baseMs + 240 * 2000);
         docker.runningCount = 3;
         docker.issueCount = 2;
@@ -1336,7 +1336,8 @@ int main(int argc, char *argv[]) {
     QList<Incident> incidents;
     Incident incident;
     incident.id = QStringLiteral("inc-1");
-    incident.key = QStringLiteral("host_cpu_high");
+    incident.groupKey = QStringLiteral("compute");
+    incident.owner = QStringLiteral("platform");
     incident.title = QStringLiteral("host CPU high");
     incident.severity = QStringLiteral("high");
     incident.status = QStringLiteral("open");

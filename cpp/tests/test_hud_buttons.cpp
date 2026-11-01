@@ -1578,6 +1578,28 @@ int main(int argc, char *argv[]) {
         hud.setKubeSnapshot(cost);
     }
 
+    // --- M90: the Kubernetes page names the context it is describing --------
+    {
+        KubeSnapshot ctx = kubeSnap;
+        KubeContext dev;
+        dev.name = QStringLiteral("dev");
+        dev.cluster = QStringLiteral("dev");
+        KubeContext prod;
+        prod.name = QStringLiteral("prod");
+        prod.cluster = QStringLiteral("prod");
+        prod.current = true;
+        ctx.contexts = {dev, prod};
+        ctx.selectedContext = QStringLiteral("prod");
+        hud.setKubeSnapshot(ctx);
+        auto *contexts =
+            hud.findChild<QLabel *>(QStringLiteral("ddKubeContexts"));
+        check(contexts != nullptr
+                  && contexts->text().contains(QStringLiteral("prod (current)"))
+                  && contexts->text().contains(QStringLiteral("querying prod")),
+              "M90: the kube page names the contexts and the selected one");
+        hud.setKubeSnapshot(kubeSnap);
+    }
+
     DisplaySnapshot hot = makeSnapshot("hot", "9", "95%", "10 MB", "WARN");
     hot.cpuValid = true;
     hot.cpuPercent = 95.0;
