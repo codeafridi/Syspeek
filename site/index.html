@@ -29,7 +29,7 @@
           <a href="#install">Install</a>
         </nav>
         <div class="nav-right">
-          <a class="ver" href="https://github.com/codeafridi/Syspeek/releases/tag/v0.10.0" rel="noopener" title="Release notes for 0.10.0">v0.10.0</a>
+          <a class="ver" href="https://github.com/codeafridi/Syspeek/releases/tag/v0.11.0" rel="noopener" title="Release notes for 0.11.0">v0.11.0</a>
           <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
             <svg class="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.7 17.7l1.41 1.41M2 12h2M20 12h2M6.34 17.7l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
             <svg class="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
@@ -45,7 +45,7 @@
     <main id="top">
       <section class="hero">
         <div class="wrap">
-          <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6. Version 0.10.0.</p>
+          <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6. Version 0.11.0.</p>
           <h1>The HUD that follows the app you are using.</h1>
           <p class="lede">
             Pick any window and Syspeek puts that app's CPU, memory, threads, file descriptors, disk and network throughput in a small panel that floats over your desktop. Click once and the same binary opens a full console for the whole machine: host, disks, GPU, sensors, containers, Kubernetes, databases, traces and what the cloud is billing you.
@@ -99,13 +99,13 @@
             </article>
             <article class="card">
               <h3>The bills and the pager</h3>
-              <p>OTLP traces, DogStatsD metrics, synthetic HTTP checks and a Prometheus endpoint on the receiving end. Cloud instance identity, accrued cost and the provider's own billed spend. Alerts, incidents, SLO burn and webhooks to the receiver you already own.</p>
+              <p>OTLP traces, DogStatsD metrics, synthetic HTTP checks and a Prometheus endpoint on the receiving end. Cloud instance identity, accrued cost, the provider's own billed spend, the burn rate against your own trailing baseline, per-pod right-sizing with the headroom priced at your cluster's rates, and Terraform state diffed against the account listing. Alerts correlated into one incident per subject, with an owner and a page only when the rule is not flapping, SLO burn, and webhooks to the receiver you already own.</p>
             </article>
           </div>
 
           <ul class="truth">
             <li><strong>Local only.</strong> No account, no telemetry, no phone home. The only outbound calls are ones you switch on: cloud metadata, your own webhook, your own Prometheus scraper.</li>
-            <li><strong>Honest about the gaps.</strong> A surface the OS will not give up says so on the panel. macOS TCP counters need root, Windows has no load average, and the console prints those sentences instead of a zero.</li>
+            <li><strong>Honest about the gaps.</strong> A surface the OS will not give up says so on the panel. macOS TCP counters need root, Windows has no load average, the cloud inventory and the cost query are gated on an identity the host may not have, and the console prints those sentences instead of a zero. Where the instance metadata service is blocked by network policy, <code>[cloud] identity=</code> is a fallback &mdash; the metadata service always wins when it answers, and the page says which source it used.</li>
             <li><strong>One static binary.</strong> C++20 and Qt 6. Started from a .deb, a DMG, an MSI, an AppImage, Homebrew, Scoop or a single shell line.</li>
           </ul>
         </div>
@@ -201,7 +201,7 @@
           <div class="notes">
             <h3 id="screenshot-notes">Notes on these captures</h3>
             <p>
-              These are live captures of Syspeek 0.10.0 on one machine &mdash; not mock-ups and not a designer's render. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD. There is no cloud provider behind this laptop, so the two <b>Cloud</b> panels are rendered from the application's own screenshot fixtures with a synthetic AWS identity and spend document; every other panel is the running binary. Treat the Cloud panels as a layout reference, and the release notes for what CI proves about that path against a real metadata service.
+              These are live captures of Syspeek on one machine &mdash; not mock-ups and not a designer's render. The gallery was shot on 0.10.0 and has not been re-taken for 0.11.0 yet, so the <b>Cost</b> panel predates the per-pod right-sizing table and the <b>Cloud</b> panel predates the burn-rate line and the IaC drift card; the rest of the console is unchanged apart from those additions. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD. There is no cloud provider behind this laptop, so the two <b>Cloud</b> panels are rendered from the application's own screenshot fixtures with a synthetic AWS identity and spend document; every other panel is the running binary. Treat the Cloud panels as a layout reference, and the release notes for what CI proves about that path against a real metadata service.
             </p>
           </div>
         </div>
@@ -266,7 +266,7 @@
 
     <footer class="site-footer">
       <div class="wrap footer-inner">
-        <span>Syspeek 0.10.0. MIT license.</span>
+        <span>Syspeek 0.11.0. MIT license.</span>
         <span class="footer-links">
           <a href="https://github.com/codeafridi/Syspeek" rel="noopener">GitHub</a>
           <a href="https://github.com/codeafridi/Syspeek/releases" rel="noopener">Releases</a>
