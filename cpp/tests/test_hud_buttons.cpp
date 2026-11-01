@@ -1025,9 +1025,14 @@ int main(int argc, char *argv[]) {
         rule.author = QStringLiteral("ops");
         rule.comment = QStringLiteral("snoozed");
         panel->setSilences({rule});
+        // A countdown, not an exact minute: the fixture ends ten minutes out
+        // and the panel reads the clock again a few milliseconds later, so
+        // "10m left" tips to "9m left" depending on where the read lands
+        // (this failed a release build while the matrix was green). The exact
+        // arithmetic is asserted on formatSilenceRemaining() with fixed input.
         check(silenceSummary->text().contains(QStringLiteral("1 active"))
                   && silenceList->text().contains(QStringLiteral("host_cpu"))
-                  && silenceList->text().contains(QStringLiteral("10m left")),
+                  && silenceList->text().contains(QStringLiteral("m left")),
               "panel renders an authored silence with its remaining time");
 
         Alert silencedAlert;
