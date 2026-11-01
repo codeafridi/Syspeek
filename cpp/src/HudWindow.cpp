@@ -286,6 +286,12 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::serviceRestartRequested);
     connect(m_panel, &DashboardPanel::containerActionRequested, this,
             &HudWindow::containerActionRequested);
+    connect(m_panel, &DashboardPanel::timelineFocusRequested, this,
+            &HudWindow::focusTimeline);
+    connect(m_panel, &DashboardPanel::timelineFocusCleared, this, [this]() {
+        m_timelineFocusMs = 0;
+        publishTimeline();
+    });
     m_panel->setVisible(false);
     pagesLayout->addWidget(m_compactPage);
     pagesLayout->addWidget(m_panel);
@@ -332,6 +338,14 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     if (m_historyLog.isOpen()) {
         m_historyLog.append(historyRecordFrom(m_exportRows.last()));
         publishHistory();
+    }
+    // The event page is republished on a slow cadence so "12s ago" stays
+    // true without rebuilding rows on every tick; new events pull that
+    // forward exactly once.
+    ++m_timelineTick;
+    if (m_timelineDirty || m_timelineTick % 5 == 0) {
+        publishTimeline();
+        m_timelineDirty = false;
     }
 
     if (m_appValue->text() != snapshot.appName) {
@@ -391,6 +405,14 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
         m_alertInput.batteryPercent = lowestCharge;
     } else {
         m_alertInput.batteryValid = false;
+    }
+    // M88: the billed-spend burn rate is a monitor input like any other; a
+    // host with no billed spend leaves it invalid and the rule never fires.
+    if (snapshot.cloud.burn.valid) {
+        m_alertInput.cloudBurnValid = true;
+        m_alertInput.cloudBurnUsdHour = snapshot.cloud.burn.currentPerHour;
+    } else {
+        m_alertInput.cloudBurnValid = false;
     }
     if (snapshot.kernelLimits.available && snapshot.kernelLimits.fdMax > 0) {
         m_alertInput.kernelFdValid = true;
@@ -474,9 +496,16 @@ void HudWindow::setDockerSnapshot(const DockerSnapshot &snapshot) {
         }
     }
 
+    // M88: accumulated low-activity state per container. The tracker needs the
+    // per-tick sample, so it lives here where the docker snapshot lands.
+    m_idleContainers.update(snapshot.containers,
+                            QDateTime::currentMSecsSinceEpoch());
     if (m_panel != nullptr) {
         m_panel->setDockerSnapshot(snapshot);
+        m_panel->setIdleContainers(m_idleContainers.idle(),
+                                   m_idleContainers.limits());
     }
+    emit idleContainersChanged(m_idleContainers.idleCount());
 }
 
 void HudWindow::toggleDockerDetails() {
@@ -537,6 +566,29 @@ void HudWindow::setKubeSnapshot(const KubeSnapshot &snapshot) {
     m_alertInput.k8sValid = snapshot.state == KubeState::Ok;
     m_alertInput.k8sIssues = snapshot.issueCount + snapshot.eventCount;
     evaluateAlerts();
+
+    int recorded = 0;
+    for (const KubeChange &change : snapshot.timeline) {
+        const QString key = QStringLiteral("kube:%1:%2:%3:%4")
+                                .arg(change.atMs)
+                                .arg(change.ns, change.object, change.summary);
+        if (!eventFirstSeen(key)) {
+            continue;
+        }
+        if (++recorded > 12) {
+            break;
+        }
+        TimelineEvent event;
+        event.kind = TimelineKind::Kubernetes;
+        event.atMs = change.atMs;
+        event.severity = TimelineSeverity::Info;
+        event.subject = QStringLiteral("kube:%1/%2")
+                            .arg(change.ns, change.object);
+        event.title = change.summary;
+        event.tags = {QStringLiteral("kind:%1").arg(change.kind),
+                      QStringLiteral("ns:%1").arg(change.ns)};
+        recordEvent(event);
+    }
 }
 
 void HudWindow::setServicesSnapshot(const ServicesSnapshot &snapshot) {
@@ -546,6 +598,26 @@ void HudWindow::setServicesSnapshot(const ServicesSnapshot &snapshot) {
     m_alertInput.servicesValid = snapshot.available;
     m_alertInput.servicesFailed = snapshot.failedCount;
     evaluateAlerts();
+
+    int recorded = 0;
+    for (const ServiceChange &change : snapshot.changes) {
+        const QString key =
+            QStringLiteral("unit:%1:%2:%3").arg(change.atMs).arg(change.unit,
+                                                            change.summary);
+        if (!eventFirstSeen(key)) {
+            continue;
+        }
+        if (++recorded > 12) {
+            break;
+        }
+        TimelineEvent event;
+        event.kind = TimelineKind::Service;
+        event.atMs = change.atMs;
+        event.severity = TimelineSeverity::Warning;
+        event.subject = QStringLiteral("unit:") + change.unit;
+        event.title = change.summary;
+        recordEvent(event);
+    }
 }
 
 void HudWindow::setJournalSnapshot(const JournalSnapshot &snapshot) {
@@ -615,6 +687,34 @@ void HudWindow::setSyntheticSnapshot(const SyntheticSnapshot &snapshot) {
     if (m_panel != nullptr) {
         m_panel->setSyntheticSnapshot(snapshot);
     }
+    // Only transitions matter: a check that has been failing for an hour is
+    // one event, not sixty.
+    for (const ProbeResult &probe : snapshot.results) {
+        const QString state = probe.success ? QStringLiteral("up")
+                                            : QStringLiteral("down");
+        const QString previous = m_checkStates.value(probe.url);
+        if (previous == state) {
+            continue;
+        }
+        m_checkStates.insert(probe.url, state);
+        TimelineEvent event;
+        event.kind = TimelineKind::Synthetic;
+        event.atMs = probe.atMs;
+        event.severity = probe.success ? TimelineSeverity::Ok
+                                       : TimelineSeverity::Error;
+        event.subject = QStringLiteral("check:") + probe.url;
+        if (probe.success) {
+            event.title = QStringLiteral("%1 up again (%2 ms)")
+                              .arg(probe.url)
+                              .arg(probe.totalMs, 0, 'f', 0);
+        } else {
+            event.title = QStringLiteral("%1 down").arg(probe.url);
+            event.detail = probe.error.isEmpty()
+                ? QStringLiteral("HTTP %1").arg(probe.status)
+                : probe.error;
+        }
+        recordEvent(event);
+    }
 }
 
 void HudWindow::setTraceSnapshot(const TraceSnapshot &snapshot) {
@@ -650,6 +750,37 @@ void HudWindow::setTlsSnapshot(const TlsSnapshot &snapshot) {
 void HudWindow::setFimSnapshot(const FimSnapshot &snapshot) {
     if (m_panel != nullptr) {
         m_panel->setFimSnapshot(snapshot);
+    }
+    // The FIM snapshot replays its bounded change list on every rescan; the
+    // seen set keeps one event per actual change (kind + path + instant).
+    int recorded = 0;
+    for (const FimChange &change : snapshot.changes) {
+        const QString key = QStringLiteral("fim:%1:%2:%3")
+                                .arg(int(change.kind))
+                                .arg(change.path)
+                                .arg(change.atMs);
+        if (!eventFirstSeen(key)) {
+            continue;
+        }
+        if (++recorded > 12) {
+            break;
+        }
+        TimelineEvent event;
+        event.kind = TimelineKind::FileChange;
+        event.atMs = change.atMs;
+        event.severity = change.kind == FimChangeKind::Metadata
+            ? TimelineSeverity::Info
+            : TimelineSeverity::Warning;
+        event.subject = QStringLiteral("file:") + change.path;
+        event.title = fimChangeKindText(change.kind) + QLatin1Char(' ')
+            + change.path;
+        if (!change.oldPath.isEmpty() && change.oldPath != change.path) {
+            event.detail = QStringLiteral("from %1").arg(change.oldPath);
+        }
+        if (!change.hash.isEmpty()) {
+            event.tags.append(QStringLiteral("sha:%1").arg(change.hash));
+        }
+        recordEvent(event);
     }
 }
 
@@ -738,6 +869,111 @@ void HudWindow::seekHistory(int index) {
     publishHistory();
 }
 
+// ---------------------------------------------------------------------------
+// M86 event stream
+// ---------------------------------------------------------------------------
+
+void HudWindow::setTimelineConfig(bool enabled, int capacity, bool markers,
+                                  int windowSeconds) {
+    m_eventsEnabled = enabled;
+    m_eventCapacity = qMax(50, capacity);
+    m_eventMarkers = markers;
+    m_timelineWindowMs = qint64(qMax(10, windowSeconds)) * 1000;
+    while (m_events.size() > m_eventCapacity) {
+        m_events.removeFirst();
+    }
+    publishTimeline();
+}
+
+bool HudWindow::eventFirstSeen(const QString &key) {
+    if (key.isEmpty()) {
+        return true;
+    }
+    if (m_eventSeen.contains(key)) {
+        return false;
+    }
+    m_eventSeen.insert(key);
+    // The seen set only exists to stop a resampled snapshot from replaying
+    // the same change; it is bounded so a long run cannot grow it forever.
+    if (m_eventSeen.size() > 8192) {
+        m_eventSeen.clear();
+        m_eventSeen.insert(key);
+    }
+    return true;
+}
+
+void HudWindow::recordEvent(const TimelineEvent &event) {
+    if (!m_eventsEnabled) {
+        return;
+    }
+    TimelineEvent copy = event;
+    if (copy.atMs <= 0) {
+        copy.atMs = QDateTime::currentMSecsSinceEpoch();
+    }
+    timelineAppend(m_events, copy, m_eventCapacity);
+    if (copy.severity == TimelineSeverity::Error
+        || copy.severity == TimelineSeverity::Warning) {
+        qInfo().noquote() << QStringLiteral("[timeline]")
+                          << timelineRowText(copy, copy.atMs);
+    }
+    // Publishes are coalesced into the tick: a FIM burst can produce a dozen
+    // events at once, and each publish rebuilds the row list and re-pushes
+    // the chart ticks for every chart.
+    m_timelineDirty = true;
+}
+
+void HudWindow::noteActionEvent(TimelineKind kind, const QString &subject,
+                                const QString &title, const QString &detail,
+                                bool ok) {
+    TimelineEvent event;
+    event.kind = kind;
+    event.severity = ok ? TimelineSeverity::Info : TimelineSeverity::Warning;
+    event.subject = subject;
+    event.title = title;
+    event.detail = detail;
+    event.tags = {timelineKindName(kind),
+                  ok ? QStringLiteral("result:ok")
+                     : QStringLiteral("result:failed")};
+    recordEvent(event);
+}
+
+void HudWindow::focusTimeline(qint64 atMs) {
+    m_timelineFocusMs = atMs > 0 ? atMs : 0;
+    publishTimeline();
+    if (m_panel != nullptr) {
+        m_panel->showTimeline();
+    }
+}
+
+void HudWindow::publishTimeline() {
+    if (m_panel == nullptr) {
+        return;
+    }
+    TimelineViewInfo info;
+    info.enabled = m_eventsEnabled;
+    info.markers = m_eventMarkers;
+    info.capacity = m_eventCapacity;
+    info.count = int(m_events.size());
+    if (!m_events.isEmpty()) {
+        info.oldestMs = m_events.constFirst().atMs;
+        info.newestMs = m_events.constLast().atMs;
+    }
+    // Newest first for the list; the ring itself stays in arrival order.
+    const int displayCap = 240;
+    for (int i = m_events.size() - 1;
+         i >= 0 && info.events.size() < displayCap; --i) {
+        info.events.append(m_events.at(i));
+    }
+    if (m_timelineFocusMs > 0) {
+        info.focus = true;
+        info.focusMs = m_timelineFocusMs;
+        info.focusWindowMs = m_timelineWindowMs;
+        info.focusEvents = timelineNear(m_events, m_timelineFocusMs,
+                                        m_timelineWindowMs, 200);
+    }
+    m_panel->setTimeline(info);
+}
+
 void HudWindow::setSettingsInfo(const SettingsInfo &info) {
     if (m_panel != nullptr) {
         m_panel->setSettingsInfo(info);
@@ -748,6 +984,8 @@ void HudWindow::setMonitors(const QList<AlertRule> &rules) {
     for (const AlertRule &rule : rules) {
         m_alerts.setRuleThreshold(rule.id, rule.threshold);
         m_alerts.setRuleSustained(rule.id, rule.sustained);
+        m_alerts.setRuleCorrelation(rule.id, rule.group, rule.owner,
+                                    rule.groupWaitMs, rule.repeatIntervalMs);
     }
     if (m_panel != nullptr) {
         m_panel->setMonitors(rules);
@@ -785,6 +1023,9 @@ void HudWindow::applyProcessAction(const ProcessAction &action) {
     const bool ok = systemBackend().applyProcessAction(action, &error);
     const QString text = processActionResultText(action, ok, error);
     m_panel->setActionStatus(text, ok);
+    noteActionEvent(TimelineKind::ProcessAction,
+                    QStringLiteral("pid:%1").arg(action.pid),
+                    processActionLabel(action), text, ok);
     if (ok) {
         qInfo().noquote() << QStringLiteral("[actions]") << text;
     } else {
@@ -885,14 +1126,84 @@ void HudWindow::evaluateAlerts() {
         }
     }
 
+    // M87: correlate before anything goes out, so flap state is known.
+    m_incidents.update(loudActive, m_alerts.rules(), now);
+    const QSet<QString> flapping = m_incidents.flappingRules();
+    // Flap suppression holds only the OUTBOUND path - the incident row and the
+    // Alerts page keep showing the breach (the same split silences use).
+    for (auto it = loudFired.begin(); it != loudFired.end();) {
+        if (flapping.contains(it->id)) {
+            it = loudFired.erase(it);
+        } else {
+            ++it;
+        }
+    }
     if (m_webhook != nullptr) {
         m_webhook->processEvents(loudFired, loudActive, now);
     }
+    // The notification ledger: group_wait holds the first note for a new
+    // group, repeat_interval gates the repeats - both land on the incident
+    // rows the Incidents page renders.
+    m_incidents.dueNotifications(now);
+    const QList<Incident> incidents = m_incidents.incidents();
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
-        m_incidents.update(loudActive, now);
-        m_panel->setIncidents(m_incidents.incidents());
+        m_panel->setIncidents(incidents);
     }
+    AlertExposure exposure;
+    exposure.pushed = true;
+    exposure.flappingRules = flapping.size();
+    for (const Incident &incident : incidents) {
+        if (incident.status != QStringLiteral("open")) {
+            continue;
+        }
+        ++exposure.openIncidents;
+        if (incident.flapping) {
+            ++exposure.flappingIncidents;
+        }
+        if (incident.owner.isEmpty()) {
+            ++exposure.unownedOpen;
+        }
+    }
+    emit alertStateChanged(exposure);
+
+    // Event stream: the engine only reports transitions, so a fired alert is
+    // exactly one event and a monitor that stops breaching is exactly one
+    // recovery. A silenced breach is still a fact - it happened - so it is
+    // recorded and tagged rather than hidden.
+    for (const Alert &alert : fired) {
+        TimelineEvent event;
+        event.kind = TimelineKind::Alert;
+        event.severity = timelineSeverityFromText(alert.severity);
+        event.subject = QStringLiteral("monitor:") + alert.id;
+        event.title = alert.title;
+        event.detail = alert.detail;
+        event.tags = {QStringLiteral("monitor:%1").arg(alert.id),
+                      QStringLiteral("severity:%1").arg(alert.severity)};
+        if (activeSilenceFor(m_silences, alert.id, now) != nullptr) {
+            event.tags.append(QStringLiteral("silenced"));
+        }
+        if (flapping.contains(alert.id)) {
+            event.tags.append(QStringLiteral("flapping"));
+        }
+        recordEvent(event);
+    }
+    QSet<QString> activeIds;
+    for (const Alert &alert : active) {
+        activeIds.insert(alert.id);
+    }
+    for (const QString &id : m_activeAlertIds) {
+        if (!activeIds.contains(id)) {
+            TimelineEvent event;
+            event.kind = TimelineKind::Alert;
+            event.severity = TimelineSeverity::Ok;
+            event.subject = QStringLiteral("monitor:") + id;
+            event.title = QStringLiteral("%1 recovered").arg(id);
+            event.tags = {QStringLiteral("monitor:%1").arg(id)};
+            recordEvent(event);
+        }
+    }
+    m_activeAlertIds = activeIds;
 }
 
 void HudWindow::toggleKubeDetails() {

@@ -48,9 +48,29 @@ WebhookEvent eventFor(const Alert &alert, const QString &status,
     event.detail = alert.detail;
     event.severity = alert.severity;
     event.status = status;
+    event.group = alert.group.isEmpty() ? alert.id : alert.group;
+    event.owner = alert.owner;
     event.startsAtMs = startsAtMs > 0 ? startsAtMs : alert.atMs;
     event.endsAtMs = endsAtMs;
     return event;
+}
+
+// Alertmanager's groupKey is the encoded group-label set; a batch that folds
+// under one key carries it, a mixed batch falls back to the receiver name.
+QString batchGroupKey(const QList<WebhookEvent> &events) {
+    if (events.isEmpty()) {
+        return QStringLiteral("syspeek");
+    }
+    const QString group = events.first().group.trimmed();
+    if (group.isEmpty()) {
+        return QStringLiteral("syspeek");
+    }
+    for (const WebhookEvent &event : events) {
+        if (event.group != events.first().group) {
+            return QStringLiteral("syspeek");
+        }
+    }
+    return group;
 }
 
 } // namespace
@@ -61,6 +81,9 @@ QByteArray alertmanagerWebhookPayload(const QList<WebhookEvent> &events) {
         QJsonObject labels{
             {QStringLiteral("alertname"), event.id},
             {QStringLiteral("severity"), event.severity},
+            {QStringLiteral("group"), event.group},
+            {QStringLiteral("owner"),
+             event.owner.isEmpty() ? QStringLiteral("unowned") : event.owner},
             {QStringLiteral("source"), QStringLiteral("syspeek")}};
         QJsonObject annotations{
             {QStringLiteral("summary"), event.title},
@@ -76,18 +99,35 @@ QByteArray alertmanagerWebhookPayload(const QList<WebhookEvent> &events) {
         alerts.append(alert);
     }
 
+    const QString groupKey = batchGroupKey(events);
+    QJsonObject groupLabels;
+    groupLabels.insert(QStringLiteral("group"), groupKey);
+    QJsonObject commonLabels{
+        {QStringLiteral("source"), QStringLiteral("syspeek")}};
+    bool sameOwner = !events.isEmpty();
+    for (const WebhookEvent &event : events) {
+        if (event.owner != events.first().owner) {
+            sameOwner = false;
+            break;
+        }
+    }
+    if (sameOwner) {
+        commonLabels.insert(QStringLiteral("owner"),
+                            events.first().owner.isEmpty()
+                                ? QStringLiteral("unowned")
+                                : events.first().owner);
+    }
     QJsonObject message{
         {QStringLiteral("version"), QStringLiteral("4")},
-        {QStringLiteral("groupKey"), QStringLiteral("syspeek")},
+        {QStringLiteral("groupKey"), groupKey},
         {QStringLiteral("truncatedAlerts"), 0},
         {QStringLiteral("receiver"), QStringLiteral("syspeek")},
         {QStringLiteral("status"),
          events.isEmpty() ? QString()
                           : events.first().status},
         {QStringLiteral("alerts"), alerts},
-        {QStringLiteral("groupLabels"), QJsonObject{}},
-        {QStringLiteral("commonLabels"),
-         QJsonObject{{QStringLiteral("source"), QStringLiteral("syspeek")}}},
+        {QStringLiteral("groupLabels"), groupLabels},
+        {QStringLiteral("commonLabels"), commonLabels},
         {QStringLiteral("commonAnnotations"), QJsonObject{}},
         {QStringLiteral("externalURL"), QString()}};
     return QJsonDocument(message).toJson(QJsonDocument::Compact);
@@ -112,6 +152,14 @@ QByteArray slackWebhookPayload(const QList<WebhookEvent> &events) {
                         {QStringLiteral("short"), true}},
             QJsonObject{{QStringLiteral("title"), QStringLiteral("status")},
                         {QStringLiteral("value"), event.status},
+                        {QStringLiteral("short"), true}},
+            QJsonObject{{QStringLiteral("title"), QStringLiteral("owner")},
+                        {QStringLiteral("value"),
+                         event.owner.isEmpty() ? QStringLiteral("unowned")
+                                               : event.owner},
+                        {QStringLiteral("short"), true}},
+            QJsonObject{{QStringLiteral("title"), QStringLiteral("group")},
+                        {QStringLiteral("value"), event.group},
                         {QStringLiteral("short"), true}}};
         QJsonObject attachment{
             {QStringLiteral("fallback"),

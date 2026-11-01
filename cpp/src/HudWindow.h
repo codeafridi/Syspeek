@@ -23,8 +23,11 @@
 #include "TlsStatus.h"
 #include "FimStatus.h"
 #include "OverlayStatus.h"
+#include "TimelineStatus.h"
 
+#include <QHash>
 #include <QPoint>
+#include <QSet>
 #include <QRect>
 #include <QWidget>
 
@@ -76,6 +79,12 @@ public:
     void expireSilence(const QString &matcher);
 
 signals:
+    // M87: the console owns the correlation state; the scrape endpoint needs
+    // it pushed (the sampler knows nothing about alerts).
+    void alertStateChanged(const AlertExposure &state);
+    // M88: idle containers are a console-side accumulation (the docker source
+    // hands the HUD one snapshot at a time), so the count is pushed too.
+    void idleContainersChanged(int count);
     void serviceRestartRequested(const QString &unit);
     void containerActionRequested(const QString &id, const QString &verb);
 
@@ -101,6 +110,15 @@ public:
 
     void setSettingsInfo(const SettingsInfo &info);
     void setHistoryStore(const QString &path, int capacity);
+
+    // M86: the event stream. One bounded in-memory ring fed by every
+    // collector that can say "something changed".
+    void setTimelineConfig(bool enabled, int capacity, bool markers,
+                           int windowSeconds);
+    void focusTimeline(qint64 atMs);
+    void noteActionEvent(TimelineKind kind, const QString &subject,
+                         const QString &title, const QString &detail, bool ok);
+    QList<TimelineEvent> timelineEvents() const { return m_events; }
 
     // M80: the overlay's own state (session, click-through, pinned, geometry).
     // An empty path disables persistence, which is what tests use.
@@ -131,6 +149,24 @@ private:
     void toggleKubeDetails();
     void updateCompactText();
 
+    // M86 event stream.
+    void recordEvent(const TimelineEvent &event);
+    void publishTimeline();
+    bool eventFirstSeen(const QString &key);
+    void feedStructuredEvents();
+    QList<TimelineEvent> m_events;
+    QSet<QString> m_eventSeen;
+    QSet<QString> m_activeAlertIds;
+    QSet<QString> m_activeIncidentIds;
+    QHash<QString, QString> m_checkStates;
+    int m_timelineTick = 0;
+    bool m_timelineDirty = false;
+    int m_eventCapacity = 2000;
+    bool m_eventsEnabled = true;
+    bool m_eventMarkers = true;
+    qint64 m_timelineFocusMs = 0;
+    qint64 m_timelineWindowMs = 90000;
+
     QLabel *m_appValue = nullptr;
     QLabel *m_pidValue = nullptr;
     QLabel *m_cpuValue = nullptr;
@@ -160,6 +196,7 @@ private:
     QRect m_savedGeometry;
     AlertEngine m_alerts;
     IncidentTracker m_incidents;
+    IdleContainerTracker m_idleContainers;
     QList<SilenceRule> m_silences;
     QList<double> m_cpuHistory;
     QList<double> m_hostCpuHistory;

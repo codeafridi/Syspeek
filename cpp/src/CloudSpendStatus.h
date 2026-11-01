@@ -95,6 +95,31 @@ struct CloudSpendStatus {
     QList<CloudSpendDay> days;
 };
 
+// Cost burn rate: what the account is spending per hour right now, what it
+// was averaging, and what the rest of the month projects to. AWS Cost Explorer
+// ships the same idea as its anomaly surface - botocore `data/ce/2017-10-25/
+// service-2.json` `GetAnomalies`: "Retrieves all of the cost anomalies
+// detected on your account during the time period that's specified by the
+// DateInterval object. Anomalies are available for up to 90 days." with
+// `Anomaly{AnomalyId, AnomalyStartDate, AnomalyEndDate, DimensionValue,
+// RootCauses, AnomalyScore, Impact, MonitorArn, Feedback}` and
+// `AnomalyScore{MaxScore, CurrentScore}` - i.e. a score against a learned
+// baseline, which is what the ratio below stands in for (Syspeek computes it
+// locally so it needs no anomaly monitor to be configured in the account).
+struct CloudBurnRate {
+    bool valid = false;
+    double currentPerHour = -1.0;   // month to date / hours elapsed
+    double baselinePerHour = -1.0;  // trailing whole-day average
+    double projectedPerHour = -1.0; // rest of the month from the forecast
+    double ratio = -1.0;            // current / baseline
+    int severity = 0;               // 0 ok, 1 warning, 2 critical
+    QString text;
+};
+
+// ratio >= 3.0 is critical, >= 1.5 warning (the spike has to be worth paging).
+CloudBurnRate cloudBurnRate(const CloudSpendStatus &spend, qint64 nowMs);
+QString cloudBurnText(const CloudBurnRate &burn);
+
 // --- parsers (pure) ------------------------------------------------------
 CloudSpendStatus parseAwsCostAndUsage(const QByteArray &json, QString *error);
 CloudSpendStatus parseAwsCostForecast(const QByteArray &json, QString *error);

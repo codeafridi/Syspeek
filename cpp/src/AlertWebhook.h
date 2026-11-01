@@ -31,6 +31,8 @@ struct WebhookEvent {
     QString detail;
     QString severity;
     QString status; // "firing" | "resolved"
+    QString group;  // M87: the fold key the console grouped this alert under
+    QString owner;  // M87: the assignment (empty = unowned)
     qint64 startsAtMs = 0;
     qint64 endsAtMs = 0;
 };

@@ -44,7 +44,9 @@
 #include "CloudPricing.h"
 #include "CloudFleetSource.h"
 #include "CloudSpendStatus.h"
+#include "IacStatus.h"
 #include "CloudSpendSource.h"
+#include "TimelineStatus.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
 #include "ServicesSource.h"
@@ -352,6 +354,31 @@ int main(int argc, char *argv[]) {
     check(immediate.size() == 1
               && immediate.at(0).id == QStringLiteral("services_failed"),
           "alert: service failure fires immediately");
+
+    // M88: the billed-spend burn rate is a monitor input; a host with no
+    // billed spend never fires it.
+    {
+        AlertEngine burnEngine;
+        AlertInput burn;
+        burn.cloudBurnValid = true;
+        burn.cloudBurnUsdHour = 12.0;
+        burnEngine.update(burn, 10);
+        burnEngine.update(burn, 11);
+        const QList<Alert> burnFired = burnEngine.update(burn, 12);
+        check(burnFired.size() == 1
+                  && burnFired.first().id == QStringLiteral("cloud_burn")
+                  && burnFired.first().group == QStringLiteral("cost"),
+              "alert: a high burn rate fires at the sustained count");
+
+        AlertEngine quietEngine;
+        AlertInput quiet;
+        quiet.cloudBurnValid = false;
+        for (int i = 0; i < 5; ++i) {
+            quietEngine.update(quiet, 20 + i);
+        }
+        check(quietEngine.active().isEmpty(),
+              "alert: no billed spend never fires the burn rule");
+    }
 
     engine.reset();
     AlertInput memInput;
@@ -1377,7 +1404,7 @@ int main(int argc, char *argv[]) {
     }
 
     {
-        IncidentTracker tracker(5000, 10);
+        IncidentTracker tracker(5000, 10, 6, 600000);
         Alert cpu;
         cpu.id = QStringLiteral("app_cpu");
         cpu.title = QStringLiteral("Focused app CPU high");
@@ -1385,14 +1412,14 @@ int main(int argc, char *argv[]) {
         cpu.detail = QStringLiteral("95%");
         QList<Alert> alerts{cpu};
 
-        tracker.update(alerts, 100000);
+        tracker.update(alerts, defaultAlertRules(), 100000);
         QList<Incident> incidents = tracker.incidents();
         check(incidents.size() == 1
                   && incidents.first().status == QStringLiteral("open")
                   && incidents.first().count == 1,
               "incident: opened from alert");
 
-        tracker.update(alerts, 101000);
+        tracker.update(alerts, defaultAlertRules(), 101000);
         incidents = tracker.incidents();
         check(incidents.size() == 1 && incidents.first().count == 2,
               "incident: repeated alert grouped");
@@ -1403,11 +1430,11 @@ int main(int argc, char *argv[]) {
         mem.severity = QStringLiteral("warning");
         mem.detail = QStringLiteral("90%");
         alerts.append(mem);
-        tracker.update(alerts, 102000);
+        tracker.update(alerts, defaultAlertRules(), 102000);
         incidents = tracker.incidents();
         check(incidents.size() == 2, "incident: separate groups by alert id");
 
-        tracker.update({}, 102000 + 6000);
+        tracker.update({}, defaultAlertRules(), 102000 + 6000);
         incidents = tracker.incidents();
         bool allResolved = true;
         for (const Incident &incident : incidents) {
@@ -1420,6 +1447,195 @@ int main(int argc, char *argv[]) {
               "incident: summary text");
         check(incidentsDetailText(incidents).contains(QStringLiteral("resolved")),
               "incident: detail text");
+    }
+
+    // --- M87: correlation, ownership, notification cadence, flap -----------
+    {
+        const QList<AlertRule> rules = defaultAlertRules();
+        bool appCompute = false;
+        bool ownerEmpty = false;
+        for (const AlertRule &rule : rules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                appCompute = rule.group == QStringLiteral("compute");
+                ownerEmpty = rule.owner.isEmpty();
+            }
+        }
+        check(appCompute, "correlation: defaults fold app_cpu into compute");
+        check(ownerEmpty, "ownership: defaults leave the assignment unset");
+
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+        Alert hostCpu;
+        hostCpu.id = QStringLiteral("host_cpu");
+        hostCpu.title = QStringLiteral("Host CPU high");
+        hostCpu.severity = QStringLiteral("warning");
+        hostCpu.detail = QStringLiteral("91.0%");
+        hostCpu.group = QStringLiteral("compute");
+        Alert disk;
+        disk.id = QStringLiteral("disk");
+        disk.title = QStringLiteral("Low disk space");
+        disk.severity = QStringLiteral("warning");
+        disk.detail = QStringLiteral("9.0% free");
+        disk.group = QStringLiteral("capacity");
+
+        IncidentTracker folded(60000, 10, 6, 600000);
+        folded.update({cpu}, rules, 1000);
+        folded.update({cpu, hostCpu}, rules, 2000);
+        folded.update({cpu, hostCpu, disk}, rules, 3000);
+        const QList<Incident> rows = folded.incidents();
+        check(rows.size() == 2, "correlation: two groups make two incidents");
+        int computeRow = -1;
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows.at(i).groupKey == QStringLiteral("compute")) {
+                computeRow = i;
+            }
+        }
+        check(computeRow >= 0 && rows.at(computeRow).rules.size() == 2
+                  && rows.at(computeRow).count == 5,
+              "correlation: grouped rules fold onto one row and count");
+        check(computeRow >= 0
+                  && rows.at(computeRow).severity == QStringLiteral("critical")
+                  && rows.at(computeRow).title
+                         == QStringLiteral("Focused app CPU high"),
+              "correlation: the most severe folded alert names the row");
+
+        QList<AlertRule> owned = defaultAlertRules();
+        for (AlertRule &rule : owned) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.owner = QStringLiteral("platform");
+            }
+        }
+        IncidentTracker tracker(60000, 10, 6, 600000);
+        tracker.update({cpu}, owned, 1000);
+        check(tracker.incidents().first().owner == QStringLiteral("platform"),
+              "ownership: the rule owner lands on the incident");
+        check(incidentsDetailText(tracker.incidents())
+                  .contains(QStringLiteral("owner platform")),
+              "ownership: the detail names the owner");
+        IncidentTracker unowned(60000, 10, 6, 600000);
+        unowned.update({cpu}, rules, 1000);
+        check(incidentsDetailText(unowned.incidents())
+                  .contains(QStringLiteral("owner unowned")),
+              "ownership: an unassigned incident says unowned");
+    }
+
+    {
+        // Alertmanager cadence: group_wait holds the first note, repeat_interval
+        // gates the next, and a batch key reflects the fold.
+        const QList<AlertRule> rules = defaultAlertRules();
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+
+        IncidentTracker tracker(60000, 10, 6, 600000);
+        tracker.update({cpu}, rules, 0);
+        check(tracker.dueNotifications(1000).isEmpty(),
+              "notify: group_wait holds the first notification");
+        check(tracker.dueNotifications(6000).size() == 1,
+              "notify: group_wait elapses, the group notifies once");
+        check(tracker.dueNotifications(10000).isEmpty(),
+              "notify: repeat_interval gates the next notification");
+        check(tracker.dueNotifications(306000).size() == 1,
+              "notify: the default repeat_interval re-notifies at 5 min");
+
+        QList<AlertRule> fast = defaultAlertRules();
+        for (AlertRule &rule : fast) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.groupWaitMs = 1000;
+                rule.repeatIntervalMs = 30000;
+            }
+        }
+        IncidentTracker quick(60000, 10, 6, 600000);
+        quick.update({cpu}, fast, 0);
+        check(quick.dueNotifications(2000).size() == 1,
+              "notify: a 1s group_wait notifies quickly");
+        check(quick.dueNotifications(10000).isEmpty(),
+              "notify: the configured 30s repeat holds at 10s");
+        check(quick.dueNotifications(33000).size() == 1,
+              "notify: the configured 30s repeat fires at 33s");
+
+        // M87: the correlation state reaches /metrics, but only once the
+        // console has actually reported.
+        DisplaySnapshot scrape;
+        scrape.hostAvailable = true;
+        scrape.hostCpuPercent = 12.0;
+        check(!prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_incidents_open")),
+              "prometheus: no incident gauges before the console reports");
+        scrape.alerts.pushed = true;
+        scrape.alerts.openIncidents = 2;
+        scrape.alerts.flappingIncidents = 1;
+        scrape.alerts.flappingRules = 1;
+        scrape.alerts.unownedOpen = 1;
+        const QString exposition = prometheusText(scrape);
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_open 2")),
+              "prometheus: open incident gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_flapping 1")),
+              "prometheus: flapping incident gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_alerts_flapping 1")),
+              "prometheus: flapping rule gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_unowned 1")),
+              "prometheus: unowned incident gauge");
+
+        const QString detail =
+            tracker.incidents().isEmpty()
+                ? QString()
+                : tracker.incidents().first().timeline.join(QLatin1Char('\n'));
+        check(detail.contains(QStringLiteral("notified")),
+              "notify: the incident timeline records the notification");
+    }
+
+    {
+        const QList<AlertRule> rules = defaultAlertRules();
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+
+        IncidentTracker flapper(60000, 10, 6, 600000);
+        qint64 now = 0;
+        for (int i = 0; i < 12; ++i) {
+            flapper.update(i % 2 == 0 ? QList<Alert>{cpu} : QList<Alert>{},
+                           rules, now);
+            now += 1000;
+        }
+        check(flapper.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: repeated transitions mark the rule flapping");
+        check(incidentsSummaryText(flapper.incidents())
+                  .contains(QStringLiteral("flapping")),
+              "flap: the summary counts flapping rows");
+        check(incidentsDetailText(flapper.incidents())
+                  .contains(QStringLiteral("FLAPPING")),
+              "flap: the detail shows the flapping marker");
+
+        IncidentTracker quiet(60000, 10, 6, 600000);
+        quiet.update({cpu}, rules, 0);
+        quiet.update({cpu}, rules, 1000);
+        check(!quiet.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: a steady breach is not flapping");
+
+        IncidentTracker slow(60000, 10, 3, 10000);
+        qint64 sparse = 0;
+        for (int i = 0; i < 6; ++i) {
+            slow.update(i % 2 == 0 ? QList<Alert>{cpu} : QList<Alert>{}, rules,
+                        sparse);
+            sparse += 20000;
+        }
+        check(!slow.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: transitions outside the window do not count");
     }
 
     {
@@ -1896,6 +2112,216 @@ int main(int argc, char *argv[]) {
 #endif
     }
 
+    // --- M91: terraform state vs the account listing ------------------------
+    {
+        // `terraform show -json` shape: a root resource, a child module, and a
+        // data source that must not be counted as an asset.
+        const QByteArray state = R"({
+          "format_version": "1.0",
+          "terraform_version": "1.9.8",
+          "values": {
+            "root_module": {
+              "resources": [
+                {"address": "aws_instance.web", "mode": "managed",
+                 "type": "aws_instance", "name": "web",
+                 "provider_name": "registry.terraform.io/hashicorp/aws",
+                 "schema_version": 1,
+                 "values": {"id": "i-0aaa"}},
+                {"address": "data.aws_ami.ubuntu", "mode": "data",
+                 "type": "aws_ami", "name": "ubuntu",
+                 "values": {"id": "ami-123"}}
+              ],
+              "child_modules": [
+                {"address": "module.db",
+                 "resources": [
+                   {"address": "module.db.aws_db_instance.main",
+                    "mode": "managed", "type": "aws_db_instance",
+                    "name": "main",
+                    "provider_name": "registry.terraform.io/hashicorp/aws",
+                    "values": {"id": "db-1"}}
+                 ]}
+              ]
+            }
+          }
+        })";
+        QString error;
+        const QList<IacResource> parsed = iacParseTerraformState(state, &error);
+        check(error.isEmpty() && parsed.size() == 2,
+              "iac: the show -json shape parses, data sources excluded");
+        check(parsed.at(0).address == QStringLiteral("aws_instance.web")
+                  && parsed.at(0).id == QStringLiteral("i-0aaa")
+                  && parsed.at(0).provider.contains(QStringLiteral("hashicorp/aws")),
+              "iac: a root resource keeps its address, id and provider");
+        check(parsed.at(1).address
+                      == QStringLiteral("module.db.aws_db_instance.main")
+                  && parsed.at(1).id == QStringLiteral("db-1"),
+              "iac: a child module resource is found and addressed");
+
+        // Raw .tfstate shape.
+        const QByteArray raw = R"({
+          "version": 4, "terraform_version": "1.9.8",
+          "resources": [
+            {"mode": "managed", "type": "aws_instance", "name": "api",
+             "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+             "instances": [{"attributes": {"id": "i-0bbb"}}]}
+          ]
+        })";
+        const QList<IacResource> rawParsed =
+            iacParseTerraformState(raw, &error);
+        check(rawParsed.size() == 1
+                  && rawParsed.first().id == QStringLiteral("i-0bbb")
+                  && rawParsed.first().name == QStringLiteral("api"),
+              "iac: the raw .tfstate shape parses via instances[].attributes");
+
+        QString badError;
+        check(iacParseTerraformState("{ not json", &badError).isEmpty()
+                  && !badError.isEmpty(),
+              "iac: a malformed document is refused with a reason");
+        QString emptyError;
+        check(iacParseTerraformState("{}", &emptyError).isEmpty()
+                  && !emptyError.isEmpty(),
+              "iac: a document with no state is refused");
+
+        // Diff: one resource in both, one deleted out of band, one created.
+        QList<IacResource> cloud;
+        IacResource same;
+        same.id = QStringLiteral("i-0aaa");
+        same.name = QStringLiteral("web");
+        same.type = QStringLiteral("aws_instance");
+        cloud.append(same);
+        IacResource stray;
+        stray.id = QStringLiteral("i-0ccc");
+        stray.name = QStringLiteral("manually-made");
+        stray.type = QStringLiteral("t3.micro");
+        cloud.append(stray);
+
+        IacResource gone;
+        gone.address = QStringLiteral("module.db.aws_db_instance.main");
+        gone.id = QStringLiteral("db-1");
+        gone.name = QStringLiteral("main");
+        gone.type = QStringLiteral("aws_db_instance");
+        const IacDrift drift = iacDiff({parsed.at(0), gone}, cloud);
+        check(drift.available && drift.inSync == 1
+                  && drift.missing.size() == 1
+                  && drift.missing.first().id == QStringLiteral("db-1"),
+              "iac: a state resource absent from the account is missing");
+        check(drift.unmanaged.size() == 1
+                  && drift.unmanaged.first().id == QStringLiteral("i-0ccc"),
+              "iac: an account resource absent from the state is unmanaged");
+
+        const QString summary = iacSummaryText(drift);
+        check(summary.contains(QStringLiteral("2 state resource(s) vs 2 listed"))
+                  && summary.contains(QStringLiteral("1 in sync"))
+                  && summary.contains(QStringLiteral("1 missing"))
+                  && summary.contains(QStringLiteral("1 unmanaged")),
+              "iac: the summary counts every bucket");
+        const QString detail = iacDriftText(drift);
+        check(detail.contains(QStringLiteral("MISSING"))
+                  && detail.contains(QStringLiteral("UNMANAGED"))
+                  && detail.contains(QStringLiteral("deleted out of band")),
+              "iac: the detail names both drift directions");
+
+        // Name fallback for a state that exposes no id.
+        IacResource noId;
+        noId.name = QStringLiteral("web");
+        noId.type = QStringLiteral("aws_instance");
+        const IacDrift byName = iacDiff({noId}, cloud);
+        check(byName.inSync == 1 && byName.missing.isEmpty(),
+              "iac: a state row without an id matches the account by name");
+
+        check(iacDriftText(iacDiff(cloud, cloud))
+                  .contains(QStringLiteral("no drift")),
+              "iac: a clean state says no drift");
+        check(iacGateText(QString()).contains(
+                  QStringLiteral("terraform_state")),
+              "iac: the unset gate names the config key");
+        check(iacGateText(QStringLiteral("/tmp/tf.json"))
+                  .contains(QStringLiteral("terraform show -json")),
+              "iac: the unreadable gate names the command");
+        check(iacSettingsLine(QStringLiteral("/tmp/tf.json"), drift)
+                  .contains(QStringLiteral("1 unmanaged")),
+              "iac: the settings line carries the counts");
+    }
+
+    // --- M88: cost burn rate against the account's own baseline ------------
+    {
+        // 2026-11-15T12:00Z: 14 whole days plus 12 hours into the month.
+        const qint64 nowMs = QDateTime(QDate(2026, 11, 15), QTime(12, 0),
+                                       QTimeZone(QByteArrayLiteral("UTC")))
+                                 .toMSecsSinceEpoch();
+        CloudSpendStatus spend;
+        spend.available = true;
+        spend.monthToDateUsd = 420.0;
+        for (int day = 1; day <= 14; ++day) {
+            CloudSpendDay row;
+            row.date = QDate(2026, 11, day).toString(Qt::ISODate);
+            row.usd = 24.0;   // $1/h across a whole day
+            spend.days.append(row);
+        }
+        spend.days.append({QDate(2026, 11, 15).toString(Qt::ISODate), 12.0});
+        spend.forecastUsd = 900.0;
+
+        const CloudBurnRate burn = cloudBurnRate(spend, nowMs);
+        // 348 h elapsed (14 x 24 + 12) -> 420 / 348
+        check(burn.valid
+                  && std::fabs(burn.currentPerHour - 420.0 / 348.0) < 1e-6,
+              "burn: current rate is month to date over the elapsed hours");
+        check(std::fabs(burn.baselinePerHour - 1.0) < 1e-9,
+              "burn: the baseline is the mean whole day, today excluded");
+        check(std::fabs(burn.ratio - (420.0 / 348.0)) < 1e-6
+                  && burn.severity == 0,
+              "burn: 1.21x baseline stays below the warning band");
+
+        CloudSpendStatus warm = spend;
+        warm.monthToDateUsd = 560.0;   // 1.61x the $1/h baseline
+        check(cloudBurnRate(warm, nowMs).severity == 1,
+              "burn: 1.6x baseline is the warning band");
+        check(burn.projectedPerHour > 0.0,
+              "burn: the forecast projects a rest-of-month rate");
+        check(burn.text.contains(QStringLiteral("baseline"))
+                  && burn.text.contains(QStringLiteral("x")),
+              "burn: the text states the rate, the baseline and the ratio");
+
+        CloudSpendStatus spike = spend;
+        for (CloudSpendDay &day : spike.days) {
+            day.usd = 4.0;   // $0.167/h baseline
+        }
+        const CloudBurnRate sharp = cloudBurnRate(spike, nowMs);
+        check(sharp.severity == 2,
+              "burn: 5x baseline is critical");
+
+        CloudSpendStatus todayOnly;
+        todayOnly.available = true;
+        todayOnly.monthToDateUsd = 9.0;
+        todayOnly.days = {{QDate(2026, 11, 15).toString(Qt::ISODate), 9.0}};
+        const CloudBurnRate flat = cloudBurnRate(todayOnly, nowMs);
+        check(flat.valid && flat.ratio == 1.0 && flat.severity == 0,
+              "burn: only today's row means the baseline is the current rate");
+
+        CloudSpendStatus none;
+        check(!cloudBurnRate(none, nowMs).valid,
+              "burn: no billed spend is invalid, not zero");
+        check(cloudBurnText(CloudBurnRate{})
+                  .contains(QStringLiteral("no billed spend yet")),
+              "burn: the invalid state says why");
+
+        DisplaySnapshot scrape;
+        check(!prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_cloud_burn_usd_hour")),
+              "prometheus: no burn gauge without billed spend");
+        scrape.cloud.burn = burn;
+        const QString text = prometheusText(scrape);
+        check(text.contains(QStringLiteral("syspeek_cloud_burn_usd_hour "))
+                  && text.contains(QStringLiteral("syspeek_cloud_burn_ratio ")),
+              "prometheus: the burn gauge and ratio are exported");
+        check(!text.contains(QStringLiteral("syspeek_idle_containers")),
+              "prometheus: idle containers absent until the console reports");
+        scrape.idleContainers = 2;
+        check(prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_idle_containers 2")),
+              "prometheus: the idle container gauge is exported");
+    }
+
     // --- alert webhooks (M69): payload schema grounded on Alertmanager 0.34.1
     {
         WebhookEvent firing;
@@ -1904,6 +2330,8 @@ int main(int argc, char *argv[]) {
         firing.detail = QStringLiteral("cursor cpu 96.0% >= 90%");
         firing.severity = QStringLiteral("critical");
         firing.status = QStringLiteral("firing");
+        firing.group = QStringLiteral("compute");
+        firing.owner = QStringLiteral("platform");
         firing.startsAtMs = 1700000000000LL;
 
         const QJsonObject generic =
@@ -1914,6 +2342,9 @@ int main(int argc, char *argv[]) {
               "webhook: generic payload version 4");
         check(!generic.value(QStringLiteral("groupKey")).toString().isEmpty(),
               "webhook: generic groupKey present");
+        check(generic.value(QStringLiteral("groupKey")).toString()
+                  == QStringLiteral("compute"),
+              "webhook: groupKey carries the fold key");
         check(generic.value(QStringLiteral("truncatedAlerts")).toInt() == 0,
               "webhook: generic truncatedAlerts 0");
         check(generic.value(QStringLiteral("receiver")).toString()
@@ -1940,6 +2371,36 @@ int main(int argc, char *argv[]) {
         check(labels.value(QStringLiteral("severity")).toString()
                   == QStringLiteral("critical"),
               "webhook: label severity");
+        check(labels.value(QStringLiteral("group")).toString()
+                  == QStringLiteral("compute"),
+              "webhook: label group");
+        check(labels.value(QStringLiteral("owner")).toString()
+                  == QStringLiteral("platform"),
+              "webhook: label owner");
+        check(generic.value(QStringLiteral("groupLabels"))
+                      .toObject()
+                      .value(QStringLiteral("group"))
+                      .toString()
+                  == QStringLiteral("compute"),
+              "webhook: groupLabels carry the fold key");
+        check(generic.value(QStringLiteral("commonLabels"))
+                      .toObject()
+                      .value(QStringLiteral("owner"))
+                      .toString()
+                  == QStringLiteral("platform"),
+              "webhook: commonLabels carry the assignment");
+        {
+            WebhookEvent other = firing;
+            other.id = QStringLiteral("disk");
+            other.group = QStringLiteral("capacity");
+            const QJsonObject mixed =
+                QJsonDocument::fromJson(
+                    alertmanagerWebhookPayload({firing, other}))
+                    .object();
+            check(mixed.value(QStringLiteral("groupKey")).toString()
+                      == QStringLiteral("syspeek"),
+                  "webhook: a mixed batch falls back to the receiver key");
+        }
         check(annotations.value(QStringLiteral("summary")).toString()
                   == firing.title
                   && annotations.value(QStringLiteral("description")).toString()
@@ -1993,10 +2454,13 @@ int main(int argc, char *argv[]) {
               "webhook: slack fallback");
         const QJsonArray fields =
             attachment.value(QStringLiteral("fields")).toArray();
-        check(fields.size() == 2
+        check(fields.size() == 4
                   && fields.first().toObject().value(QStringLiteral("short"))
-                         .toBool(),
-              "webhook: slack fields short");
+                         .toBool()
+                  && fields.at(2).toObject().value(QStringLiteral("value"))
+                             .toString()
+                         == QStringLiteral("platform"),
+              "webhook: slack fields short (severity, status, owner, group)");
         check(attachment.value(QStringLiteral("mrkdwn_in"))
                       .toArray()
                       .contains(QJsonValue(QStringLiteral("text"))),
@@ -5606,6 +6070,208 @@ int main(int argc, char *argv[]) {
         for (const char *name : {"SPEND_ARGV_LOG", "SPEND_COST", "SPEND_FORECAST"}) {
             qunsetenv(name);
         }
+    }
+
+    // --- journal failure text ---------------------------------------------
+    {
+        check(journalFailureText(1, QString())
+                  == QStringLiteral("journalctl failed (exit 1)"),
+              "journal: a silent failure still reports the exit code");
+        check(journalFailureText(1, QStringLiteral(
+                  "No journal files were found.\nsecond line"))
+                  == QStringLiteral("journalctl failed (exit 1): "
+                                    "No journal files were found."),
+              "journal: the first stderr line becomes the reason");
+        const QString permissionHint = journalFailureText(
+            3, QStringLiteral("Hint: You are currently not seeing "
+                              "messages from other users."));
+        check(permissionHint.contains(QStringLiteral("exit 3"))
+                  && permissionHint.contains(QStringLiteral("not seeing")),
+              "journal: a permission hint survives into the card");
+        const QString longReason(400, QLatin1Char('x'));
+        const QString capped = journalFailureText(2, longReason);
+        check(capped.size() <= 150
+                  && capped.endsWith(QStringLiteral("...")),
+              "journal: an absurd stderr line is capped, not pasted");
+    }
+
+    // --- M86 event stream -------------------------------------------------
+    {
+        check(timelineKindName(TimelineKind::Alert) == QStringLiteral("alert")
+                  && timelineKindName(TimelineKind::FileChange)
+                      == QStringLiteral("file")
+                  && timelineKindName(TimelineKind::Kubernetes)
+                      == QStringLiteral("kube")
+                  && timelineKindName(TimelineKind::ServiceAction)
+                      == QStringLiteral("restart"),
+              "timeline: every kind has a short lowercase name");
+        check(timelineKindFromName(QStringLiteral("Kube"))
+                      == TimelineKind::Kubernetes
+                  && timelineKindFromName(QStringLiteral("fim"))
+                      == TimelineKind::FileChange
+                  && timelineKindFromName(QStringLiteral("any"))
+                      == TimelineKind::Other
+                  && timelineKindFromName(QStringLiteral("nonsense"))
+                      == TimelineKind::Other,
+              "timeline: a kind name round-trips and unknown names mean any");
+
+        check(timelineSeverityFromText(QStringLiteral("critical"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("HIGH"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("warning"))
+                      == TimelineSeverity::Warning
+                  && timelineSeverityFromText(QStringLiteral("warn"))
+                      == TimelineSeverity::Warning
+                  && timelineSeverityFromText(QStringLiteral("ok"))
+                      == TimelineSeverity::Ok
+                  && timelineSeverityFromText(QStringLiteral("resolved"))
+                      == TimelineSeverity::Ok
+                  && timelineSeverityFromText(QStringLiteral("down"))
+                      == TimelineSeverity::Error
+                  && timelineSeverityFromText(QStringLiteral("something"))
+                      == TimelineSeverity::Info,
+              "timeline: alert severities map onto the four-level scale");
+        check(timelineSeverityRank(TimelineSeverity::Error) > timelineSeverityRank(
+                  TimelineSeverity::Warning)
+                  && timelineSeverityRank(TimelineSeverity::Warning)
+                      > timelineSeverityRank(TimelineSeverity::Info)
+                  && timelineSeverityRank(TimelineSeverity::Ok)
+                      < timelineSeverityRank(TimelineSeverity::Info),
+              "timeline: severity ranks order error above warn above info");
+
+        auto makeEvent = [](qint64 atMs, TimelineKind kind,
+                            TimelineSeverity severity, const QString &subject,
+                            const QString &title) {
+            TimelineEvent event;
+            event.atMs = atMs;
+            event.kind = kind;
+            event.severity = severity;
+            event.subject = subject;
+            event.title = title;
+            return event;
+        };
+
+        QList<TimelineEvent> ring;
+        for (int i = 0; i < 10; ++i) {
+            timelineAppend(ring, makeEvent(1000 + i, TimelineKind::Alert,
+                                           TimelineSeverity::Info,
+                                           QStringLiteral("monitor:app_cpu"),
+                                           QStringLiteral("e%1").arg(i)),
+                           4);
+        }
+        check(ring.size() == 4 && ring.constFirst().title == QStringLiteral("e6")
+                  && ring.constLast().title == QStringLiteral("e9"),
+              "timeline: the ring keeps the newest events and drops the oldest");
+        QList<TimelineEvent> unbounded;
+        timelineAppend(unbounded, makeEvent(1, TimelineKind::Other,
+                                            TimelineSeverity::Info,
+                                            QString(), QString()), 0);
+        check(unbounded.size() == 1,
+              "timeline: a zero cap is the test-shaped unbounded ring");
+
+        QList<TimelineEvent> window;
+        window.append(makeEvent(10000, TimelineKind::Alert,
+                                TimelineSeverity::Error,
+                                QStringLiteral("monitor:app_cpu"),
+                                QStringLiteral("cpu high")));
+        window.append(makeEvent(20000, TimelineKind::FileChange,
+                                TimelineSeverity::Warning,
+                                QStringLiteral("file:/etc/passwd"),
+                                QStringLiteral("modified /etc/passwd")));
+        window.append(makeEvent(60000, TimelineKind::Kubernetes,
+                                TimelineSeverity::Info,
+                                QStringLiteral("kube:web/pod-1"),
+                                QStringLiteral("pod restarted")));
+        const QList<TimelineEvent> near =
+            timelineNear(window, 21000, 12000, 10);
+        check(near.size() == 2 && near.at(0).atMs == 20000
+                  && near.at(1).atMs == 10000,
+              "timeline: a spike window returns the nearest events first");
+        check(timelineNear(window, 21000, 12000, 1).size() == 1,
+              "timeline: the spike window respects its limit");
+        check(timelineNear(window, 400000, 5000, 10).isEmpty(),
+              "timeline: a window with nothing in it comes back empty");
+        // Same distance from the anchor: the more severe event wins.
+        QList<TimelineEvent> tie;
+        tie.append(makeEvent(4000, TimelineKind::Alert, TimelineSeverity::Info,
+                             QStringLiteral("a"), QStringLiteral("info")));
+        tie.append(makeEvent(6000, TimelineKind::Alert, TimelineSeverity::Error,
+                             QStringLiteral("b"), QStringLiteral("error")));
+        const QList<TimelineEvent> tieHit = timelineNear(tie, 5000, 2000, 10);
+        check(tieHit.size() == 2 && tieHit.at(0).title == QStringLiteral("error"),
+              "timeline: an equidistant pair orders the severe event first");
+
+        const QList<TimelineEvent> byKind =
+            timelineFilter(window, TimelineKind::FileChange, QString());
+        check(byKind.size() == 1
+                  && byKind.at(0).kind == TimelineKind::FileChange,
+              "timeline: the kind filter keeps one kind");
+        const QList<TimelineEvent> byText =
+            timelineFilter(window, TimelineKind::Other, QStringLiteral("PASSWD"));
+        check(byText.size() == 1,
+              "timeline: the text filter is case-insensitive over subject/body");
+        const QList<TimelineEvent> all =
+            timelineFilter(window, TimelineKind::Other, QString());
+        check(all.size() == 3 && all.at(0).atMs == 60000
+                  && all.at(2).atMs == 10000,
+              "timeline: an unfiltered list is newest first");
+        check(timelineFilter(window, TimelineKind::Other,
+                             QStringLiteral("no-such-thing")).isEmpty(),
+              "timeline: a filter that matches nothing returns nothing");
+
+        const QStringList subjects = timelineSubjects(window);
+        check(subjects.size() == 3
+                  && subjects.at(0) == QStringLiteral("monitor:app_cpu"),
+              "timeline: subjects are unique and keep first-seen order");
+        check(timelineCountWith(window, TimelineSeverity::Error) == 1
+                  && timelineCountWith(window, TimelineSeverity::Ok) == 0,
+              "timeline: severity counting is exact");
+
+        check(timelineAgeText(400) == QStringLiteral("now")
+                  && timelineAgeText(12000) == QStringLiteral("12s")
+                  && timelineAgeText(4 * 60000) == QStringLiteral("4m")
+                  && timelineAgeText(3 * 3600000) == QStringLiteral("3h")
+                  && timelineAgeText(50 * 3600000) == QStringLiteral("2d")
+                  && timelineAgeText(-5) == QStringLiteral("now"),
+              "timeline: ages read as s/m/h/d and never go negative");
+
+        const QString row = timelineRowText(window.at(0), 10000);
+        check(row.contains(QStringLiteral("error"))
+                  && row.contains(QStringLiteral("alert"))
+                  && row.contains(QStringLiteral("monitor:app_cpu"))
+                  && row.contains(QStringLiteral("cpu high")),
+              "timeline: a row carries time, severity, kind, subject and title");
+        const QString detail = timelineDetailText(window.at(0), 40000);
+        check(detail.contains(QStringLiteral("subject  monitor:app_cpu"))
+                  && detail.contains(QStringLiteral("event    cpu high"))
+                  && detail.contains(QStringLiteral("age      30s")),
+              "timeline: the detail block carries subject, title and age");
+
+        const QString summary = timelineSummaryText(window, 62000, 2000, true);
+        check(summary.contains(QStringLiteral("3 events"))
+                  && summary.contains(QStringLiteral("1 errors"))
+                  && summary.contains(QStringLiteral("1 warnings"))
+                  && summary.contains(QStringLiteral("3 subjects"))
+                  && summary.contains(QStringLiteral("ring 2,000")),
+              "timeline: the summary counts severities and names the ring");
+        check(timelineSummaryText(window, 62000, 2000, false)
+                  .contains(QStringLiteral("disabled in [timeline]")),
+              "timeline: a disabled stream says so instead of counting");
+        check(timelineSummaryText(QList<TimelineEvent>(), 1, 10, true)
+                  .contains(QStringLiteral("waiting for the first event")),
+              "timeline: an empty stream says what will land there");
+        check(timelineWindowText(5000, 90000, 3)
+                  .contains(QStringLiteral("+-90s"))
+                  && timelineWindowText(5000, 90000, 3)
+                         .contains(QStringLiteral("3 events in this window")),
+              "timeline: the spike window states its radius and hit count");
+        check(timelineWindowText(5000, 90000, 0)
+                  .contains(QStringLiteral("no events in this window")),
+              "timeline: an empty spike window says so");
+        check(timelineNoEventText(false)
+                  .contains(QStringLiteral("disabled in [timeline]")),
+              "timeline: the empty-state text honours the switch");
     }
 
     std::printf("%d failure(s)\n", failures);

@@ -1,4 +1,5 @@
 #include "HudWindow.h"
+#include "Theme.h"
 
 #include "Config.h"
 #include "DockerSource.h"
@@ -28,6 +29,7 @@
 #include "platform/PlatformFactory.h"
 
 #include <QApplication>
+#include <QStyleFactory>
 #include <QSettings>
 #include <QCoreApplication>
 #include <QLocalServer>
@@ -450,6 +452,15 @@ int main(int argc, char *argv[]) {
     QApplication::setApplicationVersion(
         QString::fromLatin1(SYSPEEK_APP_VERSION));
 
+    // Fusion honours a palette on every platform; the platform styles only
+    // do so partially. The palette is what makes the widgets the stylesheet
+    // cannot reach (combo popups, tooltips, menus, scrollbars) dark instead of
+    // falling back to a white system theme.
+    if (QStyle *fusion = QStyleFactory::create(QStringLiteral("Fusion"))) {
+        QApplication::setStyle(fusion);
+    }
+    QApplication::setPalette(ui_theme::darkPalette());
+
 #if defined(Q_OS_WIN)
     if (!g_windowsCtrlHandlerInstalled) {
         SetConsoleCtrlHandler(windowsConsoleCtrlHandler, TRUE);
@@ -548,6 +559,15 @@ int main(int argc, char *argv[]) {
                 ? metricsEndpointText(resolveMetricsEndpoint(config.metrics))
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
+        settingsInfo.timelineLine =
+            config.timeline.enabled
+                ? QStringLiteral("on - ring %1 events, window +-%2 s, "
+                                 "chart markers %3")
+                      .arg(config.timeline.events)
+                      .arg(config.timeline.windowSeconds)
+                      .arg(config.timeline.markers ? QStringLiteral("on")
+                                                  : QStringLiteral("off"))
+                : QStringLiteral("disabled ([timeline] enabled=false)");
         settingsInfo.historyLine =
             config.history.enabled
                 ? QStringLiteral("%1 samples max - %2")
@@ -584,6 +604,9 @@ int main(int argc, char *argv[]) {
         hud.setExportIntervalMs(config.sampleIntervalMs);
         hud.setHistoryStore(historyDefaultPath(),
                             config.history.enabled ? config.history.samples : 0);
+        hud.setTimelineConfig(config.timeline.enabled, config.timeline.events,
+                              config.timeline.markers,
+                              config.timeline.windowSeconds);
         hud.setOverlayConfig(config.overlay, defaultConfigPath());
     }
 
@@ -629,6 +652,10 @@ int main(int argc, char *argv[]) {
         metricsServer->start();
         QObject::connect(worker, &SamplerWorker::snapshotReady, metricsServer,
                          &MetricsServer::setSnapshot);
+        QObject::connect(&hud, &HudWindow::alertStateChanged, metricsServer,
+                         &MetricsServer::setAlertState);
+        QObject::connect(&hud, &HudWindow::idleContainersChanged, metricsServer,
+                         &MetricsServer::setIdleContainers);
     }
 
     quint64 lastSequence = 0;
@@ -671,6 +698,10 @@ int main(int argc, char *argv[]) {
                                 : QStringLiteral("docker %1 %2 failed: %3")
                                       .arg(verb, id.left(12), error);
                          hud.setContainerActionStatus(text, ok);
+                         hud.noteActionEvent(TimelineKind::ContainerAction,
+                                             QStringLiteral("container:") + id,
+                                             QStringLiteral("docker %1").arg(verb),
+                                             text, ok);
                      });
     dockerThread->start();
 
@@ -709,6 +740,9 @@ int main(int argc, char *argv[]) {
                                 : QStringLiteral("%1 %2 failed: %3")
                                       .arg(verb, unit, error);
                          hud.setServiceActionStatus(text, ok);
+                         hud.noteActionEvent(TimelineKind::ServiceAction,
+                                             QStringLiteral("unit:") + unit,
+                                             text, QString(), ok);
                      });
     servicesThread->start();
 

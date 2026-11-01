@@ -104,8 +104,10 @@ void JournalSource::onFinished(int exitCode, QProcess::ExitStatus status) {
     // in that case no child process was started, so QProcess is not an open
     // QIODevice to read from.  Reading it emits Qt's "device not open"
     // warning on every fresh HUD launch.
+    QByteArray stderrBytes;
     if (m_process != nullptr && m_process->isOpen()) {
         m_stdout += m_process->readAllStandardOutput();
+        stderrBytes = m_process->readAllStandardError();
     }
 
     JournalSnapshot snapshot;
@@ -118,7 +120,8 @@ void JournalSource::onFinished(int exitCode, QProcess::ExitStatus status) {
         snapshot.errorCount = journalErrorCount(entries);
         snapshot.errorGroups = groupJournalErrors(entries);
     } else {
-        snapshot.errorMessage = QStringLiteral("journalctl failed");
+        snapshot.errorMessage = journalFailureText(
+            exitCode, QString::fromUtf8(stderrBytes));
     }
 
     emit journalReady(snapshot);

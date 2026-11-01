@@ -77,6 +77,52 @@ DockerState classifyDockerFailure(const QByteArray &payload);
 QString dockerSummaryText(const DockerSnapshot &snapshot);
 QString dockerDetailText(const DockerSnapshot &snapshot);
 
+// M88: a container that keeps holding memory and disk while doing no work is
+// the cheapest thing on the box to stop. The tracker accumulates consecutive
+// low-activity ticks per container instead of judging a single sample (a
+// replica that is idle between requests is not idle).
+struct IdleLimits {
+    double cpuPercent = 1.0;         // below this counts as idle
+    double netBytesPerSec = 1024.0;  // and below this
+    qint64 idleAfterMs = 900000;     // sustained for this long before reporting
+};
+
+struct IdleContainer {
+    QString id;
+    QString name;
+    double cpuPercent = -1.0;
+    double netBytesPerSec = -1.0;
+    qint64 idleSeconds = 0;
+};
+
+class IdleContainerTracker {
+public:
+    explicit IdleContainerTracker(const IdleLimits &limits = IdleLimits{});
+
+    void update(const QList<DockerContainer> &containers, qint64 nowMs);
+    QList<IdleContainer> idle() const { return m_idle; }
+    int idleCount() const { return m_idle.size(); }
+    IdleLimits limits() const { return m_limits; }
+    void reset();
+
+private:
+    struct State {
+        qint64 lowSinceMs = 0;
+        qint64 lastMs = 0;
+        unsigned long long lastRx = 0;
+        unsigned long long lastTx = 0;
+        bool haveCounters = false;
+        bool haveSample = false;   // a previous tick produced a rate
+    };
+
+    IdleLimits m_limits;
+    QHash<QString, State> m_state;
+    QList<IdleContainer> m_idle;
+};
+
+QString idleContainerSummaryText(const QList<IdleContainer> &idle,
+                                 const IdleLimits &limits);
+
 class DockerStateTracker {
 public:
     void update(QList<DockerContainer> &containers);

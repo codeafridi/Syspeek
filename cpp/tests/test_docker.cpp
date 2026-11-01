@@ -406,6 +406,94 @@ int main() {
     }
 #endif
 
+    // --- M88: idle container tracking ------------------------------------
+    {
+        auto container = [](const QString &id, double cpu, unsigned long long rx,
+                            unsigned long long tx) {
+            DockerContainer c;
+            c.id = id;
+            c.name = id;
+            c.state = QStringLiteral("running");
+            c.hasDepth = true;
+            c.depth.cpuPercent = cpu;
+            c.depth.hasNet = true;
+            c.depth.netRxBytes = rx;
+            c.depth.netTxBytes = tx;
+            return c;
+        };
+
+        IdleLimits limits;
+        limits.cpuPercent = 1.0;
+        limits.netBytesPerSec = 1024.0;
+        limits.idleAfterMs = 60000;   // one minute for the test
+
+        IdleContainerTracker tracker(limits);
+        // Tick 1 has no rate yet - never evidence of idleness.
+        tracker.update({container(QStringLiteral("web"), 0.1, 1000, 500)}, 0);
+        check(tracker.idleCount() == 0,
+              "idle: the first sample has no rate and counts as nothing");
+
+        // The streak starts on the first tick that HAS a rate (30s in).
+        tracker.update({container(QStringLiteral("web"), 0.1, 1000, 500)}, 30000);
+        check(tracker.idleCount() == 0,
+              "idle: below the window is not reported yet");
+
+        tracker.update({container(QStringLiteral("web"), 0.1, 1000, 500)}, 61000);
+        check(tracker.idleCount() == 0,
+              "idle: 31s of quiet is still inside the one-minute window");
+
+        // A full minute of quiet since the streak began.
+        tracker.update({container(QStringLiteral("web"), 0.1, 1000, 500)}, 95000);
+        check(tracker.idleCount() == 1,
+              "idle: a quiet minute reports the container");
+        check(tracker.idleCount() == 1 && tracker.idle().first().idleSeconds == 65,
+              "idle: the row carries the idle seconds");
+
+        // Traffic resumes: the streak resets.
+        tracker.update({container(QStringLiteral("web"), 0.1, 2000000, 500)},
+                       62000);
+        check(tracker.idleCount() == 0,
+              "idle: traffic resets the streak");
+
+        // A busy container never becomes idle, however long it runs.
+        IdleContainerTracker busy(limits);
+        for (int i = 0; i < 8; ++i) {
+            busy.update({container(QStringLiteral("api"), 40.0, 0, 0)},
+                        i * 30000);
+        }
+        check(busy.idleCount() == 0, "idle: a busy container is never idle");
+
+        // A removed container is pruned, not remembered forever.
+        IdleContainerTracker pruned(limits);
+        pruned.update({container(QStringLiteral("gone"), 0.0, 0, 0)}, 0);
+        pruned.update({container(QStringLiteral("gone"), 0.0, 0, 0)}, 30000);
+        pruned.update({container(QStringLiteral("gone"), 0.0, 0, 0)}, 95000);
+        check(pruned.idleCount() == 1, "idle: the quiet container is idle");
+        pruned.update({}, 100000);
+        check(pruned.idleCount() == 0, "idle: a removed container is pruned");
+
+        const QString summary =
+            idleContainerSummaryText(tracker.idle(), limits);
+        check(summary.contains(QStringLiteral("no idle container")),
+              "idle: the empty summary states the limits");
+    }
+    {
+        IdleLimits limits;
+        QList<IdleContainer> rows;
+        IdleContainer row;
+        row.name = QStringLiteral("web1");
+        row.idleSeconds = 1080;
+        rows.append(row);
+        row.name = QStringLiteral("pg");
+        row.idleSeconds = 960;
+        rows.append(row);
+        const QString text = idleContainerSummaryText(rows, limits);
+        check(text.contains(QStringLiteral("2 idle container(s)"))
+                  && text.contains(QStringLiteral("web1 18m"))
+                  && text.contains(QStringLiteral("15m")),
+              "idle: the summary names the containers and the window");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

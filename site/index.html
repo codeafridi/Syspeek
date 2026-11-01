@@ -7,7 +7,7 @@
     <meta name="description" content="Syspeek is a small overlay HUD that follows the app you are using, then opens into a 31-view console for the host, disks, GPU, sensors, containers, Kubernetes, databases, traces and cloud cost. Linux, macOS and Windows. C++ and Qt 6, local only, fully open source." />
     <meta name="theme-color" content="#f4f5f8" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311151b'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23d9a441'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=5" />
     <script>
       (function () {
         var t = 'light';
@@ -61,7 +61,7 @@
               <span class="shot-title">syspeek console &mdash; Overview</span>
             </div>
             <a href="shots/overview.webp" target="_blank" rel="noopener">
-              <img src="shots/overview.webp" width="1200" height="920" alt="Syspeek Overview console: focused app CPU, RSS and process count tiles, CPU, memory and process count charts, host CPU, memory available and load charts, network, disk and utilisation charts, and the watchdog and forecast cards." />
+              <img src="shots/overview.webp" width="1200" height="852" alt="Syspeek Overview console: focused app CPU, RSS and process count tiles, CPU, memory and process count charts, host CPU, memory available and load charts, network, disk and utilisation charts, and the watchdog and forecast cards." />
             </a>
           </div>
           <div class="hud">
@@ -83,7 +83,7 @@
       <section class="section" id="features">
         <div class="wrap">
           <p class="section-kicker">What it shows</p>
-          <h2>One panel over your app. Thirty-one views behind it.</h2>
+          <h2>One panel over your app. Thirty-two views behind it.</h2>
           <div class="grid">
             <article class="card">
               <h3>The app you are using</h3>
@@ -121,47 +121,47 @@
 
           <div class="gallery">
             <figure class="tile">
-              <a href="shots/processes.webp" target="_blank" rel="noopener"><img src="shots/processes.webp" width="1200" height="920" loading="lazy" alt="Processes page: grouped process tree with CPU, memory, threads, file descriptors, per-process disk read and write rates, TCP throughput and listening ports." /></a>
+              <a href="shots/processes.webp" target="_blank" rel="noopener"><img src="shots/processes.webp" width="1200" height="852" loading="lazy" alt="Processes page: grouped process tree with CPU, memory, threads, file descriptors, per-process disk read and write rates, TCP throughput and listening ports." /></a>
               <figcaption><b>Processes</b> Each row carries CPU, RSS, threads, fds, block I/O and TCP throughput, plus the ports it listens on.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/sensors.webp" target="_blank" rel="noopener"><img src="shots/sensors.webp" width="1200" height="920" loading="lazy" alt="Sensors page: hottest temperature, fan RPM, power draw and battery charge tiles, hwmon readings per chip, hottest sensor and power charts, and a battery detail card." /></a>
+              <a href="shots/sensors.webp" target="_blank" rel="noopener"><img src="shots/sensors.webp" width="1200" height="852" loading="lazy" alt="Sensors page: hottest temperature, fan RPM, power draw and battery charge tiles, hwmon readings per chip, hottest sensor and power charts, and a battery detail card." /></a>
               <figcaption><b>Sensors</b> Every hwmon chip, the battery's health and cycles, and the AC adapter state, sampled from sysfs.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/gpu.webp" target="_blank" rel="noopener"><img src="shots/gpu.webp" width="1200" height="920" loading="lazy" alt="GPU page: utilisation, VRAM, temperature and process count tiles, a utilisation chart, the device card and a per-process table of GPU engines and memory." /></a>
+              <a href="shots/gpu.webp" target="_blank" rel="noopener"><img src="shots/gpu.webp" width="1200" height="852" loading="lazy" alt="GPU page: utilisation, VRAM, temperature and process count tiles, a utilisation chart, the device card and a per-process table of GPU engines and memory." /></a>
               <figcaption><b>GPU</b> Device busy, VRAM, clocks and temperature, with the processes currently using the GPU.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/network.webp" target="_blank" rel="noopener"><img src="shots/network.webp" width="1200" height="920" loading="lazy" alt="Network page: connection counts, established sockets, retransmit percentage and transmit throughput tiles, a throughput chart, and the connection and interface tables." /></a>
+              <a href="shots/network.webp" target="_blank" rel="noopener"><img src="shots/network.webp" width="1200" height="852" loading="lazy" alt="Network page: connection counts, established sockets, retransmit percentage and transmit throughput tiles, a throughput chart, and the connection and interface tables." /></a>
               <figcaption><b>Network</b> Sockets by state, retransmits, per-interface throughput and top talkers.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/disks.webp" target="_blank" rel="noopener"><img src="shots/disks.webp" width="1200" height="920" loading="lazy" alt="Disks page: read and write throughput, busiest device utilisation and I/O pressure tiles, a summary card, a per-device table and read, write and utilisation charts." /></a>
+              <a href="shots/disks.webp" target="_blank" rel="noopener"><img src="shots/disks.webp" width="1200" height="852" loading="lazy" alt="Disks page: read and write throughput, busiest device utilisation and I/O pressure tiles, a summary card, a per-device table and read, write and utilisation charts." /></a>
               <figcaption><b>Disks</b> iostat-style per-device rates, await and utilisation, plus the processes doing the writing.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/host.webp" target="_blank" rel="noopener"><img src="shots/host.webp" width="1200" height="920" loading="lazy" alt="Host page: host CPU, load, memory available and disk free tiles, a load chart, the host inventory summary and the platform, CPU, filesystem and network cards." /></a>
+              <a href="shots/host.webp" target="_blank" rel="noopener"><img src="shots/host.webp" width="1200" height="852" loading="lazy" alt="Host page: host CPU, load, memory available and disk free tiles, a load chart, the host inventory summary and the platform, CPU, filesystem and network cards." /></a>
               <figcaption><b>Host</b> CPU topology, memory, load, kernel limits and every mounted filesystem with free space.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/metrics.webp" target="_blank" rel="noopener"><img src="shots/metrics.webp" width="1200" height="920" loading="lazy" alt="Metrics page: received, events, service checks and parse error tiles, a DogStatsD receiver card, ingestion and error charts and a series explorer table." /></a>
+              <a href="shots/metrics.webp" target="_blank" rel="noopener"><img src="shots/metrics.webp" width="1200" height="852" loading="lazy" alt="Metrics page: received, events, service checks and parse error tiles, a DogStatsD receiver card, ingestion and error charts and a series explorer table." /></a>
               <figcaption><b>Metrics</b> A DogStatsD receiver on 8125, with counters, gauges, histograms, sets, events and service checks.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/traces.webp" target="_blank" rel="noopener"><img src="shots/traces.webp" width="1200" height="920" loading="lazy" alt="Traces page: trace, span, error and service tiles, a latency chart, the service map and recent traces." /></a>
+              <a href="shots/traces.webp" target="_blank" rel="noopener"><img src="shots/traces.webp" width="1200" height="852" loading="lazy" alt="Traces page: trace, span, error and service tiles, a latency chart, the service map and recent traces." /></a>
               <figcaption><b>Traces</b> An OTLP/HTTP receiver on 4318, with per-service latency, p95 and the cross-service map.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/containers.webp" target="_blank" rel="noopener"><img src="shots/containers.webp" width="1200" height="920" loading="lazy" alt="Containers page: running, issues, container count and cgroup memory tiles, a container table with CPU, memory, network and PIDs, and lifecycle buttons." /></a>
+              <a href="shots/containers.webp" target="_blank" rel="noopener"><img src="shots/containers.webp" width="1200" height="852" loading="lazy" alt="Containers page: running, issues, container count and cgroup memory tiles, a container table with CPU, memory, network and PIDs, and lifecycle buttons." /></a>
               <figcaption><b>Containers</b> Engine API stats per container &mdash; CPU, memory against the limit, I/O, PIDs &mdash; and start, stop, restart.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/kubernetes.webp" target="_blank" rel="noopener"><img src="shots/kubernetes.webp" width="1200" height="920" loading="lazy" alt="Kubernetes page: pod, issue, deployment and monthly cost tiles, the cluster summary, pod and deployment tables, a pods-over-time chart and the cluster health, node and event cards." /></a>
+              <a href="shots/kubernetes.webp" target="_blank" rel="noopener"><img src="shots/kubernetes.webp" width="1200" height="852" loading="lazy" alt="Kubernetes page: pod, issue, deployment and monthly cost tiles, the cluster summary, pod and deployment tables, a pods-over-time chart and the cluster health, node and event cards." /></a>
               <figcaption><b>Kubernetes</b> Pods and deployments with metrics-server usage, node capacity, warning events, deprecated APIs and cost.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/databases.webp" target="_blank" rel="noopener"><img src="shots/databases.webp" width="1200" height="920" loading="lazy" alt="Databases page: cache hit ratio, commits per second, rollbacks and deadlock tiles, a throughput chart, and the statements and application connection cards." /></a>
+              <a href="shots/databases.webp" target="_blank" rel="noopener"><img src="shots/databases.webp" width="1200" height="852" loading="lazy" alt="Databases page: cache hit ratio, commits per second, rollbacks and deadlock tiles, a throughput chart, and the statements and application connection cards." /></a>
               <figcaption><b>Databases</b> PostgreSQL cache hit rate, commits, rollbacks, deadlocks and the slowest statements.</figcaption>
             </figure>
             <figure class="tile">
@@ -169,27 +169,31 @@
               <figcaption><b>Logs</b> journald, unified logging or the Windows event log, parsed into fields, scanned for secrets, and kept local.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/history.webp" target="_blank" rel="noopener"><img src="shots/history.webp" width="1200" height="920" loading="lazy" alt="History page: samples, span, on-disk size and interval tiles, a rewind card with a scrubber and record lines, and stored-window CPU and memory charts." /></a>
+              <a href="shots/history.webp" target="_blank" rel="noopener"><img src="shots/history.webp" width="1200" height="852" loading="lazy" alt="History page: samples, span, on-disk size and interval tiles, a rewind card with a scrubber and record lines, and stored-window CPU and memory charts." /></a>
               <figcaption><b>History</b> A bounded on-disk ring of every sample, with a scrubber to rewind the console an hour.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/cost.webp" target="_blank" rel="noopener"><img src="shots/cost.webp" width="1200" height="920" loading="lazy" alt="Cost page: monthly, hourly, CPU efficiency and memory efficiency tiles, a cost allocation card, a right-sizing card, a cost chart and namespace and workload breakdown tables." /></a>
+              <a href="shots/timeline.webp" target="_blank" rel="noopener"><img src="shots/timeline.webp" width="1200" height="852" loading="lazy" alt="Timeline page: event, error, warning and subject tiles, a kind and text filter, a table of events with time, severity, kind, subject and title, and a selected-event detail block." /></a>
+              <figcaption><b>Timeline</b> One stream of everything that changed &mdash; alerts, actions, file edits, cluster changes &mdash; with a click from any chart spike straight to the events around it.</figcaption>
+            </figure>
+            <figure class="tile">
+              <a href="shots/cost.webp" target="_blank" rel="noopener"><img src="shots/cost.webp" width="1200" height="852" loading="lazy" alt="Cost page: monthly, hourly, CPU efficiency and memory efficiency tiles, a cost allocation card, a right-sizing card, a cost chart and namespace and workload breakdown tables." /></a>
               <figcaption><b>Cost</b> OpenCost-style cluster cost from declared requests, efficiency, right-sizing and per-namespace share.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/cloud.webp" target="_blank" rel="noopener"><img src="shots/cloud.webp" width="1200" height="920" loading="lazy" alt="Cloud page: provider, age, accrued and monthly cost tiles, the instance identity card, a running-instances chart and the fleet inventory table." /></a>
+              <a href="shots/cloud.webp" target="_blank" rel="noopener"><img src="shots/cloud.webp" width="1200" height="852" loading="lazy" alt="Cloud page: provider, age, accrued and monthly cost tiles, the instance identity card, a running-instances chart and the fleet inventory table." /></a>
               <figcaption><b>Cloud</b> Instance identity from the metadata service, age and accrued cost, and the account's fleet from your own CLI.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/cloud-spend.webp" target="_blank" rel="noopener"><img src="shots/cloud-spend.webp" width="1200" height="800" loading="lazy" alt="Billed spend section of the Cloud page: a daily spend chart, month to date and forecast, the query it came from, and a per-service breakdown." /></a>
+              <a href="shots/cloud-spend.webp" target="_blank" rel="noopener"><img src="shots/cloud-spend.webp" width="1200" height="715" loading="lazy" alt="Billed spend section of the Cloud page: a daily spend chart, month to date and forecast, the query it came from, and a per-service breakdown." /></a>
               <figcaption><b>Billed spend</b> What the provider actually charged this month, straight from Cost Explorer, with a month-end forecast.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/security.webp" target="_blank" rel="noopener"><img src="shots/security.webp" width="1200" height="920" loading="lazy" alt="Security page: exposure, findings, threats and file change tiles, the sandbox exposure card, threat rows and file integrity entries." /></a>
+              <a href="shots/security.webp" target="_blank" rel="noopener"><img src="shots/security.webp" width="1200" height="852" loading="lazy" alt="Security page: exposure, findings, threats and file change tiles, the sandbox exposure card, threat rows and file integrity entries." /></a>
               <figcaption><b>Security</b> Sandbox exposure per process, log-based threat detection, and file integrity with hashes.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/settings.webp" target="_blank" rel="noopener"><img src="shots/settings.webp" width="1200" height="920" loading="lazy" alt="Settings page: version, refresh, monitors and silenced tiles, software and runtime paths, the collection scope matrix, monitor editors and the diagnostics card." /></a>
+              <a href="shots/settings.webp" target="_blank" rel="noopener"><img src="shots/settings.webp" width="1200" height="852" loading="lazy" alt="Settings page: version, refresh, monitors and silenced tiles, software and runtime paths, the collection scope matrix, monitor editors and the diagnostics card." /></a>
               <figcaption><b>Settings</b> Every path, every switch, which collection surfaces are live on this OS, and the monitor editors.</figcaption>
             </figure>
           </div>

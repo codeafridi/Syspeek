@@ -36,6 +36,10 @@ bool parseJournalJson(const QByteArray &text, QList<JournalEntry> &out);
 bool journalEntryIsError(const JournalEntry &entry);
 int journalErrorCount(const QList<JournalEntry> &entries);
 
+// Why the journal read failed, in one line: exit code plus the first line of
+// stderr, capped. "journalctl failed" alone told the user nothing about
+// whether they had no permission, no journal files, or no journalctl.
+QString journalFailureText(int exitCode, const QString &standardError);
 QString journalSummaryText(const JournalSnapshot &snapshot);
 QString journalLogsText(const JournalSnapshot &snapshot, int maxLines = 40);
 QString journalErrorsText(const JournalSnapshot &snapshot);

@@ -11,6 +11,7 @@
 #include "AlertEngine.h"
 #include "AlertSilence.h"
 #include "MonitorBands.h"
+#include "TimelineStatus.h"
 #include "SyntheticStatus.h"
 #include "TraceStatus.h"
 #include "PathStatus.h"
@@ -35,6 +36,7 @@ class QPushButton;
 class QDoubleSpinBox;
 class QSpinBox;
 class QComboBox;
+class QLineEdit;
 class QCheckBox;
 class Sparkline;
 class TimeseriesChart;
@@ -57,6 +59,23 @@ struct HistoryViewInfo {
     QList<ExportRow> window;
 };
 
+// The event stream page. `events` arrives newest-first and already bounded;
+// `focus` is set when a chart tick was clicked ("why did this spike") and
+// carries the events inside the focus window instead.
+struct TimelineViewInfo {
+    bool enabled = true;
+    bool markers = true;
+    int capacity = 0;
+    int count = 0;
+    qint64 oldestMs = 0;
+    qint64 newestMs = 0;
+    QList<TimelineEvent> events;
+    bool focus = false;
+    qint64 focusMs = 0;
+    qint64 focusWindowMs = 90000;
+    QList<TimelineEvent> focusEvents;
+};
+
 struct SettingsInfo {
     QString version;
     QString configPath;
@@ -68,6 +87,7 @@ struct SettingsInfo {
     QString webhookLine;
     QString exportLine;
     QString historyLine;
+    QString timelineLine;
     QString overlayLine;
     QString cloudLine;
     int sampleIntervalMs = 1000;
@@ -87,6 +107,9 @@ public:
     void setSnapshot(const DisplaySnapshot &snapshot);
     void setDockerSnapshot(const DockerSnapshot &snapshot);
     void setKubeSnapshot(const KubeSnapshot &snapshot);
+    // M88: containers that have stayed below the idle limits long enough.
+    void setIdleContainers(const QList<IdleContainer> &idle,
+                           const IdleLimits &limits);
     void setServicesSnapshot(const ServicesSnapshot &snapshot);
     void setJournalSnapshot(const JournalSnapshot &snapshot);
     void setAlerts(const QList<Alert> &alerts);
@@ -102,6 +125,9 @@ public:
     void setSettingsInfo(const SettingsInfo &info);
     void setHistoryView(const HistoryViewInfo &view);
     void setHistorySelection(const QString &position, const QString &detail);
+
+    void setTimeline(const TimelineViewInfo &info);
+    void showTimeline();
 
     void setWebhookLine(const QString &line);
 
@@ -124,6 +150,9 @@ public:
     void setContainerStatus(const QString &text, bool ok);
 
 signals:
+    // A chart event tick was clicked: the HUD narrows the timeline to it.
+    void timelineFocusRequested(qint64 atMs);
+    void timelineFocusCleared();
     void collapseRequested();
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
@@ -158,6 +187,10 @@ private:
     QWidget *buildInstrumentationView();
     QWidget *buildDatabasesView();
     QWidget *buildHistoryView();
+    QWidget *buildTimelineView();
+    void applyChartEvents();
+    void rebuildTimelineRows();
+    void updateTimelineDetail();
     QWidget *buildCostView();
     QWidget *buildCloudView();
     QWidget *buildDisksView();
@@ -238,6 +271,7 @@ private:
     QLabel *m_cgroup = nullptr;
     QLabel *m_docker = nullptr;
     QLabel *m_kubeSummary = nullptr;
+    QLabel *m_kubeContexts = nullptr;
     QTreeWidget *m_kubePods = nullptr;
     QTreeWidget *m_kubeDeploys = nullptr;
     QLabel *m_kubeEvents = nullptr;
@@ -247,6 +281,7 @@ private:
     QLabel *m_nodes = nullptr;
     QLabel *m_costSummary = nullptr;
     QLabel *m_costWarnings = nullptr;
+    QTreeWidget *m_costRightSizing = nullptr;
     QTreeWidget *m_costNamespaces = nullptr;
     QTreeWidget *m_costWorkloads = nullptr;
     QLabel *m_costTileMonthly = nullptr;
@@ -262,6 +297,7 @@ private:
     QLabel *m_cloudDetail = nullptr;
     QLabel *m_cloudFleetSummary = nullptr;
     QLabel *m_cloudFleetNote = nullptr;
+    QLabel *m_cloudIac = nullptr;
     QTreeWidget *m_cloudFleet = nullptr;
     TimeseriesChart *m_chartCloudFleet = nullptr;
     QLabel *m_cloudCost = nullptr;
@@ -463,6 +499,13 @@ private:
     QLabel *m_dockTileTotal = nullptr;
     QLabel *m_dockTileCgMem = nullptr;
     QTreeWidget *m_dockerTable = nullptr;
+    // M88: the docker table gains an IDLE column; the last snapshot is kept so
+    // an idle update can re-render without waiting for the next poll.
+    DockerSnapshot m_lastDocker;
+    QHash<QString, qint64> m_idleSeconds;
+    QString m_idleSummary;
+    QString m_dockerBaseText;
+    void fillDockerTable();
     TimeseriesChart *m_chartDocker = nullptr;
 
     // Datadog-style Kubernetes page (M64): cluster tiles + workloads.
@@ -505,6 +548,25 @@ private:
     TimeseriesChart *m_chartHistMem = nullptr;
     HistoryViewInfo m_historyView;
     qint64 m_histWindowNewest = 0;
+
+    // Timeline page (M86): one event stream for every collector, plus the
+    // chart ticks that narrow it to a single instant.
+    QLabel *m_tlTileEvents = nullptr;
+    QLabel *m_tlTileErrors = nullptr;
+    QLabel *m_tlTileWarnings = nullptr;
+    QLabel *m_tlTileSubjects = nullptr;
+    QLabel *m_tlSummary = nullptr;
+    QLabel *m_tlWindow = nullptr;
+    QLabel *m_tlEmpty = nullptr;
+    QLabel *m_tlDetail = nullptr;
+    QComboBox *m_tlKind = nullptr;
+    QLineEdit *m_tlSearch = nullptr;
+    QPushButton *m_tlClear = nullptr;
+    QTreeWidget *m_tlTable = nullptr;
+    TimelineViewInfo m_timelineInfo;
+    QList<TimelineEvent> m_tlRows;
+    QString m_tlSignature;
+    int m_tlRowIndex = -1;
 
     // GPU page (M73): device utilization/memory/sensors + gpu processes.
     QLabel *m_gpuTileUtil = nullptr;

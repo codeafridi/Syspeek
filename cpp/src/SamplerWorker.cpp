@@ -1,5 +1,7 @@
 #include "SamplerWorker.h"
 
+#include "IacStatus.h"
+
 #include "CloudFleetSource.h"
 #include "CostModel.h"
 #include "FocusedWindowProvider.h"
@@ -10,6 +12,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QSet>
 #include <QFile>
 #include <QThread>
@@ -1047,6 +1050,55 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
         m_cloudSpend->update(cloud.identity, now);
         cloud.spend = m_cloudSpend->status();
     }
+    // M91: diff the terraform state against the listing above. The state file
+    // can be megabytes, so it is re-read only when its mtime changes.
+    {
+        const QString iacPath = m_cloud.terraformStatePath;
+        cloud.iac = IacDrift{};
+        cloud.iac.path = iacPath;
+        if (iacPath.isEmpty()) {
+            cloud.iac.note = iacGateText(QString());
+        } else {
+            const QFileInfo info(iacPath);
+            if (!info.exists() || !info.isReadable()) {
+                cloud.iac.note = iacGateText(iacPath);
+            } else {
+                const qint64 mtime = info.lastModified().toMSecsSinceEpoch();
+                if (mtime != m_iacMtimeMs) {
+                    m_iacMtimeMs = mtime;
+                    QFile file(iacPath);
+                    if (file.open(QIODevice::ReadOnly)) {
+                        m_iacState =
+                            iacParseTerraformState(file.readAll(), &m_iacError);
+                    } else {
+                        m_iacState.clear();
+                        m_iacError = QStringLiteral("unreadable");
+                    }
+                }
+                if (!m_iacError.isEmpty()) {
+                    cloud.iac.note = iacParseErrorText(m_iacError);
+                } else {
+                    QList<IacResource> cloudRows;
+                    for (const CloudFleetInstance &instance :
+                         cloud.fleet.rows) {
+                        IacResource row;
+                        row.id = instance.instanceId;
+                        row.name = instance.name;
+                        row.type = instance.instanceType;
+                        row.address = instance.name;
+                        row.provider = instance.region;
+                        cloudRows.append(row);
+                    }
+                    cloud.iac = iacDiff(m_iacState, cloudRows);
+                    cloud.iac.path = iacPath;
+                    cloud.iac.note = iacSummaryText(cloud.iac);
+                }
+            }
+        }
+    }
+    // M88: burn rate against the account's own trailing baseline, from the
+    // billed spend the cost query returned.
+    cloud.burn = cloudBurnRate(cloud.spend, now);
     cloud.footprint = footprint;
     snapshot.cloud = cloud;
 }

@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QDoubleSpinBox>
@@ -365,10 +366,16 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("Instrumentation"),
                       QStringLiteral("Traces"), QStringLiteral("Profiles"),
                       QStringLiteral("Databases"), QStringLiteral("Security"),
-                      QStringLiteral("History"), QStringLiteral("Cost"),
+                      QStringLiteral("History"), QStringLiteral("Timeline"),
+                      QStringLiteral("Cost"),
                       QStringLiteral("Cloud"),
                       QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
+    for (int i = 0; i < m_rail->count(); ++i) {
+        if (m_rail->item(i)->text() == QStringLiteral("Timeline")) {
+            m_tlRowIndex = i;
+        }
+    }
 
     m_views = new QStackedWidget(body);
     m_views->setObjectName(QStringLiteral("ddViews"));
@@ -400,12 +407,20 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildDatabasesView());
     m_views->addWidget(buildSecurityView());
     m_views->addWidget(buildHistoryView());
+    m_views->addWidget(buildTimelineView());
     m_views->addWidget(buildCostView());
     m_views->addWidget(buildCloudView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
             &QStackedWidget::setCurrentIndex);
+
+    // "Why did this spike": every live chart carries the event tick overlay;
+    // clicking one narrows the timeline to that instant.
+    for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+        connect(chart, &TimeseriesChart::eventActivated, this,
+                &DashboardPanel::timelineFocusRequested);
+    }
 
     bodyLayout->addWidget(m_rail);
     bodyLayout->addWidget(m_views, 1);
@@ -478,6 +493,24 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         " #ddDiskTop, #ddGpuDevices, #ddGpuProcessNote, #ddHistSummary,"
         " #ddHistDetail, #ddSilenceSummary, #ddSilenceList { color: %MUTED%; }"
         "#ddTalkerSummary { color: %DIM%; }"
+        "#ddTlSummary, #ddTlWindow, #ddTlEmpty, #ddTlDetail { color: %MUTED%; }"
+        "#ddTlTileEvents, #ddTlTileErrors, #ddTlTileWarnings,"
+        " #ddTlTileSubjects { color: %TEXT%; }"
+        "#ddTlKind, #ddTlSearch { background-color: %SURFACE%; color: %TEXT%;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 3px 6px;"
+        "  font-size: 10px; }"
+        "#ddTlClear { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 3px 10px;"
+        "  font-size: 9px; }"
+        "#ddTlClear:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddTlTable { background-color: transparent; border: none;"
+        "  color: %TEXT%; }"
+        "#ddTlTable::item { padding: 1px 2px; }"
+        "#ddTlTable::item:selected { background-color: %HOVER%;"
+        "  color: %TEXT%; }"
+        "#ddTlTable QHeaderView::section { background-color: transparent;"
+        "  color: %MUTED%; border: none; border-bottom: 1px solid %BORDER%;"
+        "  padding: 3px 2px; }"
         "#ddTcpSummary { color: %DIM%; }"
         "#ddTcp { color: %MUTED%; }"
         "#ddSecuritySummary { color: %DIM%; }"
@@ -568,10 +601,24 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         "QComboBox, QSpinBox, QDoubleSpinBox { color: %TEXT%;"
         "  background-color: %SURFACE%; border: 1px solid %BORDER%;"
         "  border-radius: 2px; padding: 2px 5px; font-size: 10px; }"
-        "QComboBox::drop-down { border: 0px; width: 14px; }"
+        "QComboBox::drop-down { border: 0px; width: 16px; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid"
+        "  transparent; border-right: 4px solid transparent;"
+        "  border-top: 5px solid %DIM%; width: 0px; height: 0px;"
+        "  margin-right: 5px; }"
+        "QComboBox::down-arrow:on { border-top-color: %TEXT%; }"
         "QComboBox QAbstractItemView { background-color: %SURFACE%;"
         "  color: %TEXT%; selection-background-color: %HOVER%;"
+        "  selection-color: %TEXT%; outline: none;"
         "  border: 1px solid %BORDER%; }"
+        "QComboBox QAbstractItemView::item { padding: 4px 8px;"
+        "  min-height: 16px; }"
+        "QComboBox QAbstractItemView::item:hover"
+        " { background-color: %HOVER%; color: %TEXT%; }"
+        "QComboBox QAbstractItemView::item:selected"
+        " { background-color: %HOVER%; color: %ACCENT%; }"
+        "QToolTip { background-color: #1f2229; color: %TEXT%;"
+        "  border: 1px solid %BORDER%; padding: 4px 6px; }"
         "QCheckBox { color: %DIM%; font-size: 9px; }"
         "QCheckBox::indicator { width: 11px; height: 11px;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
@@ -1228,7 +1275,7 @@ QWidget *DashboardPanel::buildAlertsView() {
     silenceLayout->addWidget(m_silenceList);
 
     layout->addWidget(makeBanner(QStringLiteral("SILENCES"),
-        ui_theme::ok(), view));
+        ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("QUIET WINDOWS"),
                                silenceBox, view), 1);
 
@@ -1591,8 +1638,10 @@ QWidget *DashboardPanel::buildProcessesView() {
     actionLayout->addLayout(signalRow);
     actionLayout->addLayout(niceRow);
     actionLayout->addWidget(m_actionStatus);
+    // A section label is not an error: red belongs to a failing state, not to
+    // the header over the buttons that would fix it.
     layout->addWidget(makeBanner(QStringLiteral("ACTIONS"),
-                                 ui_theme::crit(), view));
+                                 ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("SIGNALS / PRIORITY"),
                                actionBox, view));
 
@@ -2031,7 +2080,7 @@ QWidget *DashboardPanel::buildContainersView() {
 
     m_dockerTable = new QTreeWidget(view);
     m_dockerTable->setObjectName(QStringLiteral("ddDockerTable"));
-    m_dockerTable->setColumnCount(8);
+    m_dockerTable->setColumnCount(9);
     m_dockerTable->setHeaderLabels({QStringLiteral("Container"),
                                     QStringLiteral("Image"),
                                     QStringLiteral("State"),
@@ -2039,13 +2088,14 @@ QWidget *DashboardPanel::buildContainersView() {
                                     QStringLiteral("CPU %"),
                                     QStringLiteral("MEM USAGE"),
                                     QStringLiteral("NET I/O"),
-                                    QStringLiteral("PIDS")});
+                                    QStringLiteral("PIDS"),
+                                    QStringLiteral("IDLE")});
     m_dockerTable->setRootIsDecorated(false);
     m_dockerTable->setSelectionMode(QAbstractItemView::NoSelection);
     m_dockerTable->setFocusPolicy(Qt::NoFocus);
     m_dockerTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_dockerTable->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    for (int i = 2; i < 8; ++i) {
+    for (int i = 2; i < 9; ++i) {
         m_dockerTable->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
 
@@ -2242,6 +2292,15 @@ QWidget *DashboardPanel::buildKubernetesView() {
     layout->addWidget(
         makeCard(QStringLiteral("CLUSTER"), m_kubeSummary, view));
 
+    // M90: which kubeconfig context the tables describe, and what else the
+    // file offers - the page never pretends there is one cluster.
+    m_kubeContexts = new QLabel(QStringLiteral("--"), view);
+    m_kubeContexts->setObjectName(QStringLiteral("ddKubeContexts"));
+    m_kubeContexts->setFont(monoFont(9));
+    m_kubeContexts->setWordWrap(true);
+    m_kubeContexts->setMinimumWidth(1);
+    layout->addWidget(m_kubeContexts);
+
     m_kubePods->setColumnWidth(0, 150);
     layout->addWidget(
         makeCard(QStringLiteral("PODS"), m_kubePods, view), 1);
@@ -2431,7 +2490,7 @@ QWidget *DashboardPanel::buildServicesView() {
     serviceActionLayout->addWidget(m_serviceStatus);
 
     layout->addWidget(makeBanner(QStringLiteral("UNIT ACTIONS"),
-                                 ui_theme::crit(), view));
+                                 ui_theme::accent(), view));
     layout->addWidget(makeCard(QStringLiteral("RESTART UNIT"),
                                serviceActionBox, view));
 
@@ -2862,7 +2921,8 @@ QWidget *DashboardPanel::buildLogsView() {
     m_logPipeline->setFont(monoFont(10));
     m_logPipeline->setWordWrap(false);
     layout->addWidget(
-        makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline, view), 1);
+        makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline,
+                 view));
 
     // --- Per-tick line volume (Syspeek-own counter).
     m_chartLog = new TimeseriesChart(view);
@@ -2888,13 +2948,34 @@ QWidget *DashboardPanel::buildLogsView() {
     sensLayout->addWidget(m_sensitiveSummary);
     sensLayout->addWidget(m_sensitive);
     layout->addWidget(
-        makeCard(QStringLiteral("SENSITIVE DATA"), sensBox, view), 1);
+        makeCard(QStringLiteral("SENSITIVE DATA"), sensBox, view));
 
     m_logs = new QLabel(QStringLiteral("--"), view);
     m_logs->setObjectName(QStringLiteral("ddLogs"));
     m_logs->setFont(monoFont(10));
     m_logs->setWordWrap(false);
     layout->addWidget(makeCard(QStringLiteral("RECENT LOGS"), m_logs, view), 1);
+
+    // Every other page wraps its content in a scroll area; this one returned
+    // the bare page, so the content widget was never managed by a layout. It
+    // then sized itself to its own size hint - a narrow column pinned to the
+    // top-left, with the tiles squeezed until their values clipped - and the
+    // narrower the text (a failed journalctl leaves one short line), the worse
+    // it looked.
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
     return view;
 }
 
@@ -3405,6 +3486,11 @@ void DashboardPanel::applySettingsInfo() {
         m_settings.historyLine.isEmpty()
             ? muted(QStringLiteral("--"))
             : muted(m_settings.historyLine));
+    general += row(
+        QStringLiteral("timeline"),
+        m_settings.timelineLine.isEmpty()
+            ? muted(QStringLiteral("--"))
+            : muted(m_settings.timelineLine));
     general += row(
         QStringLiteral("overlay"),
         m_settings.overlayLine.isEmpty()
@@ -3980,7 +4066,8 @@ QWidget *DashboardPanel::buildHistoryView() {
     m_chartHistMem = new TimeseriesChart(view);
     m_chartHistMem->setUnit(QStringLiteral("GB"));
     m_chartHistMem->setSeriesName(QStringLiteral("syspeek.history.mem"));
-    m_chartHistMem->setSeriesColors(QColor(60, 202, 170), QColor(127, 92, 255));
+    m_chartHistMem->setSeriesColors(QColor(ui_theme::seriesB()),
+                                    QColor(ui_theme::seriesA()));
 
     auto *charts = new QHBoxLayout();
     charts->setSpacing(10);
@@ -4008,6 +4095,358 @@ QWidget *DashboardPanel::buildHistoryView() {
     outer->setSpacing(0);
     outer->addWidget(scroll);
     return view;
+}
+
+QWidget *DashboardPanel::buildTimelineView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Tiles. COUNT is the ring, ERRORS/WARNINGS are the two severity
+    // levels that ever need action, SUBJECTS says how many things are
+    // involved (the aggregation keys, not the events).
+    m_tlTileEvents = new QLabel(QStringLiteral("--"), view);
+    m_tlTileEvents->setObjectName(QStringLiteral("ddTlTileEvents"));
+    m_tlTileErrors = new QLabel(QStringLiteral("--"), view);
+    m_tlTileErrors->setObjectName(QStringLiteral("ddTlTileErrors"));
+    m_tlTileWarnings = new QLabel(QStringLiteral("--"), view);
+    m_tlTileWarnings->setObjectName(QStringLiteral("ddTlTileWarnings"));
+    m_tlTileSubjects = new QLabel(QStringLiteral("--"), view);
+    m_tlTileSubjects->setObjectName(QStringLiteral("ddTlTileSubjects"));
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("EVENTS"), m_tlTileEvents,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("ERRORS"), m_tlTileErrors,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WARNINGS"), m_tlTileWarnings,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("SUBJECTS"), m_tlTileSubjects,
+                              nullptr, view), 1);
+    layout->addLayout(tiles);
+
+    m_tlSummary = new QLabel(QStringLiteral("--"), view);
+    m_tlSummary->setObjectName(QStringLiteral("ddTlSummary"));
+    m_tlSummary->setFont(monoFont(9));
+    m_tlSummary->setMinimumWidth(1);
+    m_tlSummary->setWordWrap(true);
+    layout->addWidget(m_tlSummary);
+
+    layout->addWidget(makeBanner(QStringLiteral("EVENT STREAM"),
+                                 ui_theme::banner(), view));
+
+    auto *stream = new QWidget(view);
+    auto *streamLayout = new QVBoxLayout(stream);
+    streamLayout->setContentsMargins(0, 0, 0, 0);
+    streamLayout->setSpacing(6);
+
+    auto *filters = new QHBoxLayout();
+    filters->setSpacing(6);
+    m_tlKind = new QComboBox(stream);
+    m_tlKind->setObjectName(QStringLiteral("ddTlKind"));
+    m_tlKind->addItem(QStringLiteral("any kind"), QStringLiteral("any"));
+    for (TimelineKind kind :
+         {TimelineKind::Alert, TimelineKind::Incident, TimelineKind::ProcessAction,
+          TimelineKind::ContainerAction, TimelineKind::ServiceAction,
+          TimelineKind::FileChange, TimelineKind::Kubernetes,
+          TimelineKind::Service, TimelineKind::Synthetic, TimelineKind::Cloud}) {
+        m_tlKind->addItem(timelineKindName(kind), timelineKindName(kind));
+    }
+    connect(m_tlKind, &QComboBox::currentIndexChanged, this,
+            [this](int) { rebuildTimelineRows(); });
+    m_tlSearch = new QLineEdit(stream);
+    m_tlSearch->setObjectName(QStringLiteral("ddTlSearch"));
+    m_tlSearch->setPlaceholderText(
+        QStringLiteral("filter subject, title or tag"));
+    m_tlSearch->setClearButtonEnabled(true);
+    connect(m_tlSearch, &QLineEdit::textChanged, this,
+            [this](const QString &) { rebuildTimelineRows(); });
+    m_tlClear = new QPushButton(QStringLiteral("CLEAR WINDOW"), stream);
+    m_tlClear->setObjectName(QStringLiteral("ddTlClear"));
+    m_tlClear->setVisible(false);
+    connect(m_tlClear, &QPushButton::clicked, this,
+            [this]() { emit timelineFocusCleared(); });
+    filters->addWidget(m_tlKind);
+    filters->addWidget(m_tlSearch, 1);
+    filters->addWidget(m_tlClear);
+    streamLayout->addLayout(filters);
+
+    m_tlWindow = new QLabel(QString(), stream);
+    m_tlWindow->setObjectName(QStringLiteral("ddTlWindow"));
+    m_tlWindow->setFont(monoFont(9));
+    m_tlWindow->setMinimumWidth(1);
+    m_tlWindow->setVisible(false);
+    streamLayout->addWidget(m_tlWindow);
+
+    m_tlTable = new QTreeWidget(stream);
+    m_tlTable->setObjectName(QStringLiteral("ddTlTable"));
+    m_tlTable->setColumnCount(5);
+    m_tlTable->setHeaderLabels({QStringLiteral("TIME"),
+                                QStringLiteral("SEV"),
+                                QStringLiteral("KIND"),
+                                QStringLiteral("SUBJECT"),
+                                QStringLiteral("EVENT")});
+    m_tlTable->setRootIsDecorated(false);
+    m_tlTable->setUniformRowHeights(true);
+    m_tlTable->setAlternatingRowColors(false);
+    m_tlTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tlTable->setMinimumHeight(240);
+    m_tlTable->setFont(monoFont(9));
+    m_tlTable->headerItem()->setFont(0, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(1, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(2, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(3, monoFont(8, true));
+    m_tlTable->headerItem()->setFont(4, monoFont(8, true));
+    m_tlTable->setColumnWidth(0, 74);
+    m_tlTable->setColumnWidth(1, 52);
+    m_tlTable->setColumnWidth(2, 82);
+    m_tlTable->setColumnWidth(3, 190);
+    m_tlTable->header()->setStretchLastSection(true);
+    connect(m_tlTable, &QTreeWidget::itemSelectionChanged, this,
+            [this]() { updateTimelineDetail(); });
+    streamLayout->addWidget(m_tlTable, 1);
+
+    m_tlEmpty = new QLabel(timelineNoEventText(true), stream);
+    m_tlEmpty->setObjectName(QStringLiteral("ddTlEmpty"));
+    m_tlEmpty->setFont(monoFont(9));
+    m_tlEmpty->setMinimumWidth(1);
+    m_tlEmpty->setWordWrap(true);
+    streamLayout->addWidget(m_tlEmpty);
+    layout->addWidget(makeCard(QStringLiteral("STREAM"), stream, view), 1);
+
+    layout->addWidget(makeBanner(QStringLiteral("SELECTED EVENT"),
+                                 ui_theme::warn(), view));
+    m_tlDetail = new QLabel(QStringLiteral("--"), view);
+    m_tlDetail->setObjectName(QStringLiteral("ddTlDetail"));
+    m_tlDetail->setFont(monoFont(9));
+    m_tlDetail->setMinimumWidth(1);
+    m_tlDetail->setTextFormat(Qt::PlainText);
+    m_tlDetail->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_tlDetail->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    layout->addWidget(makeCard(QStringLiteral("DETAIL"), m_tlDetail, view));
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet(QStringLiteral(
+        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
+void DashboardPanel::showTimeline() {
+    if (m_tlRowIndex >= 0 && m_rail != nullptr) {
+        m_rail->setCurrentRow(m_tlRowIndex);
+    }
+}
+
+void DashboardPanel::setTimeline(const TimelineViewInfo &info) {
+    m_timelineInfo = info;
+    if (m_tlSummary == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const QList<TimelineEvent> &source =
+        info.focus ? info.focusEvents : info.events;
+    const int errors = timelineCountWith(source, TimelineSeverity::Error);
+    const int warnings = timelineCountWith(source, TimelineSeverity::Warning);
+    if (m_tlTileEvents != nullptr) {
+        m_tlTileEvents->setText(QString::number(source.size()));
+    }
+    if (m_tlTileErrors != nullptr) {
+        m_tlTileErrors->setText(QString::number(errors));
+        m_tlTileErrors->setStyleSheet(errors > 0
+            ? QStringLiteral("color:%1;").arg(ui_theme::crit())
+            : QString());
+    }
+    if (m_tlTileWarnings != nullptr) {
+        m_tlTileWarnings->setText(QString::number(warnings));
+        m_tlTileWarnings->setStyleSheet(warnings > 0
+            ? QStringLiteral("color:%1;").arg(ui_theme::warn())
+            : QString());
+    }
+    if (m_tlTileSubjects != nullptr) {
+        m_tlTileSubjects->setText(
+            QString::number(timelineSubjects(source).size()));
+    }
+    m_tlSummary->setText(timelineSummaryText(info.focus ? info.focusEvents
+                                                        : info.events,
+                                             now, info.capacity, info.enabled));
+    if (m_tlWindow != nullptr) {
+        m_tlWindow->setVisible(info.focus);
+        if (info.focus) {
+            m_tlWindow->setText(timelineWindowText(
+                info.focusMs, info.focusWindowMs, int(info.focusEvents.size())));
+        }
+    }
+    if (m_tlClear != nullptr) {
+        m_tlClear->setVisible(info.focus);
+    }
+    if (m_tlEmpty != nullptr) {
+        m_tlEmpty->setText(timelineNoEventText(info.enabled));
+        m_tlEmpty->setVisible(source.isEmpty());
+    }
+    rebuildTimelineRows();
+    applyChartEvents();
+}
+
+void DashboardPanel::rebuildTimelineRows() {
+    if (m_tlTable == nullptr) {
+        return;
+    }
+    const TimelineViewInfo &info = m_timelineInfo;
+    const QList<TimelineEvent> &source =
+        info.focus ? info.focusEvents : info.events;
+    TimelineKind kind = TimelineKind::Other;
+    if (m_tlKind != nullptr) {
+        kind = timelineKindFromName(m_tlKind->currentData().toString());
+    }
+    const QString needle = m_tlSearch != nullptr ? m_tlSearch->text()
+                                                 : QString();
+    // The page is republished on a slow cadence so the ages stay true; the
+    // rows only rebuild when something actually changed, otherwise a rebuild
+    // every fifth tick would keep stealing the user's selection.
+    const QString signature =
+        QStringLiteral("%1|%2|%3|%4|%5|%6")
+            .arg(source.size())
+            .arg(info.newestMs)
+            .arg(info.focus ? info.focusMs : 0)
+            .arg(int(kind))
+            .arg(needle)
+            .arg(info.enabled ? 1 : 0);
+    if (signature == m_tlSignature) {
+        return;
+    }
+    m_tlSignature = signature;
+    qint64 keepMs = 0;
+    QString keepSubject;
+    if (auto *selected = m_tlTable->currentItem()) {
+        keepMs = selected->data(0, Qt::UserRole).toLongLong();
+        keepSubject = selected->text(3);
+    }
+    m_tlRows = timelineFilter(source, kind, needle);
+    if (m_tlEmpty != nullptr) {
+        m_tlEmpty->setVisible(m_tlRows.isEmpty());
+        if (m_tlRows.isEmpty() && (!source.isEmpty())
+            && !(m_tlSearch != nullptr && m_tlSearch->text().trimmed().isEmpty()
+                 && kind == TimelineKind::Other)) {
+            m_tlEmpty->setText(QStringLiteral("no event matches this filter"));
+        } else if (m_tlRows.isEmpty()) {
+            m_tlEmpty->setText(timelineNoEventText(info.enabled));
+        }
+    }
+
+    QSignalBlocker blocker(m_tlTable);
+    m_tlTable->clear();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (const TimelineEvent &event : m_tlRows) {
+        auto *row = new QTreeWidgetItem(m_tlTable);
+        const QString clock = QDateTime::fromMSecsSinceEpoch(event.atMs)
+                                  .toString(QStringLiteral("HH:mm:ss"));
+        row->setText(0, clock);
+        row->setText(1, timelineSeverityName(event.severity));
+        row->setText(2, timelineKindName(event.kind));
+        row->setText(3, event.subject.isEmpty() ? QStringLiteral("-")
+                                                : event.subject);
+        row->setText(4, event.title.isEmpty() ? event.detail : event.title);
+        QColor ink = ui_theme::text();
+        if (event.severity == TimelineSeverity::Error) {
+            ink = ui_theme::crit();
+        } else if (event.severity == TimelineSeverity::Warning) {
+            ink = ui_theme::warn();
+        } else if (event.severity == TimelineSeverity::Ok) {
+            ink = ui_theme::ok();
+        }
+        row->setForeground(1, ink);
+        row->setForeground(0, QColor(ui_theme::dim()));
+        row->setForeground(3, QColor(ui_theme::dim()));
+        row->setData(0, Qt::UserRole, event.atMs);
+        row->setToolTip(0, timelineDetailText(event, now));
+        row->setToolTip(4, timelineDetailText(event, now));
+    }
+    QTreeWidgetItem *restore = nullptr;
+    if (keepMs != 0) {
+        for (int i = 0; i < m_tlTable->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = m_tlTable->topLevelItem(i);
+            if (item->data(0, Qt::UserRole).toLongLong() == keepMs
+                && item->text(3) == keepSubject) {
+                restore = item;
+                break;
+            }
+        }
+    }
+    if (restore != nullptr) {
+        m_tlTable->setCurrentItem(restore);
+    } else if (!m_tlRows.isEmpty()) {
+        m_tlTable->setCurrentItem(m_tlTable->topLevelItem(0));
+    }
+    blocker.unblock();
+    updateTimelineDetail();
+}
+
+void DashboardPanel::updateTimelineDetail() {
+    if (m_tlDetail == nullptr) {
+        return;
+    }
+    auto *row = m_tlTable != nullptr ? m_tlTable->currentItem() : nullptr;
+    if (row == nullptr) {
+        m_tlDetail->setText(QStringLiteral("--"));
+        return;
+    }
+    const int index = m_tlTable->indexOfTopLevelItem(row);
+    if (index < 0 || index >= m_tlRows.size()) {
+        m_tlDetail->setText(QStringLiteral("--"));
+        return;
+    }
+    m_tlDetail->setText(timelineDetailText(
+        m_tlRows.at(index), QDateTime::currentMSecsSinceEpoch()));
+}
+
+// Hand the event ring to every live chart as annotation ticks. Charts with a
+// replaced series (the stored-window panels) carry no sample clock and skip
+// them; charts whose window does not reach an event skip that event. The ring
+// is already bounded, so this stays a paint-time loop over <256 items.
+void DashboardPanel::applyChartEvents() {
+    if (!m_timelineInfo.markers) {
+        // Switching markers off clears the ticks that are already drawn;
+        // leaving them behind would make the switch look broken.
+        for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+            chart->setEvents(QList<ChartEvent>());
+        }
+        return;
+    }
+    const QList<TimelineEvent> &source =
+        m_timelineInfo.focus ? m_timelineInfo.focusEvents
+                             : m_timelineInfo.events;
+    QList<ChartEvent> markers;
+    const int start = qMax(0, int(source.size()) - 96);
+    markers.reserve(source.size() - start);
+    for (int i = start; i < source.size(); ++i) {
+        ChartEvent marker;
+        marker.atMs = source.at(i).atMs;
+        marker.severity = timelineSeverityRank(source.at(i).severity);
+        marker.label = QStringLiteral("%1 %2 - %3")
+                           .arg(timelineSeverityName(source.at(i).severity),
+                                timelineKindName(source.at(i).kind),
+                                source.at(i).title.isEmpty()
+                                    ? source.at(i).detail
+                                    : source.at(i).title);
+        markers.append(marker);
+    }
+    for (TimeseriesChart *chart : findChildren<TimeseriesChart *>()) {
+        chart->setEvents(markers);
+    }
 }
 
 QWidget *DashboardPanel::buildCloudView() {
@@ -4114,6 +4553,18 @@ QWidget *DashboardPanel::buildCloudView() {
     m_cloudFleetNote->setMinimumWidth(1);
     layout->addWidget(m_cloudFleetNote);
 
+    // --- M91: the terraform state diffed against the listing above. Read-only
+    // both ways: it names drift, it never applies, imports or destroys.
+    m_cloudIac = new QLabel(QStringLiteral("--"), view);
+    m_cloudIac->setObjectName(QStringLiteral("ddCloudIac"));
+    m_cloudIac->setFont(monoFont(10));
+    m_cloudIac->setWordWrap(false);
+    m_cloudIac->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("IAC DRIFT"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("terraform state vs the account"),
+                               m_cloudIac, view));
 
     // --- Rate / accrual / projection, with the import date that decides how
     // much the number is worth.
@@ -4309,12 +4760,32 @@ QWidget *DashboardPanel::buildCostView() {
     m_costWarnings->setObjectName(QStringLiteral("ddCostWarnings"));
     m_costWarnings->setFont(monoFont(10));
     m_costWarnings->setTextFormat(Qt::RichText);
-    m_costWarnings->setWordWrap(false);
+    m_costWarnings->setWordWrap(true);
 
     layout->addWidget(makeBanner(QStringLiteral("RIGHT-SIZING"),
         ui_theme::warn(), view));
     layout->addWidget(makeCard(QStringLiteral("usage vs requests"),
                                m_costWarnings, view));
+
+    // --- Per-pod recommendations (OpenCost's right-sizing surface: a
+    // request at measured usage x buffer, and the headroom it frees).
+    m_costRightSizing = new QTreeWidget(view);
+    m_costRightSizing->setObjectName(QStringLiteral("ddCostRightSizing"));
+    m_costRightSizing->setColumnCount(3);
+    m_costRightSizing->setHeaderLabels({QStringLiteral("Pod"),
+                                        QStringLiteral("Recommendation"),
+                                        QStringLiteral("$/month")});
+    m_costRightSizing->setRootIsDecorated(false);
+    m_costRightSizing->setSelectionMode(QAbstractItemView::NoSelection);
+    m_costRightSizing->setFocusPolicy(Qt::NoFocus);
+    m_costRightSizing->header()->setSectionResizeMode(0,
+                                                      QHeaderView::ResizeToContents);
+    m_costRightSizing->header()->setSectionResizeMode(1,
+                                                      QHeaderView::Stretch);
+    m_costRightSizing->header()->setSectionResizeMode(
+        2, QHeaderView::ResizeToContents);
+    layout->addWidget(makeCard(QStringLiteral("per-pod suggestions"),
+                               m_costRightSizing, view));
 
     // --- Estimate history (Syspeek-own: OpenCost's monthlyCost recomputed
     // per poll from the live request set).
@@ -6200,47 +6671,8 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
             : QStringLiteral("color: %1;").arg(ui_theme::text()));
     m_dockTileTotal->setText(QString::number(snapshot.containers.size()));
 
-    m_dockerTable->clear();
-    for (const DockerContainer &container : snapshot.containers) {
-        auto *item = new QTreeWidgetItem(m_dockerTable);
-        item->setData(0, Qt::UserRole, container.id);
-        item->setText(0, container.name.isEmpty() ? container.id
-                                                  : container.name);
-        item->setText(1, container.image);
-        item->setText(2, container.state);
-        item->setText(3, container.status);
-        if (container.hasDepth) {
-            const DockerDepth &depth = container.depth;
-            if (depth.cpuPercent >= 0.0) {
-                item->setText(4,
-                              QStringLiteral("%1 %").arg(depth.cpuPercent, 0,
-                                                         'f', 1));
-            }
-            if (depth.hasMem) {
-                const QString limit =
-                    depth.memLimitBytes > 0
-                        ? formatBytesCompact(depth.memLimitBytes)
-                        : QStringLiteral("unlimited");
-                item->setText(5, QStringLiteral("%1 / %2")
-                                     .arg(formatBytesCompact(depth.memUsedBytes),
-                                          limit));
-            }
-            if (depth.hasNet) {
-                item->setText(6, QStringLiteral("%1 / %2")
-                                     .arg(formatBytesCompact(depth.netRxBytes),
-                                          formatBytesCompact(depth.netTxBytes)));
-            }
-            if (depth.pids >= 0) {
-                item->setText(7, QString::number(depth.pids));
-            }
-        }
-        const bool bad = container.crashed
-            || container.health == QLatin1String("unhealthy")
-            || (container.state != QLatin1String("running")
-                && container.state != QLatin1String("healthy"));
-        item->setForeground(2, QBrush(QColor(
-            bad ? ui_theme::crit() : ui_theme::ok())));
-    }
+    m_lastDocker = snapshot;
+    fillDockerTable();
 
     const QString summary = dockerSummaryText(snapshot);
     const QString details = dockerDetailText(snapshot);
@@ -6248,7 +6680,18 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
     if (!details.isEmpty() && details != QStringLiteral("no issues")) {
         text += QStringLiteral("\n") + details;
     }
-    m_docker->setText(text.isEmpty() ? QStringLiteral("--") : text);
+    m_dockerBaseText = text;
+    if (m_docker != nullptr) {
+        // The idle line is appended by setIdleContainers, which runs right
+        // after this tick; keep the base so a re-render never loses it.
+        const QString combined =
+            m_idleSummary.isEmpty()
+                ? text
+                : (text.isEmpty() ? m_idleSummary
+                                  : text + QStringLiteral("\n") + m_idleSummary);
+        m_docker->setText(combined.isEmpty() ? QStringLiteral("--")
+                                             : combined);
+    }
 
     if (m_chartDocker != nullptr
         && (snapshot.state == DockerState::Ok
@@ -6303,6 +6746,10 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
 void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
     const QString summary = kubeSummaryText(snapshot);
     m_kubeSummary->setText(summary.isEmpty() ? QStringLiteral("--") : summary);
+    if (m_kubeContexts != nullptr) {
+        m_kubeContexts->setText(
+            kubeContextsText(snapshot.contexts, snapshot.selectedContext));
+    }
 
     // Cluster-page tiles (M64); issues colored red while nonzero.
     m_kubeTilePods->setText(QString::number(snapshot.totalPods));
@@ -6491,9 +6938,47 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
                                      .arg(ui_theme::ok()));
         }
         m_costSummary->setText(allocation);
-        m_costWarnings->setText(costEfficiencyTextFromRatios(
-            snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
-            snapshot.costEfficiencyPods, snapshot.costWastedMonthly));
+        m_costWarnings->setText(
+            costEfficiencyTextFromRatios(
+                snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
+                snapshot.costEfficiencyPods, snapshot.costWastedMonthly)
+            // Rich text: a plain newline does not break the line in a
+            // QLabel(Qt::RichText), and the summary belongs in the same
+            // label/value column as the rest of the card.
+            + QStringLiteral("<br/>")
+            + line(QStringLiteral("sized"),
+                   rightSizingSummaryText(snapshot.costRightSizing,
+                                          snapshot.costRightSizingPods)));
+
+        if (m_costRightSizing != nullptr) {
+            m_costRightSizing->clear();
+            if (snapshot.costRightSizing.isEmpty()) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, QStringLiteral("no measured pods"));
+                item->setText(1, QStringLiteral("--"));
+                item->setText(2, QStringLiteral("--"));
+                m_costRightSizing->addTopLevelItem(item);
+            } else {
+                int shown = 0;
+                for (const PodRightSizing &row : snapshot.costRightSizing) {
+                    if (shown++ >= 10) {
+                        break;
+                    }
+                    auto *item = new QTreeWidgetItem();
+                    item->setText(0, row.ns + QStringLiteral("/") + row.pod);
+                    item->setText(1, podRightSizingText(row));
+                    item->setText(2,
+                                  row.underCpu || row.underMem
+                                      ? QStringLiteral("--")
+                                      : formatCostMoney(row.monthlySavings));
+                    if (row.underCpu || row.underMem) {
+                        item->setForeground(
+                            1, QBrush(QColor(ui_theme::warn())));
+                    }
+                    m_costRightSizing->addTopLevelItem(item);
+                }
+            }
+        }
 
         auto fillTable = [&snapshot](QTreeWidget *tree,
                                      const QList<QPair<QString, double>> &rows) {
@@ -6831,7 +7316,7 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     "&nbsp;&nbsp;<span style=\"color:%3;\">[%4]</span>"
                     "&nbsp;%5&nbsp;%6")
                     .arg(stamp,
-                         QStringLiteral("#3ccaaa"),
+                         ui_theme::seriesB(),
                          ui_theme::statusColor(sev),
                          sev,
                          alert.title,
@@ -6919,7 +7404,13 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
     if (m_cloudSpendSummary != nullptr) {
         const CloudSpendStatus &spend = cloud.spend;
         m_cloudSpendSummary->setText(cloudSpendSummaryText(spend));
-        m_cloudSpendDetail->setText(cloudSpendDetailText(spend));
+        // M88: the burn line rides the spend detail - it is the same data
+        // expressed as a rate, and it is pointless when nothing was billed.
+        m_cloudSpendDetail->setText(
+            spend.available
+                ? cloudSpendDetailText(spend) + QStringLiteral("\n")
+                      + cloudBurnText(snapshot.cloud.burn)
+                : cloudSpendDetailText(spend));
         m_cloudSpendServices->clear();
         for (const CloudSpendService &service : spend.services) {
             auto *item =
@@ -6957,6 +7448,13 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
     const QString fleetText =
         cloud.available ? fleetSummaryText(fleet) : fleetNoProviderText();
     m_cloudFleetSummary->setText(fleetText);
+    if (m_cloudIac != nullptr) {
+        // The sampler sets the note on every tick, so what is shown is exactly
+        // what the last state read produced (gate, parse error, or the diff).
+        m_cloudIac->setText(cloud.iac.note.isEmpty()
+                                ? iacGateText(cloud.iac.path)
+                                : cloud.iac.note);
+    }
     if (m_cloudFleet != nullptr) {
         m_cloudFleet->clear();
         for (const CloudFleetInstance &row : fleet.rows) {
@@ -7307,14 +7805,28 @@ void DashboardPanel::setIncidents(const QList<Incident> &incidents) {
                 ? QStringLiteral("%1h").arg(ageMs / 3600000)
                 : QStringLiteral("%1m").arg(ageMs / 60000));
         text += QStringLiteral(
-            "<span style=\"color:%1;\">[OPEN]</span>"
+            "<span style=\"color:%1;\">[%6]</span>"
             "&nbsp;&nbsp;<span style=\"color:%2;\">[%3]</span>"
             "&nbsp;%4&nbsp;&nbsp;x%5")
-            .arg(ui_theme::accent(),
+            .arg(incident.flapping ? ui_theme::warn() : ui_theme::accent(),
                  ui_theme::statusColor(sev),
                  sev,
                  incident.title)
             .arg(incident.count)
+            .arg(incident.flapping ? QStringLiteral("FLAPPING")
+                                   : QStringLiteral("OPEN"))
+            + (incident.owner.isEmpty()
+                   ? QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "unowned</span>")
+                         .arg(ui_theme::dim())
+                   : QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "@%2</span>")
+                         .arg(ui_theme::dim(), incident.owner))
+            + (incident.rules.size() > 1
+                   ? QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "group %2</span>")
+                         .arg(ui_theme::dim(), incident.groupKey)
+                   : QString())
             + (age.isEmpty()
                    ? QString()
                    : QStringLiteral("&nbsp;&middot;&nbsp;&nbsp;%1").arg(age))
@@ -7745,3 +8257,85 @@ void DashboardPanel::setContainerStatus(const QString &text, bool ok) {
         QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
     m_containerStatus->setText(text);
 }
+void DashboardPanel::fillDockerTable() {
+    if (m_dockerTable == nullptr) {
+        return;
+    }
+    m_dockerTable->clear();
+    for (const DockerContainer &container : m_lastDocker.containers) {
+        auto *item = new QTreeWidgetItem(m_dockerTable);
+        item->setData(0, Qt::UserRole, container.id);
+        item->setText(0, container.name.isEmpty() ? container.id
+                                                  : container.name);
+        item->setText(1, container.image);
+        item->setText(2, container.state);
+        item->setText(3, container.status);
+        if (container.hasDepth) {
+            const DockerDepth &depth = container.depth;
+            if (depth.cpuPercent >= 0.0) {
+                item->setText(4,
+                              QStringLiteral("%1 %").arg(depth.cpuPercent, 0,
+                                                         'f', 1));
+            }
+            if (depth.hasMem) {
+                const QString limit =
+                    depth.memLimitBytes > 0
+                        ? formatBytesCompact(depth.memLimitBytes)
+                        : QStringLiteral("unlimited");
+                item->setText(5, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.memUsedBytes),
+                                          limit));
+            }
+            if (depth.hasNet) {
+                item->setText(6, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.netRxBytes),
+                                          formatBytesCompact(depth.netTxBytes)));
+            }
+            if (depth.pids >= 0) {
+                item->setText(7, QString::number(depth.pids));
+            }
+        }
+        // M88: how long this container has been below the idle limits.
+        const qint64 idleSeconds =
+            m_idleSeconds.value(container.id.isEmpty() ? container.name
+                                                       : container.id,
+                                -1);
+        if (idleSeconds >= 0) {
+            item->setText(8, idleSeconds >= 3600
+                                 ? QStringLiteral("%1h").arg(idleSeconds / 3600)
+                                 : QStringLiteral("%1m")
+                                       .arg(idleSeconds / 60));
+            item->setForeground(8, QBrush(QColor(ui_theme::warn())));
+        }
+        const bool bad = container.crashed
+            || container.health == QLatin1String("unhealthy")
+            || (container.state != QLatin1String("running")
+                && container.state != QLatin1String("healthy"));
+        item->setForeground(2, QBrush(QColor(
+            bad ? ui_theme::crit() : ui_theme::ok())));
+    }
+
+}
+
+void DashboardPanel::setIdleContainers(const QList<IdleContainer> &idle,
+                                       const IdleLimits &limits) {
+    m_idleSeconds.clear();
+    for (const IdleContainer &row : idle) {
+        m_idleSeconds.insert(row.id.isEmpty() ? row.name : row.id,
+                             row.idleSeconds);
+    }
+    if (m_docker != nullptr && !m_lastDocker.containers.isEmpty()) {
+        fillDockerTable();
+    }
+    m_idleSummary = idleContainerSummaryText(idle, limits);
+    if (m_docker != nullptr) {
+        QString text = m_dockerBaseText;
+        if (text.isEmpty()) {
+            text = m_idleSummary;
+        } else {
+            text += QStringLiteral("\n") + m_idleSummary;
+        }
+        m_docker->setText(text);
+    }
+}
+

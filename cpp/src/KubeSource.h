@@ -32,6 +32,7 @@ private slots:
     void onErrorOccurred(QProcess::ProcessError error);
     void onDeadlineTimeout();
     void onKillTimeout();
+    void reloadContexts();
 
 private:
     void beginQuery();
@@ -45,6 +46,11 @@ private:
     void resetBackoff();
 
     QProcess *m_process = nullptr;
+    // M90: `kubectl config view -o json` runs on its own process so the
+    // discovery never delays a poll.
+    QProcess *m_ctxProcess = nullptr;
+    QList<KubeContext> m_contexts;
+    QString m_contextError;
     QTimer *m_pollTimer = nullptr;
     QTimer *m_deadlineTimer = nullptr;
     QTimer *m_killTimer = nullptr;

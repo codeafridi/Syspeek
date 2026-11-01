@@ -28,6 +28,9 @@ struct DockerConfig {
 };
 
 struct KubeConfig {
+    // [k8s] context: the kubeconfig context every kubectl call targets. Empty
+    // means kubectl's own current-context.
+    QString context;
     int healthyMs = 30000;
     int issueMs = 10000;
     int backoffStartMs = 15000;
@@ -71,6 +74,16 @@ struct StatsdConfig {
 struct HistoryConfig {
     bool enabled = true;
     int samples = 3600;
+};
+
+// M86: the event stream. `events` is the ring size, `windowSeconds` the
+// radius of the "why did this spike" view a chart tick opens, and `markers`
+// whether charts draw the ticks at all.
+struct TimelineConfig {
+    bool enabled = true;
+    int events = 2000;
+    int windowSeconds = 90;
+    bool markers = true;
 };
 
 struct MetricsConfig {
@@ -199,6 +212,9 @@ struct CloudConfig {
     bool spend = true;
     // [cloud] spend_timeout_ms: budget per cost query.
     int spendTimeoutMs = 30000;
+    // [cloud] terraform_state: the file `terraform show -json` wrote (or a raw
+    // .tfstate). Empty means IaC drift is off and nothing is read.
+    QString terraformStatePath;
 };
 
 struct Config {
@@ -213,6 +229,7 @@ struct Config {
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
     HistoryConfig history;
+    TimelineConfig timeline;
     SilencesConfig silences;
     ActionsConfig actions;
     OverlayConfig overlay;

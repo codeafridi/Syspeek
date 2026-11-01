@@ -26,6 +26,47 @@ struct KubePod {
     long long memBytes = -1;
 };
 
+// Per-pod right-sizing (M89): OpenCost computes usage/request efficiency,
+// recommends a request at usage x buffer_multiplier (its default 1.2 for 20%
+// headroom), and prices the headroom the declared request carries above that
+// recommendation. The maths lives in CostModel (computePodRightSizing); the
+// row is declared here because a KubeSnapshot carries it.
+struct PodRightSizing {
+    QString ns;
+    QString pod;
+    double cpuUsageCores = 0.0;
+    double cpuRequestCores = 0.0;
+    double memUsageBytes = 0.0;
+    double memRequestBytes = 0.0;
+    double cpuRatio = 0.0;          // usage/request (0 when no request)
+    double memRatio = 0.0;
+    double suggestedCpuCores = 0.0; // usage x buffer
+    double suggestedMemBytes = 0.0;
+    // Headroom above the recommendation, priced at this cluster's rates.
+    // 0 when the pod is under-provisioned (usage above its request) - the
+    // recommendation is then a raise, and it saves nothing.
+    double monthlySavings = 0.0;
+    bool hasCpu = false;       // both a request and a usage sample
+    bool hasMem = false;
+    bool underCpu = false;     // usage is already above the request
+    bool underMem = false;
+};
+
+// Multi-context support (M90): the kubeconfig is the authority on which
+// clusters a user has, so Syspeek reads it rather than inventing a list.
+//
+// Grounding (shipped kubectl, strings kept /tmp/opencode/m8791/m90/
+// kubectl.strings): the kubeconfig JSON schema kubectl itself emits for
+// `kubectl config view -o json` - `"contexts"`, `"current-context"`,
+// `"clusters"`, `"users"`, and per-context `cluster` / `user` / `namespace`.
+struct KubeContext {
+    QString name;
+    QString cluster;
+    QString user;
+    QString namespace_;
+    bool current = false;
+};
+
 struct KubeDeployment {
     QString ns;
     QString name;
@@ -116,6 +157,9 @@ struct KubeSnapshot {
     QList<KubeDiagnosis> diagnoses;
     QList<KubeChange> timeline;
     QList<DeprecationFinding> deprecations;
+    QList<KubeContext> contexts;
+    QString currentContext;   // as the kubeconfig marks it
+    QString selectedContext;  // what Syspeek is actually querying
     int totalPods = 0;
     int issueCount = 0;
     int eventCount = 0;
@@ -124,6 +168,11 @@ struct KubeSnapshot {
     int costPods = 0;
     QList<QPair<QString, double>> costByNamespace;
     QList<QPair<QString, double>> costTopWorkloads;
+    // M89: per-pod right-sizing (OpenCost buffer model), computed by KubeSource
+    // once the metrics sample and the rates are both known.
+    QList<PodRightSizing> costRightSizing;
+    int costRightSizingPods = 0;
+    double costRightSizingSavings = 0.0;
     // OpenCost-style pricing detail (M81): the rates actually applied, the
     // cpu/ram split of the estimate, and usage/request efficiency over the
     // pods that report both (metrics.k8s.io) - -1 when unmeasurable.
@@ -171,6 +220,27 @@ int kubeIssueCount(const QList<KubePod> &pods,
 int kubeWarningCount(const QList<KubeEvent> &events);
 
 KubeState classifyKubeFailure(const QByteArray &payload);
+
+QString kubeSummaryText(const KubeSnapshot &snapshot);
+QString kubeDetailText(const KubeSnapshot &snapshot);
+QString kubeEventsText(const KubeSnapshot &snapshot);
+QString kubePodsText(const KubeSnapshot &snapshot);
+QString kubeDeploymentsText(const KubeSnapshot &snapshot);
+QString kubeDiagnosisText(const QList<KubeDiagnosis> &diagnoses);
+QString kubeTimelineText(const QList<KubeChange> &changes);
+QString kubeNodesText(const QList<KubeNode> &nodes);
+
+// Right-sizing recommendation per pod
+// Parses `kubectl config view -o json`. A malformed document is refused with
+// a reason; a document with no contexts is a valid (empty) kubeconfig.
+QList<KubeContext> kubeParseContexts(const QByteArray &json, QString *error);
+
+// The name marked current, or the first one when kubectl marked none.
+QString kubeCurrentContextName(const QList<KubeContext> &contexts);
+
+// "contexts: dev (current), prod, staging - SELECTED prod"
+QString kubeContextsText(const QList<KubeContext> &contexts,
+                         const QString &selected);
 
 QString kubeSummaryText(const KubeSnapshot &snapshot);
 QString kubeDetailText(const KubeSnapshot &snapshot);
