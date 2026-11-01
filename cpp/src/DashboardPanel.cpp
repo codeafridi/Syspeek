@@ -7736,14 +7736,28 @@ void DashboardPanel::setIncidents(const QList<Incident> &incidents) {
                 ? QStringLiteral("%1h").arg(ageMs / 3600000)
                 : QStringLiteral("%1m").arg(ageMs / 60000));
         text += QStringLiteral(
-            "<span style=\"color:%1;\">[OPEN]</span>"
+            "<span style=\"color:%1;\">[%6]</span>"
             "&nbsp;&nbsp;<span style=\"color:%2;\">[%3]</span>"
             "&nbsp;%4&nbsp;&nbsp;x%5")
-            .arg(ui_theme::accent(),
+            .arg(incident.flapping ? ui_theme::warn() : ui_theme::accent(),
                  ui_theme::statusColor(sev),
                  sev,
                  incident.title)
             .arg(incident.count)
+            .arg(incident.flapping ? QStringLiteral("FLAPPING")
+                                   : QStringLiteral("OPEN"))
+            + (incident.owner.isEmpty()
+                   ? QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "unowned</span>")
+                         .arg(ui_theme::dim())
+                   : QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "@%2</span>")
+                         .arg(ui_theme::dim(), incident.owner))
+            + (incident.rules.size() > 1
+                   ? QStringLiteral("&nbsp;&nbsp;<span style=\"color:%1;\">"
+                                    "group %2</span>")
+                         .arg(ui_theme::dim(), incident.groupKey)
+                   : QString())
             + (age.isEmpty()
                    ? QString()
                    : QStringLiteral("&nbsp;&middot;&nbsp;&nbsp;%1").arg(age))

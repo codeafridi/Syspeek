@@ -12,10 +12,15 @@ struct AlertRule {
     bool above = true; // breach when value > threshold (else <)
     int sustained = 1; // consecutive breaches required
     QString unit;
-    // M87: grouping key (group_by) and owner for correlation.
-    // If group is empty, each rule generates its own incident (backward-compatible).
-    QString group;       // group_by key — alerts sharing this key fold into one incident
-    QString owner;       // incident owner; "unowned" if empty, displayed on the incident row
+    // M87: correlation - group_by key and ownership, the Alertmanager/PagerDuty
+    // pair. An empty group folds the rule alone (its own id is the key); a set
+    // group folds every rule sharing it onto ONE incident row.
+    QString group;   // group_by key
+    QString owner;   // assignment; empty renders "unowned"
+    // Alertmanager group_wait / repeat_interval: hold the first notification
+    // for a new group, then re-notify a still-firing group only this often.
+    qint64 groupWaitMs = 5000;
+    qint64 repeatIntervalMs = 300000;
 };
 
 struct Alert {
@@ -25,6 +30,11 @@ struct Alert {
     QString severity;
     double value = 0.0;
     qint64 atMs = 0;
+    // M87: correlation fields carried from the rule, so the outbound webhook
+    // payload can label every alert with the group it folds into and who owns
+    // it - the receiver groups and routes the same way the console does.
+    QString group;
+    QString owner;
 };
 
 // Latest observed values, assembled from the app/host/services/journal snapshots.
@@ -69,6 +79,12 @@ public:
     QList<AlertRule> rules() const { return m_rules; }
     bool setRuleThreshold(const QString &id, double threshold);
     bool setRuleSustained(const QString &id, int sustained);
+    // M87: the correlated identity of a rule - fold key, owner, and the
+    // Alertmanager cadence. Kept separate from the threshold editors so a
+    // config load never clobbers a live edit and vice versa.
+    bool setRuleCorrelation(const QString &id, const QString &group,
+                            const QString &owner, qint64 groupWaitMs,
+                            qint64 repeatIntervalMs);
     void resetRules();
 
 private:

@@ -10,3 +10,4 @@ cpp/packaging/windows/manifests/
 
 # AppImage updatersync artifacts
 *.AppImage.zsync
+Testing/

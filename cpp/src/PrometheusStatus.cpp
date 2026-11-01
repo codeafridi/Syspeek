@@ -533,5 +533,33 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    // M87: correlation state from the console. Emitted only once the HUD has
+    // actually reported, so a scrape against a fresh sampler does not read a
+    // fabricated zero incidents.
+    if (s.alerts.pushed) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_incidents_open Open correlated incidents."));
+        lines.append(QStringLiteral("# TYPE syspeek_incidents_open gauge"));
+        lines.append(gaugeInt("syspeek_incidents_open", s.alerts.openIncidents));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_incidents_flapping Open incidents with a flapping "
+            "member rule."));
+        lines.append(
+            QStringLiteral("# TYPE syspeek_incidents_flapping gauge"));
+        lines.append(
+            gaugeInt("syspeek_incidents_flapping", s.alerts.flappingIncidents));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_alerts_flapping  Monitors whose rule is past the "
+            "flap threshold; their outbound notifications are held."));
+        lines.append(QStringLiteral("# TYPE syspeek_alerts_flapping gauge"));
+        lines.append(
+            gaugeInt("syspeek_alerts_flapping", s.alerts.flappingRules));
+        lines.append(QStringLiteral(
+            "# HELP syspeek_incidents_unowned Open incidents with no owner."));
+        lines.append(
+            QStringLiteral("# TYPE syspeek_incidents_unowned gauge"));
+        lines.append(gaugeInt("syspeek_incidents_unowned", s.alerts.unownedOpen));
+    }
+
     return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }

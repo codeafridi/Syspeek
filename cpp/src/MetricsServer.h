@@ -25,6 +25,9 @@ public slots:
     void start();
     void stop();
     void setSnapshot(const DisplaySnapshot &snapshot);
+    // M87: correlation state lives in the HUD, not the sampler - the console
+    // pushes it here so a scrape sees the same incidents the page shows.
+    void setAlertState(const AlertExposure &alerts);
 
 private slots:
     void onNewConnection();

@@ -1423,6 +1423,195 @@ int main(int argc, char *argv[]) {
               "incident: detail text");
     }
 
+    // --- M87: correlation, ownership, notification cadence, flap -----------
+    {
+        const QList<AlertRule> rules = defaultAlertRules();
+        bool appCompute = false;
+        bool ownerEmpty = false;
+        for (const AlertRule &rule : rules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                appCompute = rule.group == QStringLiteral("compute");
+                ownerEmpty = rule.owner.isEmpty();
+            }
+        }
+        check(appCompute, "correlation: defaults fold app_cpu into compute");
+        check(ownerEmpty, "ownership: defaults leave the assignment unset");
+
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+        Alert hostCpu;
+        hostCpu.id = QStringLiteral("host_cpu");
+        hostCpu.title = QStringLiteral("Host CPU high");
+        hostCpu.severity = QStringLiteral("warning");
+        hostCpu.detail = QStringLiteral("91.0%");
+        hostCpu.group = QStringLiteral("compute");
+        Alert disk;
+        disk.id = QStringLiteral("disk");
+        disk.title = QStringLiteral("Low disk space");
+        disk.severity = QStringLiteral("warning");
+        disk.detail = QStringLiteral("9.0% free");
+        disk.group = QStringLiteral("capacity");
+
+        IncidentTracker folded(60000, 10, 6, 600000);
+        folded.update({cpu}, rules, 1000);
+        folded.update({cpu, hostCpu}, rules, 2000);
+        folded.update({cpu, hostCpu, disk}, rules, 3000);
+        const QList<Incident> rows = folded.incidents();
+        check(rows.size() == 2, "correlation: two groups make two incidents");
+        int computeRow = -1;
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows.at(i).groupKey == QStringLiteral("compute")) {
+                computeRow = i;
+            }
+        }
+        check(computeRow >= 0 && rows.at(computeRow).rules.size() == 2
+                  && rows.at(computeRow).count == 5,
+              "correlation: grouped rules fold onto one row and count");
+        check(computeRow >= 0
+                  && rows.at(computeRow).severity == QStringLiteral("critical")
+                  && rows.at(computeRow).title
+                         == QStringLiteral("Focused app CPU high"),
+              "correlation: the most severe folded alert names the row");
+
+        QList<AlertRule> owned = defaultAlertRules();
+        for (AlertRule &rule : owned) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.owner = QStringLiteral("platform");
+            }
+        }
+        IncidentTracker tracker(60000, 10, 6, 600000);
+        tracker.update({cpu}, owned, 1000);
+        check(tracker.incidents().first().owner == QStringLiteral("platform"),
+              "ownership: the rule owner lands on the incident");
+        check(incidentsDetailText(tracker.incidents())
+                  .contains(QStringLiteral("owner platform")),
+              "ownership: the detail names the owner");
+        IncidentTracker unowned(60000, 10, 6, 600000);
+        unowned.update({cpu}, rules, 1000);
+        check(incidentsDetailText(unowned.incidents())
+                  .contains(QStringLiteral("owner unowned")),
+              "ownership: an unassigned incident says unowned");
+    }
+
+    {
+        // Alertmanager cadence: group_wait holds the first note, repeat_interval
+        // gates the next, and a batch key reflects the fold.
+        const QList<AlertRule> rules = defaultAlertRules();
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+
+        IncidentTracker tracker(60000, 10, 6, 600000);
+        tracker.update({cpu}, rules, 0);
+        check(tracker.dueNotifications(1000).isEmpty(),
+              "notify: group_wait holds the first notification");
+        check(tracker.dueNotifications(6000).size() == 1,
+              "notify: group_wait elapses, the group notifies once");
+        check(tracker.dueNotifications(10000).isEmpty(),
+              "notify: repeat_interval gates the next notification");
+        check(tracker.dueNotifications(306000).size() == 1,
+              "notify: the default repeat_interval re-notifies at 5 min");
+
+        QList<AlertRule> fast = defaultAlertRules();
+        for (AlertRule &rule : fast) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.groupWaitMs = 1000;
+                rule.repeatIntervalMs = 30000;
+            }
+        }
+        IncidentTracker quick(60000, 10, 6, 600000);
+        quick.update({cpu}, fast, 0);
+        check(quick.dueNotifications(2000).size() == 1,
+              "notify: a 1s group_wait notifies quickly");
+        check(quick.dueNotifications(10000).isEmpty(),
+              "notify: the configured 30s repeat holds at 10s");
+        check(quick.dueNotifications(33000).size() == 1,
+              "notify: the configured 30s repeat fires at 33s");
+
+        // M87: the correlation state reaches /metrics, but only once the
+        // console has actually reported.
+        DisplaySnapshot scrape;
+        scrape.hostAvailable = true;
+        scrape.hostCpuPercent = 12.0;
+        check(!prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_incidents_open")),
+              "prometheus: no incident gauges before the console reports");
+        scrape.alerts.pushed = true;
+        scrape.alerts.openIncidents = 2;
+        scrape.alerts.flappingIncidents = 1;
+        scrape.alerts.flappingRules = 1;
+        scrape.alerts.unownedOpen = 1;
+        const QString exposition = prometheusText(scrape);
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_open 2")),
+              "prometheus: open incident gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_flapping 1")),
+              "prometheus: flapping incident gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_alerts_flapping 1")),
+              "prometheus: flapping rule gauge");
+        check(exposition.contains(
+                  QStringLiteral("syspeek_incidents_unowned 1")),
+              "prometheus: unowned incident gauge");
+
+        const QString detail =
+            tracker.incidents().isEmpty()
+                ? QString()
+                : tracker.incidents().first().timeline.join(QLatin1Char('\\n'));
+        check(detail.contains(QStringLiteral("notified")),
+              "notify: the incident timeline records the notification");
+    }
+
+    {
+        const QList<AlertRule> rules = defaultAlertRules();
+        Alert cpu;
+        cpu.id = QStringLiteral("app_cpu");
+        cpu.title = QStringLiteral("Focused app CPU high");
+        cpu.severity = QStringLiteral("critical");
+        cpu.detail = QStringLiteral("95.0%");
+        cpu.group = QStringLiteral("compute");
+
+        IncidentTracker flapper(60000, 10, 6, 600000);
+        qint64 now = 0;
+        for (int i = 0; i < 12; ++i) {
+            flapper.update(i % 2 == 0 ? QList<Alert>{cpu} : QList<Alert>{},
+                           rules, now);
+            now += 1000;
+        }
+        check(flapper.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: repeated transitions mark the rule flapping");
+        check(incidentsSummaryText(flapper.incidents())
+                  .contains(QStringLiteral("flapping")),
+              "flap: the summary counts flapping rows");
+        check(incidentsDetailText(flapper.incidents())
+                  .contains(QStringLiteral("FLAPPING")),
+              "flap: the detail shows the flapping marker");
+
+        IncidentTracker quiet(60000, 10, 6, 600000);
+        quiet.update({cpu}, rules, 0);
+        quiet.update({cpu}, rules, 1000);
+        check(!quiet.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: a steady breach is not flapping");
+
+        IncidentTracker slow(60000, 10, 3, 10000);
+        qint64 sparse = 0;
+        for (int i = 0; i < 6; ++i) {
+            slow.update(i % 2 == 0 ? QList<Alert>{cpu} : QList<Alert>{}, rules,
+                        sparse);
+            sparse += 20000;
+        }
+        check(!slow.flappingRules().contains(QStringLiteral("app_cpu")),
+              "flap: transitions outside the window do not count");
+    }
+
     {
         QList<double> rising;
         for (int i = 0; i < 60; ++i) {
@@ -1905,6 +2094,8 @@ int main(int argc, char *argv[]) {
         firing.detail = QStringLiteral("cursor cpu 96.0% >= 90%");
         firing.severity = QStringLiteral("critical");
         firing.status = QStringLiteral("firing");
+        firing.group = QStringLiteral("compute");
+        firing.owner = QStringLiteral("platform");
         firing.startsAtMs = 1700000000000LL;
 
         const QJsonObject generic =
@@ -1915,6 +2106,9 @@ int main(int argc, char *argv[]) {
               "webhook: generic payload version 4");
         check(!generic.value(QStringLiteral("groupKey")).toString().isEmpty(),
               "webhook: generic groupKey present");
+        check(generic.value(QStringLiteral("groupKey")).toString()
+                  == QStringLiteral("compute"),
+              "webhook: groupKey carries the fold key");
         check(generic.value(QStringLiteral("truncatedAlerts")).toInt() == 0,
               "webhook: generic truncatedAlerts 0");
         check(generic.value(QStringLiteral("receiver")).toString()
@@ -1941,6 +2135,36 @@ int main(int argc, char *argv[]) {
         check(labels.value(QStringLiteral("severity")).toString()
                   == QStringLiteral("critical"),
               "webhook: label severity");
+        check(labels.value(QStringLiteral("group")).toString()
+                  == QStringLiteral("compute"),
+              "webhook: label group");
+        check(labels.value(QStringLiteral("owner")).toString()
+                  == QStringLiteral("platform"),
+              "webhook: label owner");
+        check(generic.value(QStringLiteral("groupLabels"))
+                      .toObject()
+                      .value(QStringLiteral("group"))
+                      .toString()
+                  == QStringLiteral("compute"),
+              "webhook: groupLabels carry the fold key");
+        check(generic.value(QStringLiteral("commonLabels"))
+                      .toObject()
+                      .value(QStringLiteral("owner"))
+                      .toString()
+                  == QStringLiteral("platform"),
+              "webhook: commonLabels carry the assignment");
+        {
+            WebhookEvent other = firing;
+            other.id = QStringLiteral("disk");
+            other.group = QStringLiteral("capacity");
+            const QJsonObject mixed =
+                QJsonDocument::fromJson(
+                    alertmanagerWebhookPayload({firing, other}))
+                    .object();
+            check(mixed.value(QStringLiteral("groupKey")).toString()
+                      == QStringLiteral("syspeek"),
+                  "webhook: a mixed batch falls back to the receiver key");
+        }
         check(annotations.value(QStringLiteral("summary")).toString()
                   == firing.title
                   && annotations.value(QStringLiteral("description")).toString()
@@ -1994,10 +2218,13 @@ int main(int argc, char *argv[]) {
               "webhook: slack fallback");
         const QJsonArray fields =
             attachment.value(QStringLiteral("fields")).toArray();
-        check(fields.size() == 2
+        check(fields.size() == 4
                   && fields.first().toObject().value(QStringLiteral("short"))
-                         .toBool(),
-              "webhook: slack fields short");
+                         .toBool()
+                  && fields.at(2).toObject().value(QStringLiteral("value"))
+                             .toString()
+                         == QStringLiteral("platform"),
+              "webhook: slack fields short (severity, status, owner, group)");
         check(attachment.value(QStringLiteral("mrkdwn_in"))
                       .toArray()
                       .contains(QJsonValue(QStringLiteral("text"))),

@@ -17,6 +17,17 @@
 #include "CloudStatus.h"
 #include "TickBudget.h"
 
+// M87: the console's correlation state, exported to /metrics so a dashboard
+// can alert on "an incident nobody owns" or "a flapping monitor" rather than
+// only on the raw metric.
+struct AlertExposure {
+    bool pushed = false;   // the console has reported at least once
+    int openIncidents = 0;
+    int flappingIncidents = 0;
+    int flappingRules = 0;
+    int unownedOpen = 0;
+};
+
 #include <QList>
 #include <QPair>
 #include <QString>
@@ -182,5 +193,6 @@ struct DisplaySnapshot {
     // this snapshot (both self-measured, both shown in Settings).
     SelfCost self;
     TickCost tick;
+    AlertExposure alerts;
     quint64 sequence = 0;
 };

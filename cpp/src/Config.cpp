@@ -199,6 +199,46 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             if (ok && cycles >= 1 && cycles <= 100) {
                 rule.sustained = cycles;
             }
+            // M87: correlation keys. A group folds every rule sharing it onto
+            // one incident; an owner is the PagerDuty-style assignment shown on
+            // the row. The cadence keys are Alertmanager's group_wait /
+            // repeat_interval, in seconds, clamped to a sane band.
+            const QString groupKey = rule.id + QStringLiteral("_group");
+            if (settings.contains(groupKey)) {
+                const QString group =
+                    settings.value(groupKey).toString().trimmed();
+                if (group.size() <= 64) {
+                    // Present-but-empty is a real choice: fold alone.
+                    rule.group = group;
+                }
+            }
+            const QString ownerKey = rule.id + QStringLiteral("_owner");
+            if (settings.contains(ownerKey)) {
+                const QString owner =
+                    settings.value(ownerKey).toString().trimmed();
+                if (owner.size() <= 64) {
+                    rule.owner = owner;
+                }
+            }
+            const double waitS =
+                settings.value(rule.id + QStringLiteral("_group_wait_s"))
+                    .toString()
+                    .toDouble(&ok);
+            if (ok && waitS > 0.0 && waitS <= 86400.0) {
+                rule.groupWaitMs = static_cast<qint64>(waitS * 1000.0);
+            }
+            const double repeatS =
+                settings.value(rule.id + QStringLiteral("_repeat_s"))
+                    .toString()
+                    .toDouble(&ok);
+            // repeat_interval shorter than group_wait is rejected the same way
+            // Alertmanager rejects it ("repeat_interval is less than
+            // group_interval").
+            if (ok && repeatS > 0.0 && repeatS <= 86400.0
+                && repeatS * 1000.0 >= static_cast<double>(rule.groupWaitMs)) {
+                rule.repeatIntervalMs =
+                    static_cast<qint64>(repeatS * 1000.0);
+            }
         }
         config.alertRules = rules;
     }
@@ -666,6 +706,14 @@ void saveAlertOverrides(const QString &path,
                           rule.threshold);
         settings.setValue(rule.id + QStringLiteral("_cycles"),
                           rule.sustained);
+        // M87: persist correlation + cadence so a configured group/owner
+        // survives a restart (the editors only touch threshold/cycles).
+        settings.setValue(rule.id + QStringLiteral("_group"), rule.group);
+        settings.setValue(rule.id + QStringLiteral("_owner"), rule.owner);
+        settings.setValue(rule.id + QStringLiteral("_group_wait_s"),
+                          static_cast<double>(rule.groupWaitMs) / 1000.0);
+        settings.setValue(rule.id + QStringLiteral("_repeat_s"),
+                          static_cast<double>(rule.repeatIntervalMs) / 1000.0);
     }
     settings.endGroup();
     settings.sync();

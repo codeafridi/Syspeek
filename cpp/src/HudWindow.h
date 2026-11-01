@@ -79,6 +79,9 @@ public:
     void expireSilence(const QString &matcher);
 
 signals:
+    // M87: the console owns the correlation state; the scrape endpoint needs
+    // it pushed (the sampler knows nothing about alerts).
+    void alertStateChanged(const AlertExposure &state);
     void serviceRestartRequested(const QString &unit);
     void containerActionRequested(const QString &id, const QString &verb);
 

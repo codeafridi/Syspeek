@@ -1543,6 +1543,32 @@ int main(int argc, char *argv[]) {
     check(dashAlerts != nullptr
               && dashAlerts->text().contains(QStringLiteral("CPU")),
           "panel shows active alert");
+    check(breachIncidents != nullptr
+              && breachIncidents->text().contains(QStringLiteral("unowned")),
+          "M87: an unassigned incident says unowned on the row");
+
+    // M87: assigning an owner while the incident is open lands on the row on
+    // the next tick (the fold re-reads ownership), and the fold key names the
+    // correlation the defaults gave app_cpu + host_cpu.
+    {
+        QList<AlertRule> owned = defaultAlertRules();
+        for (AlertRule &rule : owned) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                rule.owner = QStringLiteral("platform");
+            }
+        }
+        hud.setMonitors(owned);
+        // A monitor edit clears the rule's streak, so re-arm the breach.
+        hud.setSnapshot(hot);
+        hud.setSnapshot(hot);
+        hud.setSnapshot(hot);
+        auto *incidentRows =
+            hud.findChild<QLabel *>(QStringLiteral("ddIncidents"));
+        check(incidentRows != nullptr
+                  && incidentRows->text().contains(
+                      QStringLiteral("owner platform")),
+              "M87: the incident row shows the assigned owner");
+    }
 
     SyntheticSnapshot synthetic;
     ProbeResult probe;

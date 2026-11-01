@@ -93,8 +93,18 @@ void MetricsServer::stop() {
 }
 
 void MetricsServer::setSnapshot(const DisplaySnapshot &snapshot) {
+    // The sampler knows nothing about alerts; keep the console-pushed state
+    // across a snapshot replace so a scrape never flaps to zero.
+    const AlertExposure alerts = m_snapshot.alerts;
     m_snapshot = snapshot;
-    m_body = prometheusText(snapshot).toUtf8();
+    m_snapshot.alerts = alerts;
+    m_body = prometheusText(m_snapshot).toUtf8();
+}
+
+void MetricsServer::setAlertState(const AlertExposure &alerts) {
+    m_snapshot.alerts = alerts;
+    m_snapshot.alerts.pushed = true;
+    m_body = prometheusText(m_snapshot).toUtf8();
 }
 
 void MetricsServer::onNewConnection() {

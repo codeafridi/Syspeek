@@ -652,6 +652,8 @@ int main(int argc, char *argv[]) {
         metricsServer->start();
         QObject::connect(worker, &SamplerWorker::snapshotReady, metricsServer,
                          &MetricsServer::setSnapshot);
+        QObject::connect(&hud, &HudWindow::alertStateChanged, metricsServer,
+                         &MetricsServer::setAlertState);
     }
 
     quint64 lastSequence = 0;

@@ -969,6 +969,8 @@ void HudWindow::setMonitors(const QList<AlertRule> &rules) {
     for (const AlertRule &rule : rules) {
         m_alerts.setRuleThreshold(rule.id, rule.threshold);
         m_alerts.setRuleSustained(rule.id, rule.sustained);
+        m_alerts.setRuleCorrelation(rule.id, rule.group, rule.owner,
+                                    rule.groupWaitMs, rule.repeatIntervalMs);
     }
     if (m_panel != nullptr) {
         m_panel->setMonitors(rules);
@@ -1109,14 +1111,46 @@ void HudWindow::evaluateAlerts() {
         }
     }
 
+    // M87: correlate before anything goes out, so flap state is known.
+    m_incidents.update(loudActive, m_alerts.rules(), now);
+    const QSet<QString> flapping = m_incidents.flappingRules();
+    // Flap suppression holds only the OUTBOUND path - the incident row and the
+    // Alerts page keep showing the breach (the same split silences use).
+    for (auto it = loudFired.begin(); it != loudFired.end();) {
+        if (flapping.contains(it->id)) {
+            it = loudFired.erase(it);
+        } else {
+            ++it;
+        }
+    }
     if (m_webhook != nullptr) {
         m_webhook->processEvents(loudFired, loudActive, now);
     }
+    // The notification ledger: group_wait holds the first note for a new
+    // group, repeat_interval gates the repeats - both land on the incident
+    // rows the Incidents page renders.
+    m_incidents.dueNotifications(now);
+    const QList<Incident> incidents = m_incidents.incidents();
     if (m_panel != nullptr) {
         m_panel->setAlerts(active);
-        m_incidents.update(loudActive, m_alerts.rules(), now);
-        m_panel->setIncidents(m_incidents.incidents());
+        m_panel->setIncidents(incidents);
     }
+    AlertExposure exposure;
+    exposure.pushed = true;
+    exposure.flappingRules = flapping.size();
+    for (const Incident &incident : incidents) {
+        if (incident.status != QStringLiteral("open")) {
+            continue;
+        }
+        ++exposure.openIncidents;
+        if (incident.flapping) {
+            ++exposure.flappingIncidents;
+        }
+        if (incident.owner.isEmpty()) {
+            ++exposure.unownedOpen;
+        }
+    }
+    emit alertStateChanged(exposure);
 
     // Event stream: the engine only reports transitions, so a fired alert is
     // exactly one event and a monitor that stops breaching is exactly one
@@ -1133,6 +1167,9 @@ void HudWindow::evaluateAlerts() {
                       QStringLiteral("severity:%1").arg(alert.severity)};
         if (activeSilenceFor(m_silences, alert.id, now) != nullptr) {
             event.tags.append(QStringLiteral("silenced"));
+        }
+        if (flapping.contains(alert.id)) {
+            event.tags.append(QStringLiteral("flapping"));
         }
         recordEvent(event);
     }

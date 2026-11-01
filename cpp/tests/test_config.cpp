@@ -178,6 +178,60 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M87: correlation keys and cadence load, a repeat_interval shorter
+        // than group_wait is rejected (Alertmanager's own rule), and a
+        // present-but-empty group is a real choice - fold alone.
+        QTemporaryDir dir87;
+        const QString path = writeConfig(dir87, QByteArrayLiteral(
+            "[alerts]\n"
+            "app_cpu_group=edge\n"
+            "app_cpu_owner=alice\n"
+            "app_cpu_group_wait_s=3\n"
+            "app_cpu_repeat_s=45\n"
+            "host_cpu_repeat_s=1\n"
+            "disk_group=\n"
+            "disk_owner=\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        const AlertRule *appCpu = nullptr;
+        const AlertRule *hostCpu = nullptr;
+        const AlertRule *disk = nullptr;
+        for (const AlertRule &rule : c.alertRules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                appCpu = &rule;
+            } else if (rule.id == QStringLiteral("host_cpu")) {
+                hostCpu = &rule;
+            } else if (rule.id == QStringLiteral("disk")) {
+                disk = &rule;
+            }
+        }
+        check(appCpu != nullptr && appCpu->group == QStringLiteral("edge")
+                  && appCpu->owner == QStringLiteral("alice"),
+              "alerts: group + owner load from config");
+        check(appCpu != nullptr && appCpu->groupWaitMs == 3000
+                  && appCpu->repeatIntervalMs == 45000,
+              "alerts: group_wait + repeat_interval load in seconds");
+        check(hostCpu != nullptr
+                  && hostCpu->repeatIntervalMs == 300000,
+              "alerts: a repeat shorter than group_wait is rejected");
+        check(disk != nullptr && disk->group.isEmpty()
+                  && disk->owner.isEmpty(),
+              "alerts: a present-but-empty group clears the fold");
+
+        saveAlertOverrides(path, c.alertRules);
+        const Config reloaded = loadConfig(path, &error);
+        bool kept = false;
+        for (const AlertRule &rule : reloaded.alertRules) {
+            if (rule.id == QStringLiteral("app_cpu")) {
+                kept = rule.group == QStringLiteral("edge")
+                       && rule.owner == QStringLiteral("alice")
+                       && rule.repeatIntervalMs == 45000;
+            }
+        }
+        check(kept, "alerts: save roundtrip keeps group, owner and cadence");
+    }
+
+    {
         // M75: [silences] — a rolling duration authored in the file and an
         // absolute window the HUD wrote (survives a restart).
         QTemporaryDir dirSilence;
