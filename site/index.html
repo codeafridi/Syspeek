@@ -178,14 +178,14 @@
             </figure>
             <figure class="tile">
               <a href="shots/cost.webp" target="_blank" rel="noopener"><img src="shots/cost.webp" width="1200" height="852" loading="lazy" alt="Cost page: monthly, hourly, CPU efficiency and memory efficiency tiles, a cost allocation card, a right-sizing card, a cost chart and namespace and workload breakdown tables." /></a>
-              <figcaption><b>Cost</b> OpenCost-style cluster cost from declared requests, efficiency, right-sizing and per-namespace share.</figcaption>
+              <figcaption><b>Cost</b> Cluster cost from declared requests, efficiency, and a per-pod suggestion table: request &rarr; usage &times; 1.2, priced at your own rates.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/cloud.webp" target="_blank" rel="noopener"><img src="shots/cloud.webp" width="1200" height="852" loading="lazy" alt="Cloud page: provider, age, accrued and monthly cost tiles, the instance identity card, a running-instances chart and the fleet inventory table." /></a>
-              <figcaption><b>Cloud</b> Instance identity from the metadata service, age and accrued cost, and the account's fleet from your own CLI.</figcaption>
+              <a href="shots/cloud.webp" target="_blank" rel="noopener"><img src="shots/cloud.webp" width="1200" height="852" loading="lazy" alt="Cloud page: provider, age, accrued and monthly cost tiles, the instance identity card showing the config-fallback note, a running-instances chart, the fleet inventory table with per-instance monthly rates, and the IaC drift card reporting two resources in sync, one missing and one unmanaged." /></a>
+              <figcaption><b>Cloud</b> Instance identity, the account's fleet from your own CLI with each row's age and monthly rate, and the Terraform state diffed against that listing.</figcaption>
             </figure>
             <figure class="tile">
-              <a href="shots/cloud-spend.webp" target="_blank" rel="noopener"><img src="shots/cloud-spend.webp" width="1200" height="715" loading="lazy" alt="Billed spend section of the Cloud page: a daily spend chart, month to date and forecast, the query it came from, and a per-service breakdown." /></a>
+              <a href="shots/cloud-spend.webp" target="_blank" rel="noopener"><img src="shots/cloud-spend.webp" width="1200" height="761" loading="lazy" alt="Billed spend section of the Cloud page: a daily spend chart, month to date and forecast, the query it came from, and a per-service breakdown." /></a>
               <figcaption><b>Billed spend</b> What the provider actually charged this month, straight from Cost Explorer, with a month-end forecast.</figcaption>
             </figure>
             <figure class="tile">
@@ -201,7 +201,7 @@
           <div class="notes">
             <h3 id="screenshot-notes">Notes on these captures</h3>
             <p>
-              These are live captures of Syspeek on one machine &mdash; not mock-ups and not a designer's render. The gallery was shot on 0.10.0 and has not been re-taken for 0.11.0 yet, so the <b>Cost</b> panel predates the per-pod right-sizing table and the <b>Cloud</b> panel predates the burn-rate line and the IaC drift card; the rest of the console is unchanged apart from those additions. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD. There is no cloud provider behind this laptop, so the two <b>Cloud</b> panels are rendered from the application's own screenshot fixtures with a synthetic AWS identity and spend document; every other panel is the running binary. Treat the Cloud panels as a layout reference, and the release notes for what CI proves about that path against a real metadata service.
+              These are live captures of Syspeek 0.11.0 on one machine &mdash; not mock-ups and not a designer's render. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD, and the cluster panels are a real single-node Kubernetes cluster with metrics-server. There is no cloud account behind this laptop, so the <b>Cloud</b> panel is a live capture against a <em>local AWS emulator</em>: the identity comes from <code>[cloud] identity=</code> (no instance metadata service exists there, and the card says so), and the instances, the rates and the Terraform diff are the emulator's real API responses decoded by the shipping code. The <b>Billed spend</b> close-up is the one panel rendered from the application's screenshot fixtures &mdash; a three-hour-old emulator account has one day of cost, which makes for an empty chart &mdash; so treat its numbers as a layout reference and the release notes for what is proven where.
             </p>
           </div>
         </div>

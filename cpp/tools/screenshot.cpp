@@ -589,6 +589,15 @@ DisplaySnapshot demoSnapshot(int tick) {
                                                            QLatin1Char('0')),
                           12.0 + double((day * 7) % 9)});
     }
+    // M88: the burn line rides the spend detail, so the fixture carries a
+    // measured rate instead of the "no billed spend yet" gate.
+    s.cloud.burn.valid = true;
+    s.cloud.burn.currentPerHour = 0.86;
+    s.cloud.burn.baselinePerHour = 0.62;
+    s.cloud.burn.ratio = 1.39;
+    s.cloud.burn.projectedPerHour = 0.91;
+    s.cloud.burn.severity = 0;
+    s.cloud.burn.text = cloudBurnText(s.cloud.burn);
 
     // M84: the console measures itself. A measured footprint and a 62 ms tick
     // with named sections, so the Settings render shows real rows.
