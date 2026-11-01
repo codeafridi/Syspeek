@@ -617,6 +617,11 @@ int main(int argc, char *argv[]) {
 
     QString configError;
     const Config config = loadConfig(defaultConfigPath(), &configError);
+    // The accent is the one colour a user may change; it has to be installed
+    // before the HUD builds its stylesheet, and the palette has to follow it
+    // because widgets the QSS cannot reach read Highlight from there.
+    ui_theme::setAccent(config.theme.accent);
+    QApplication::setPalette(ui_theme::darkPalette());
     if (!configError.isEmpty()) {
         std::fprintf(stderr, "[syspeek] config: %s\n",
                      qUtf8Printable(configError));
@@ -738,7 +743,8 @@ int main(int argc, char *argv[]) {
         hud.setTimelineConfig(config.timeline.enabled, config.timeline.events,
                               config.timeline.markers,
                               config.timeline.windowSeconds);
-        hud.setOverlayConfig(config.overlay, defaultConfigPath());
+        hud.setAppearance(config.theme.accent, config.overlay,
+                          defaultConfigPath());
     }
 
     std::unique_ptr<FocusedWindowProvider> provider = createFocusProvider(config);

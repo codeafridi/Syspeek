@@ -15,6 +15,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QPen>
+#include <QPixmap>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -218,7 +222,10 @@ HudWindow::HudWindow(QWidget *parent)
         "  border: 1px solid %BORDER%;"
         "}"
         "#title {"
-        "  color: %DIM%;"
+        // The accent is the one colour a user may change; the strip carries it
+        // on the wordmark so a picked accent is visible without opening the
+        // console.
+        "  color: %ACCENT%;"
         "  background: transparent;"
         "  padding: 4px 6px 4px 12px;"
         "  letter-spacing: 1.5px;"
@@ -258,6 +265,7 @@ HudWindow::HudWindow(QWidget *parent)
         "  color: %TEXT%; border-color: %MUTED%;"
         "}"
         "QLabel   { color: %DIM%; }")
+        .replace(QStringLiteral("%ACCENT%"), ui_theme::accent())
         .replace(QStringLiteral("%BG%"), ui_theme::bg())
         .replace(QStringLiteral("%BORDER%"), ui_theme::border())
         .replace(QStringLiteral("%TEXT%"), ui_theme::text())
@@ -272,6 +280,22 @@ HudWindow::HudWindow(QWidget *parent)
             &HudWindow::applyMonitorChange);
     connect(m_panel, &DashboardPanel::monitorsResetRequested, this,
             &HudWindow::resetMonitors);
+    // Appearance changes take effect immediately and are written back to the
+    // same config file the overlay geometry uses.
+    connect(m_panel, &DashboardPanel::appearanceChanged, this,
+            [this](const QString &accent, int opacity, const QString &wallpaper,
+                   const QString &mode, int dim) {
+                OverlayConfig next = m_overlayConfig;
+                next.opacity = opacity;
+                next.wallpaper = wallpaper;
+                next.wallpaperMode = mode;
+                next.wallpaperDim = dim;
+                applyAppearance(accent, next, m_overlayPath);
+                if (!m_overlayPath.isEmpty()) {
+                    saveThemeAccent(m_overlayPath, accent);
+                    saveOverlayConfig(m_overlayPath, next);
+                }
+            });
     connect(m_panel, &DashboardPanel::historyExportRequested, this,
             &HudWindow::exportHistory);
     connect(m_panel, &DashboardPanel::historySeekRequested, this,
@@ -1286,6 +1310,7 @@ void HudWindow::toggleDetails() {
 
     m_moreButton->setText(m_detailsExpanded ? QStringLiteral("LESS")
                                             : QStringLiteral("MORE"));
+    applySurfaceAppearance();
 
     if (m_overlay.clickThrough) {
         // The kept input rectangle follows the CLICK button when the layout
@@ -1325,6 +1350,95 @@ void HudWindow::setOverlayConfig(const OverlayConfig &config,
                                 const QString &path) {
     m_overlayConfig = config;
     m_overlayPath = path;
+    reloadWallpaper();
+    applySurfaceAppearance();
+}
+
+void HudWindow::reloadWallpaper() {
+    const QString path = m_overlayConfig.wallpaper;
+    if (path.isEmpty()) {
+        m_wallpaper = QImage();
+    } else if (m_wallpaper.isNull() || m_wallpaperPath != path) {
+        m_wallpaper = loadWallpaper(path);
+    }
+    m_wallpaperPath = path;
+    m_wallpaperScaled = QImage();
+    m_wallpaperScaledFor = QSize();
+    update();
+}
+
+void HudWindow::applySurfaceAppearance() {
+    // The collapsed strip can be see-through; the expanded console never is -
+    // a translucent table is a readability bug, not a style.
+    const double opacity = m_detailsExpanded
+                               ? 1.0
+                               : qBound(40, m_overlayConfig.opacity, 100)
+                                     / 100.0;
+    if (!qFuzzyCompare(windowOpacity(), opacity)) {
+        setWindowOpacity(opacity);
+    }
+    update();
+}
+
+void HudWindow::setAppearance(const QString &accent,
+                              const OverlayConfig &config,
+                              const QString &path) {
+    ui_theme::setAccent(accent);
+    // setOverlayConfig keeps the config path, which is what the appearance
+    // edits write back to.
+    setOverlayConfig(config, path);
+    if (m_panel != nullptr) {
+        m_panel->setAppearance(accent, config.opacity, config.wallpaper,
+                               config.wallpaperMode, config.wallpaperDim);
+    }
+}
+
+void HudWindow::applyAppearance(const QString &accent,
+                                const OverlayConfig &config,
+                                const QString &path) {
+    ui_theme::setAccent(accent);
+    setOverlayConfig(config, path);
+    if (m_panel != nullptr) {
+        m_panel->applyTheme();
+    }
+    qApp->setPalette(ui_theme::darkPalette());
+    update();
+}
+
+void HudWindow::paintEvent(QPaintEvent *event) {
+    // The wallpaper is a collapsed-strip backdrop only, and it is always laid
+    // under a scrim of the page colour so the readout stays legible on any
+    // photograph.
+    if (m_wallpaper.isNull() || m_detailsExpanded) {
+        QWidget::paintEvent(event);
+        return;
+    }
+    QPainter painter(this);
+    const WallpaperMode mode =
+        wallpaperModeFromString(m_overlayConfig.wallpaperMode);
+    const QRectF target(rect());
+    const QSizeF source(m_wallpaper.size());
+    if (mode == WallpaperMode::Fill) {
+        painter.drawImage(target,
+                          m_wallpaper,
+                          wallpaperSourceRect(mode, source,
+                                              QSizeF(target.size())));
+    } else if (mode == WallpaperMode::Tile) {
+        painter.fillRect(rect(), QColor(ui_theme::bg()));
+        painter.drawTiledPixmap(rect(), QPixmap::fromImage(m_wallpaper));
+    } else {
+        painter.fillRect(rect(), QColor(ui_theme::bg()));
+        const QRectF place =
+            wallpaperTargetRect(mode, source, QSizeF(target.size()));
+        painter.drawImage(place, m_wallpaper);
+    }
+    QColor scrim(ui_theme::bg());
+    scrim.setAlphaF(wallpaperScrimAlpha(m_overlayConfig.wallpaperDim));
+    painter.fillRect(rect(), scrim);
+    QPen border(ui_theme::border());
+    border.setWidth(1);
+    painter.setPen(border);
+    painter.drawRect(rect().adjusted(0, 0, -1, -1));
 }
 
 void HudWindow::refreshOverlayState() {

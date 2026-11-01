@@ -3,6 +3,7 @@
 #include "DisplaySnapshot.h"
 #include "HistoryLog.h"
 #include "DockerStatus.h"
+#include "Wallpaper.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
 #include "ProcessActions.h"
@@ -123,6 +124,14 @@ public:
     // M80: the overlay's own state (session, click-through, pinned, geometry).
     // An empty path disables persistence, which is what tests use.
     void setOverlayConfig(const OverlayConfig &config, const QString &path);
+
+    // Live appearance: accent, collapsed-strip opacity and wallpaper. The
+    // accent re-tints the console stylesheet, so it does not need a restart.
+    void applyAppearance(const QString &accent, const OverlayConfig &config,
+                         const QString &path);
+    // Forwards config into the APPEARANCE card without emitting a change.
+    void setAppearance(const QString &accent, const OverlayConfig &config,
+                       const QString &path);
     OverlayState overlayState() const { return m_overlay; }
 
     bool isExpanded() const { return m_detailsExpanded; }
@@ -230,6 +239,19 @@ private:
     void refreshOverlayState();
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
+    // Wallpaper state. Loaded once per config change, scaled once per size.
+    QImage m_wallpaper;
+    QImage m_wallpaperScaled;
+    QSize m_wallpaperScaledFor;
+    WallpaperMode m_wallpaperScaledMode = WallpaperMode::Fill;
+    QString m_wallpaperPath;
+    void applySurfaceAppearance();
+    void reloadWallpaper();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+public:
     bool m_actionsEnabled = true;
     bool m_compact = false;
 

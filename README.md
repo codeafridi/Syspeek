@@ -616,6 +616,10 @@ x = 200                 ; last position (restored on launch when a screen still 
 y = 120
 width = 820             ; last expanded size
 height = 560
+opacity = 100           ; how solid the COLLAPSED strip is, 40..100
+wallpaper =             ; image behind the collapsed strip (empty = off)
+wallpaper_mode = fill   ; fill | fit | tile | center
+wallpaper_dim = 45      ; page-colour scrim over it, 0..80
 ```
 
 The footer **CLICK** button toggles click-through on X11 (X Shape `ShapeInput`),
@@ -631,6 +635,28 @@ plus the `_NET_WM_DESKTOP` all-desktops request) and the Settings page states
 what the wm actually did. Wayland, macOS and Windows state their gate instead
 of pretending: the compositor owns input routing, so click-through is X11-only
 in this build and the Settings row says so.
+
+**Appearance** — Settings → APPEARANCE carries the only two things you can
+restyle, on purpose:
+
+- **accent** — one colour, applied to chrome that does not mean anything: the
+  rail selection bar, chips, primary section banners, focus rings, and the
+  `SYSPEEK` wordmark on the strip. Four presets ship (Classic, Slate, Moss,
+  Ember) and **PICK** opens a colour dialog for anything else, `#rrggbb` only.
+  The surface palette and the `ok` / `warn` / `crit` trio are *not* editable —
+  that is how a data console stays readable.
+- **collapsed opacity** — the short form can go down to 40% so it sits quietly
+  over an editor. The expanded console is always opaque; a translucent table is
+  a readability bug, not a style.
+- **wallpaper** — an image behind the *collapsed* strip, always under a scrim of
+  the page colour (`wallpaper_dim`, default 45%) so the readout survives over
+  any photograph. A 64×64 minimum and a silent skip on an unreadable path keep
+  it from becoming a smear.
+
+```ini
+[theme]
+accent = #4a86c4
+```
 
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:

@@ -45,6 +45,8 @@
 #include "CloudFleetSource.h"
 #include "CloudSpendStatus.h"
 #include "IacStatus.h"
+#include "Theme.h"
+#include "Wallpaper.h"
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
 #include "TickBudget.h"
@@ -2241,6 +2243,113 @@ int main(int argc, char *argv[]) {
         check(iacSettingsLine(QStringLiteral("/tmp/tf.json"), drift)
                   .contains(QStringLiteral("1 unmanaged")),
               "iac: the settings line carries the counts");
+    }
+
+    // --- appearance: accent, wallpaper geometry, the legibility scrim ------
+    {
+        check(ui_theme::isValidAccent(QStringLiteral("#4a86c4"))
+                  && ui_theme::isValidAccent(QStringLiteral("#B8813F"))
+                  && !ui_theme::isValidAccent(QStringLiteral("4a86c4"))
+                  && !ui_theme::isValidAccent(QStringLiteral("#4a86c"))
+                  && !ui_theme::isValidAccent(QStringLiteral("#4a86c4ff"))
+                  && !ui_theme::isValidAccent(QStringLiteral("blue")),
+              "theme: only a #rrggbb literal is an accent");
+
+        const QList<QPair<QString, QString>> presets = ui_theme::accentPresets();
+        bool presetsSane = presets.size() >= 3;
+        for (const QPair<QString, QString> &preset : presets) {
+            presetsSane = presetsSane
+                          && ui_theme::isValidAccent(preset.second)
+                          && !preset.first.isEmpty();
+        }
+        check(presetsSane, "theme: every preset is a valid, named accent");
+        check(presets.first().second == ui_theme::defaultAccent(),
+              "theme: the first preset is the shipped classic blue");
+
+        const QString saved = ui_theme::accent();
+        ui_theme::setAccent(QStringLiteral("#b8813f"));
+        check(ui_theme::accent() == QStringLiteral("#b8813f"),
+              "theme: an accent can be installed at runtime");
+        ui_theme::setAccent(QStringLiteral("nonsense"));
+        check(ui_theme::accent() == QStringLiteral("#b8813f"),
+              "theme: an invalid accent is ignored, not applied");
+        ui_theme::setAccent(saved);
+        check(ui_theme::accent() == saved, "theme: the accent is restorable");
+    }
+
+    {
+        check(wallpaperModeFromString(QStringLiteral("fit")) == WallpaperMode::Fit
+                  && wallpaperModeFromString(QStringLiteral("TILE"))
+                         == WallpaperMode::Tile
+                  && wallpaperModeFromString(QStringLiteral("center"))
+                         == WallpaperMode::Center
+                  && wallpaperModeFromString(QStringLiteral("nonsense"))
+                         == WallpaperMode::Fill,
+              "wallpaper: modes parse and an unknown one falls back to fill");
+        check(wallpaperModeName(WallpaperMode::Tile) == QStringLiteral("tile")
+                  && wallpaperModeNames().size() == 4,
+              "wallpaper: names round-trip and the picker lists four");
+
+        // 1000x500 into a 400x400 strip: cover means the height decides.
+        const QRectF cover =
+            wallpaperSourceRect(WallpaperMode::Fill, QSizeF(1000, 500),
+                                QSizeF(400, 400));
+        check(qAbs(cover.width() - 500.0) < 0.01
+                  && qAbs(cover.height() - 500.0) < 0.01
+                  && qAbs(cover.x() - 250.0) < 0.01
+                  && qAbs(cover.y()) < 0.01,
+              "wallpaper: fill crops the long edge, centred");
+
+        const QRectF letterbox =
+            wallpaperTargetRect(WallpaperMode::Fit, QSizeF(1000, 500),
+                                QSizeF(400, 400));
+        check(qAbs(letterbox.width() - 400.0) < 0.01
+                  && qAbs(letterbox.height() - 200.0) < 0.01
+                  && qAbs(letterbox.y() - 100.0) < 0.01,
+              "wallpaper: fit letterboxes and centres");
+
+        const QRectF centred =
+            wallpaperTargetRect(WallpaperMode::Center, QSizeF(100, 80),
+                                QSizeF(400, 400));
+        check(qAbs(centred.x() - 150.0) < 0.01
+                  && qAbs(centred.y() - 160.0) < 0.01
+                  && qAbs(centred.width() - 100.0) < 0.01,
+              "wallpaper: center keeps native size");
+
+        check(qAbs(wallpaperScrimAlpha(45) - 0.45) < 1e-9
+                  && qAbs(wallpaperScrimAlpha(500) - 0.8) < 1e-9
+                  && qAbs(wallpaperScrimAlpha(-20)) < 1e-9,
+              "wallpaper: the scrim is clamped to 0..80%");
+
+        check(wallpaperSettingsLine(QString(), WallpaperMode::Fill, 45)
+                  .contains(QStringLiteral("off")),
+              "wallpaper: the off line names the config key");
+        check(wallpaperSettingsLine(QStringLiteral("/tmp/a.jpg"),
+                                    WallpaperMode::Tile, 30)
+                  .contains(QStringLiteral("tile"))
+                  && wallpaperSettingsLine(QStringLiteral("/tmp/a.jpg"),
+                                           WallpaperMode::Tile, 30)
+                         .contains(QStringLiteral("30%")),
+              "wallpaper: the settings line carries mode and dim");
+
+        check(loadWallpaper(QString()).isNull()
+                  && loadWallpaper(QStringLiteral("/nonexistent/x.png")).isNull(),
+              "wallpaper: a missing path is a null image, never a crash");
+
+        QTemporaryDir shotDir;
+        QImage tiny(16, 16, QImage::Format_RGB32);
+        tiny.fill(Qt::darkGray);
+        const QString tinyPath = shotDir.filePath(QStringLiteral("tiny.png"));
+        QImage big(128, 96, QImage::Format_RGB32);
+        big.fill(Qt::darkCyan);
+        const QString bigPath = shotDir.filePath(QStringLiteral("big.png"));
+        const bool wroteTiny = tiny.save(tinyPath);
+        const bool wroteBig = big.save(bigPath);
+        check(wroteTiny && wroteBig, "wallpaper: the fixtures were written");
+        check(loadWallpaper(tinyPath).isNull(),
+              "wallpaper: an image too small to be a backdrop is refused");
+        check(!loadWallpaper(bigPath).isNull(),
+              "wallpaper: a real image loads");
     }
 
     // --- M92: billing-day normalisation + the IMDS identity fallback -------

@@ -228,6 +228,50 @@ int main(int argc, char *argv[]) {
                        && rule.repeatIntervalMs == 45000;
             }
         }
+
+    {
+        // Appearance: accent validates, opacity floors at 40, wallpaper mode
+        // and dim clamp, and the overlay save roundtrips all of it.
+        QTemporaryDir dir93;
+        const QString path = writeConfig(dir93, QByteArrayLiteral(
+            "[theme]\n"
+            "accent=#B8813F\n"
+            "[overlay]\n"
+            "opacity=20\n"
+            "wallpaper=/tmp/w.png\n"
+            "wallpaper_mode=tile\n"
+            "wallpaper_dim=95\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.theme.accent == QStringLiteral("#b8813f"),
+              "theme: the accent loads lowercased");
+        check(c.overlay.opacity == 40,
+              "overlay: opacity below the floor is clamped to 40");
+        check(c.overlay.wallpaper == QStringLiteral("/tmp/w.png")
+                  && c.overlay.wallpaperMode == QStringLiteral("tile")
+                  && c.overlay.wallpaperDim == 80,
+              "overlay: wallpaper, mode and a clamped dim load");
+
+        const QString bad = writeConfig(dir93, QByteArrayLiteral(
+            "[theme]\n"
+            "accent=blue\n"
+            "[overlay]\n"
+            "wallpaper_mode=stretch\n"));
+        const Config badConfig = loadConfig(bad, &error);
+        check(badConfig.theme.accent == QStringLiteral("#4a86c4")
+                  && badConfig.overlay.wallpaperMode == QStringLiteral("fill"),
+              "theme: invalid values keep the shipped defaults");
+
+        OverlayConfig overlay = c.overlay;
+        overlay.opacity = 70;
+        saveOverlayConfig(path, overlay);
+        saveThemeAccent(path, QStringLiteral("#5D8A63"));
+        const Config reloaded = loadConfig(path, &error);
+        check(reloaded.overlay.opacity == 70
+                  && reloaded.theme.accent == QStringLiteral("#5d8a63")
+                  && reloaded.overlay.wallpaper == QStringLiteral("/tmp/w.png"),
+              "overlay: the appearance roundtrips through the config");
+    }
         check(kept, "alerts: save roundtrip keeps group, owner and cadence");
     }
 

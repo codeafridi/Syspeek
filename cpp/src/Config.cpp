@@ -12,6 +12,26 @@
 
 namespace {
 
+// #rrggbb only. Config is a data module and does not link the theme, so the
+// check lives here; Theme.h validates the same shape when the UI sets one.
+bool looksLikeAccent(const QString &hex) {
+    if (hex.size() != 7 || hex.at(0) != QLatin1Char('#')) {
+        return false;
+    }
+    for (int i = 1; i < 7; ++i) {
+        const QChar ch = hex.at(i);
+        if (!ch.isDigit() && !(ch >= QLatin1Char('a') && ch <= QLatin1Char('f'))
+            && !(ch >= QLatin1Char('A') && ch <= QLatin1Char('F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+namespace {
+
 double clampDouble(double value, double low, double high) {
     return std::clamp(value, low, high);
 }
@@ -310,8 +330,41 @@ Config loadConfig(const QString &path, QString *errorMessage) {
     }
     settings.endGroup();
 
+    settings.beginGroup(QStringLiteral("theme"));
+    {
+        const QString accent =
+            settings.value(QStringLiteral("accent")).toString().trimmed();
+        if (looksLikeAccent(accent)) {
+            config.theme.accent = accent.toLower();
+        }
+    }
+    settings.endGroup();
+
     settings.beginGroup(QStringLiteral("overlay"));
     {
+        const int opacity = settings.value(QStringLiteral("opacity")).toInt();
+        if (opacity > 0) {
+            config.overlay.opacity = qBound(40, opacity, 100);
+        }
+        const QString wallpaper =
+            settings.value(QStringLiteral("wallpaper")).toString().trimmed();
+        if (!wallpaper.isEmpty()) {
+            config.overlay.wallpaper = wallpaper;
+        }
+        const QString mode =
+            settings.value(QStringLiteral("wallpaper_mode"))
+                .toString()
+                .trimmed()
+                .toLower();
+        if (mode == QLatin1String("fill") || mode == QLatin1String("fit")
+            || mode == QLatin1String("tile")
+            || mode == QLatin1String("center")) {
+            config.overlay.wallpaperMode = mode;
+        }
+        const int dim = settings.value(QStringLiteral("wallpaper_dim")).toInt();
+        if (dim > 0) {
+            config.overlay.wallpaperDim = qBound(0, dim, 80);
+        }
         const int ttl =
             settings.value(QStringLiteral("focus_cache_ttl_ms")).toInt();
         if (ttl >= 0 && settings.contains(QStringLiteral("focus_cache_ttl_ms"))) {
@@ -760,6 +813,23 @@ void saveOverlayConfig(const QString &path, const OverlayConfig &overlay) {
     settings.setValue(QStringLiteral("width"), QString::number(overlay.width));
     settings.setValue(QStringLiteral("height"),
                       QString::number(overlay.height));
+    settings.setValue(QStringLiteral("opacity"),
+                      QString::number(overlay.opacity));
+    settings.setValue(QStringLiteral("wallpaper"), overlay.wallpaper);
+    settings.setValue(QStringLiteral("wallpaper_mode"), overlay.wallpaperMode);
+    settings.setValue(QStringLiteral("wallpaper_dim"),
+                      QString::number(overlay.wallpaperDim));
+    settings.endGroup();
+    settings.sync();
+}
+
+void saveThemeAccent(const QString &path, const QString &accent) {
+    if (!looksLikeAccent(accent)) {
+        return;
+    }
+    QSettings settings(path, QSettings::IniFormat);
+    settings.beginGroup(QStringLiteral("theme"));
+    settings.setValue(QStringLiteral("accent"), accent.toLower());
     settings.endGroup();
     settings.sync();
 }

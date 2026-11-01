@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QColor>
+#include <QList>
+#include <QPair>
 #include <QPalette>
+#include <QRegularExpression>
 #include <QString>
 
 // One palette for the HUD strip and the dashboard console: near-black page,
@@ -20,7 +23,39 @@ inline QString hover()   { return QStringLiteral("#20232a"); }
 inline QString text()    { return QStringLiteral("#f2f4f8"); }
 inline QString dim()     { return QStringLiteral("#949cab"); }
 inline QString muted()   { return QStringLiteral("#6d7488"); }
-inline QString accent()  { return QStringLiteral("#4a86c4"); }
+// The accent is the ONE colour a user may change: it tints chrome (rail
+// selection, chips, primary banners, focus rings) and nothing that carries
+// meaning. The surface palette and the ok/warn/crit trio stay compiled in -
+// letting somebody recolour those is how a data console becomes unreadable.
+inline QString defaultAccent() { return QStringLiteral("#4a86c4"); }
+inline QString &accentRef() {
+    static QString value = defaultAccent();
+    return value;
+}
+inline QString accent() { return accentRef(); }
+
+inline bool isValidAccent(const QString &hex) {
+    static const QRegularExpression pattern(
+        QStringLiteral("^#[0-9a-fA-F]{6}$"));
+    return pattern.match(hex.trimmed()).hasMatch();
+}
+
+inline void setAccent(const QString &hex) {
+    if (isValidAccent(hex)) {
+        accentRef() = hex.trimmed().toLower();
+    }
+}
+
+// Presets are desaturated on purpose: a HUD that glows is the thing this
+// console was stripped of in 0.10. Name -> hex, in the order the picker shows.
+inline QList<QPair<QString, QString>> accentPresets() {
+    return {
+        {QStringLiteral("Classic"), QStringLiteral("#4a86c4")},
+        {QStringLiteral("Slate"), QStringLiteral("#6b7f92")},
+        {QStringLiteral("Moss"), QStringLiteral("#5d8a63")},
+        {QStringLiteral("Ember"), QStringLiteral("#b8813f")},
+    };
+}
 inline QString seriesA() { return QStringLiteral("#4d8fd6"); }
 inline QString seriesB() { return QStringLiteral("#4f9d6f"); }
 inline QString seriesC() { return QStringLiteral("#c9a24a"); }

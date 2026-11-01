@@ -1,5 +1,7 @@
 #include "DashboardPanel.h"
 
+#include "Wallpaper.h"
+
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
@@ -17,6 +19,8 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QColor>
+#include <QColorDialog>
+#include <QFileDialog>
 #include <QDateTime>
 #include <QFont>
 #include <QFontMetrics>
@@ -223,6 +227,11 @@ QWidget *makeBanner(const QString &title, const QString &color,
         QStringLiteral("#ddBanner { background-color: %1; border-radius: 0;"
                        " }")
             .arg(color));
+    // Banners built with the accent follow a live accent change; the neutral
+    // navy and amber ones are structural and stay put.
+    if (color.compare(ui_theme::accent(), Qt::CaseInsensitive) == 0) {
+        strip->setProperty("accentBanner", true);
+    }
     auto *layout = new QHBoxLayout(strip);
     layout->setContentsMargins(10, 0, 10, 0);
     auto *label = new QLabel(title, strip);
@@ -440,7 +449,11 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     footerLayout->addWidget(m_footer, 1);
     root->addWidget(footer);
 
-    setStyleSheet(QStringLiteral(
+    setStyleSheet(consoleStyleSheet());
+}
+
+QString DashboardPanel::consoleStyleSheet() const {
+    return QStringLiteral(
         "#ddRoot { background-color: %BG%; }"
         "#ddTopbar { background-color: %RAISED%; border-bottom: 1px solid %BORDER%; }"
         "#ddChip { color: %ACCENT%; font-size: 9px; }"
@@ -683,7 +696,57 @@ DashboardPanel::DashboardPanel(QWidget *parent)
         .replace(QStringLiteral("%MUTED%"), ui_theme::muted())
         .replace(QStringLiteral("%ACCENT%"), ui_theme::accent())
         .replace(QStringLiteral("%OK%"), ui_theme::ok())
-        .replace(QStringLiteral("%SURFACE%"), ui_theme::surface()));
+        .replace(QStringLiteral("%SURFACE%"), ui_theme::surface());
+}
+
+void DashboardPanel::setAppearance(const QString &accent, int opacity,
+                                   const QString &wallpaper,
+                                   const QString &mode, int dim) {
+    if (ui_theme::isValidAccent(accent)) {
+        m_accentHex = accent.toLower();
+    }
+    m_opacityPercent = qBound(40, opacity, 100);
+    m_wallpaper = wallpaper;
+    m_wallpaperMode = wallpaperModeName(wallpaperModeFromString(mode));
+    m_wallpaperDim = qBound(0, dim, 80);
+    if (m_accentSwatch != nullptr) {
+        m_accentSwatch->setText(m_accentHex);
+        m_accentSwatch->setStyleSheet(
+            QStringLiteral("color: %1;").arg(m_accentHex));
+    }
+    if (m_opacitySpin != nullptr) {
+        QSignalBlocker block(m_opacitySpin);
+        m_opacitySpin->setValue(m_opacityPercent);
+    }
+    if (m_wallpaperModeBox != nullptr) {
+        QSignalBlocker block(m_wallpaperModeBox);
+        m_wallpaperModeBox->setCurrentText(m_wallpaperMode);
+    }
+    if (m_wallpaperDimSpin != nullptr) {
+        QSignalBlocker block(m_wallpaperDimSpin);
+        m_wallpaperDimSpin->setValue(m_wallpaperDim);
+    }
+    if (m_wallpaperLabel != nullptr) {
+        m_wallpaperLabel->setText(wallpaperSettingsLine(
+            m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
+            m_wallpaperDim));
+    }
+}
+
+void DashboardPanel::applyTheme() {
+    setStyleSheet(consoleStyleSheet());
+    // Section banners are painted with the accent at build time, so a live
+    // accent change has to re-tint them; the QSS covers the rest of the chrome.
+    for (QWidget *widget : findChildren<QWidget *>()) {
+        if (!widget->property("accentBanner").toBool()) {
+            continue;
+        }
+        widget->setStyleSheet(
+            QStringLiteral("#ddBanner { background-color: %1; border-radius: 0;"
+                           " }")
+                .arg(ui_theme::accent()));
+    }
+    update();
 }
 
 QWidget *DashboardPanel::buildOverviewView() {
@@ -3331,6 +3394,210 @@ QWidget *DashboardPanel::buildSettingsView() {
     reportRow->addWidget(reportWhat, 1);
     reportRow->addWidget(copyReport);
     diagLayout->addLayout(reportRow);
+
+    // --- APPEARANCE: the accent, the collapsed strip's opacity and its
+    // wallpaper. Deliberately narrow: chrome colour and one backdrop, never
+    // the surface palette or the semantic trio.
+    auto *appearanceCard = new QWidget(view);
+    auto *appLayout = new QVBoxLayout(appearanceCard);
+    appLayout->setContentsMargins(0, 0, 0, 0);
+    appLayout->setSpacing(6);
+
+    auto *presetRow = new QHBoxLayout;
+    presetRow->setSpacing(6);
+    auto *presetCaption = new QLabel(QStringLiteral("preset"), appearanceCard);
+    presetCaption->setFont(monoFont(9));
+    presetCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    presetRow->addWidget(presetCaption);
+    for (const QPair<QString, QString> &preset : ui_theme::accentPresets()) {
+        auto *button = new QPushButton(preset.first, appearanceCard);
+        button->setObjectName(QStringLiteral("ddCopy"));
+        button->setFont(monoFont(9));
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setToolTip(preset.second);
+        const QString hex = preset.second;
+        connect(button, &QPushButton::clicked, this, [this, hex]() {
+            m_accentHex = hex;
+            if (m_accentSwatch != nullptr) {
+                m_accentSwatch->setText(hex);
+                m_accentSwatch->setStyleSheet(
+                    QStringLiteral("color: %1;").arg(hex));
+            }
+            emit appearanceChanged(accentHex(), accentOpacity(),
+                                   wallpaperPath(), wallpaperMode(),
+                                   wallpaperDim());
+        });
+        presetRow->addWidget(button);
+    }
+    presetRow->addStretch(1);
+    appLayout->addLayout(presetRow);
+
+    auto *accentRow = new QHBoxLayout;
+    accentRow->setSpacing(8);
+    auto *accentCaption = new QLabel(QStringLiteral("accent"), appearanceCard);
+    accentCaption->setFont(monoFont(9));
+    accentCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    accentCaption->setMinimumWidth(64);
+    accentRow->addWidget(accentCaption);
+    m_accentSwatch = new QLabel(m_accentHex, appearanceCard);
+    m_accentSwatch->setObjectName(QStringLiteral("ddAccentSwatch"));
+    m_accentSwatch->setFont(monoFont(10));
+    m_accentSwatch->setStyleSheet(
+        QStringLiteral("color: %1;").arg(m_accentHex));
+    accentRow->addWidget(m_accentSwatch);
+    auto *accentPick = new QPushButton(QStringLiteral("PICK"), appearanceCard);
+    accentPick->setObjectName(QStringLiteral("ddCopy"));
+    accentPick->setFont(monoFont(9));
+    accentPick->setCursor(Qt::PointingHandCursor);
+    accentPick->setFocusPolicy(Qt::NoFocus);
+    connect(accentPick, &QPushButton::clicked, this, [this]() {
+        const QColor picked =
+            QColorDialog::getColor(QColor(m_accentHex), this,
+                                   QStringLiteral("Accent colour"));
+        if (!picked.isValid()) {
+            return;
+        }
+        m_accentHex = picked.name(QColor::HexRgb);
+        m_accentSwatch->setText(m_accentHex);
+        m_accentSwatch->setStyleSheet(
+            QStringLiteral("color: %1;").arg(m_accentHex));
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
+                               wallpaperMode(), wallpaperDim());
+    });
+    accentRow->addWidget(accentPick);
+    auto *accentHint = new QLabel(
+        QStringLiteral("chrome only - the surface palette and ok/warn/crit "
+                       "stay put"),
+        appearanceCard);
+    accentHint->setFont(monoFont(9));
+    accentHint->setObjectName(QStringLiteral("ddSettingsLabel"));
+    accentHint->setMinimumWidth(1);
+    accentRow->addWidget(accentHint);
+    accentRow->addStretch(1);
+    appLayout->addLayout(accentRow);
+
+    auto *surfaceRow = new QHBoxLayout;
+    surfaceRow->setSpacing(8);
+    auto *surfaceCaption = new QLabel(QStringLiteral("collapsed"), appearanceCard);
+    surfaceCaption->setFont(monoFont(9));
+    surfaceCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    surfaceCaption->setMinimumWidth(64);
+    surfaceRow->addWidget(surfaceCaption);
+    m_opacitySpin = new QSpinBox(appearanceCard);
+    m_opacitySpin->setObjectName(QStringLiteral("ddOpacitySpin"));
+    m_opacitySpin->setRange(40, 100);
+    m_opacitySpin->setSuffix(QStringLiteral("% solid"));
+    m_opacitySpin->setValue(m_opacityPercent);
+    m_opacitySpin->setFont(monoFont(9));
+    m_opacitySpin->setFocusPolicy(Qt::ClickFocus);
+    connect(m_opacitySpin, &QSpinBox::valueChanged, this, [this](int value) {
+        m_opacityPercent = value;
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
+                               wallpaperMode(), wallpaperDim());
+    });
+    surfaceRow->addWidget(m_opacitySpin);
+    auto *surfaceHint = new QLabel(
+        QStringLiteral("the expanded console is always opaque"), appearanceCard);
+    surfaceHint->setFont(monoFont(9));
+    surfaceHint->setObjectName(QStringLiteral("ddSettingsLabel"));
+    surfaceHint->setMinimumWidth(1);
+    surfaceRow->addWidget(surfaceHint);
+    surfaceRow->addStretch(1);
+    appLayout->addLayout(surfaceRow);
+
+    auto *wallRow = new QHBoxLayout;
+    wallRow->setSpacing(8);
+    auto *wallCaption = new QLabel(QStringLiteral("wallpaper"), appearanceCard);
+    wallCaption->setFont(monoFont(9));
+    wallCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    wallCaption->setMinimumWidth(64);
+    wallRow->addWidget(wallCaption);
+    m_wallpaperLabel = new QLabel(
+        wallpaperSettingsLine(m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
+                              m_wallpaperDim),
+        appearanceCard);
+    m_wallpaperLabel->setObjectName(QStringLiteral("ddWallpaperLabel"));
+    m_wallpaperLabel->setFont(monoFont(9));
+    m_wallpaperLabel->setMinimumWidth(1);
+    m_wallpaperLabel->setWordWrap(false);
+    wallRow->addWidget(m_wallpaperLabel, 1);
+    auto *wallPick = new QPushButton(QStringLiteral("CHOOSE"), appearanceCard);
+    wallPick->setObjectName(QStringLiteral("ddCopy"));
+    wallPick->setFont(monoFont(9));
+    wallPick->setCursor(Qt::PointingHandCursor);
+    wallPick->setFocusPolicy(Qt::NoFocus);
+    connect(wallPick, &QPushButton::clicked, this, [this]() {
+        const QString picked = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Wallpaper for the collapsed HUD"),
+            QDir::homePath(),
+            QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
+        if (picked.isEmpty()) {
+            return;
+        }
+        m_wallpaper = picked;
+        m_wallpaperLabel->setText(wallpaperSettingsLine(
+            m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
+            m_wallpaperDim));
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
+                               wallpaperMode(), wallpaperDim());
+    });
+    wallRow->addWidget(wallPick);
+    auto *wallClear = new QPushButton(QStringLiteral("CLEAR"), appearanceCard);
+    wallClear->setObjectName(QStringLiteral("ddCopy"));
+    wallClear->setFont(monoFont(9));
+    wallClear->setCursor(Qt::PointingHandCursor);
+    wallClear->setFocusPolicy(Qt::NoFocus);
+    connect(wallClear, &QPushButton::clicked, this, [this]() {
+        m_wallpaper.clear();
+        m_wallpaperLabel->setText(wallpaperSettingsLine(
+            QString(), wallpaperModeFromString(m_wallpaperMode), m_wallpaperDim));
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
+                               wallpaperMode(), wallpaperDim());
+    });
+    wallRow->addWidget(wallClear);
+    m_wallpaperModeBox = new QComboBox(appearanceCard);
+    m_wallpaperModeBox->setObjectName(QStringLiteral("ddWallpaperMode"));
+    m_wallpaperModeBox->setFont(monoFont(9));
+    m_wallpaperModeBox->addItems(wallpaperModeNames());
+    m_wallpaperModeBox->setCurrentText(m_wallpaperMode);
+    m_wallpaperModeBox->setFocusPolicy(Qt::ClickFocus);
+    m_wallpaperModeBox->setMinimumWidth(1);
+    connect(m_wallpaperModeBox, &QComboBox::currentTextChanged, this,
+            [this](const QString &mode) {
+                m_wallpaperMode = mode;
+                m_wallpaperLabel->setText(wallpaperSettingsLine(
+                    m_wallpaper, wallpaperModeFromString(mode), m_wallpaperDim));
+                emit appearanceChanged(accentHex(), accentOpacity(),
+                                       wallpaperPath(), wallpaperMode(),
+                                       wallpaperDim());
+            });
+    wallRow->addWidget(m_wallpaperModeBox);
+    m_wallpaperDimSpin = new QSpinBox(appearanceCard);
+    m_wallpaperDimSpin->setRange(0, 80);
+    m_wallpaperDimSpin->setSuffix(QStringLiteral("% dim"));
+    m_wallpaperDimSpin->setValue(m_wallpaperDim);
+    m_wallpaperDimSpin->setFont(monoFont(9));
+    m_wallpaperDimSpin->setFocusPolicy(Qt::ClickFocus);
+    connect(m_wallpaperDimSpin, &QSpinBox::valueChanged, this,
+            [this](int value) {
+                m_wallpaperDim = value;
+                m_wallpaperLabel->setText(wallpaperSettingsLine(
+                    m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
+                    m_wallpaperDim));
+                emit appearanceChanged(accentHex(), accentOpacity(),
+                                       wallpaperPath(), wallpaperMode(),
+                                       wallpaperDim());
+            });
+    wallRow->addWidget(m_wallpaperDimSpin);
+    wallRow->addStretch(0);
+    appLayout->addLayout(wallRow);
+
+    layout->addWidget(makeBanner(QStringLiteral("APPEARANCE"),
+        ui_theme::accent(), view));
+    layout->addWidget(
+        makeCard(QStringLiteral("accent, opacity, wallpaper"), appearanceCard,
+                 view));
 
     layout->addWidget(makeBanner(QStringLiteral("DIAGNOSTICS & SUPPORT"),
         ui_theme::warn(), view));

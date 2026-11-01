@@ -182,6 +182,17 @@ struct OverlayConfig {
     int y = -1;
     int width = -1;
     int height = -1;
+    // [overlay] opacity: how solid the COLLAPSED strip is, 40..100. The
+    // expanded console is always opaque - it is a data page, and a see-through
+    // table is a readability bug, not a style.
+    int opacity = 100;
+    // [overlay] wallpaper: an image painted behind the collapsed strip, with
+    // wallpaper_dim percent of the page colour laid over it so the readout
+    // stays legible on any photo. Empty = off.
+    QString wallpaper;
+    // [overlay] wallpaper_mode: fill | fit | tile | center.
+    QString wallpaperMode = QStringLiteral("fill");
+    int wallpaperDim = 45;
 };
 
 struct CloudConfig {
@@ -221,9 +232,16 @@ struct CloudConfig {
     QString identityOverride;
 };
 
+struct ThemeConfig {
+    // [theme] accent: the one colour the user may change. Anything that is not
+    // a #rrggbb literal keeps the built-in classic blue.
+    QString accent = QStringLiteral("#4a86c4");
+};
+
 struct Config {
     HealthConfig health;
     QList<AlertRule> alertRules;
+    ThemeConfig theme;
     DockerConfig docker;
     KubeConfig kube;
     SyntheticConfig synthetic;
@@ -257,6 +275,7 @@ void saveAlertOverrides(const QString &path,
 void saveSilences(const QString &path, const QList<SilenceRule> &rules);
 
 void saveOverlayConfig(const QString &path, const OverlayConfig &overlay);
+void saveThemeAccent(const QString &path, const QString &accent);
 
 QString defaultConfigPath();
 

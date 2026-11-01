@@ -107,6 +107,19 @@ public:
     void setSnapshot(const DisplaySnapshot &snapshot);
     void setDockerSnapshot(const DockerSnapshot &snapshot);
     void setKubeSnapshot(const KubeSnapshot &snapshot);
+
+signals:
+    void appearanceChanged(const QString &accent, int opacity,
+                           const QString &wallpaper, const QString &mode,
+                           int dim);
+
+public:
+    // Re-applies the console stylesheet and re-tints the accent banners, so a
+    // colour change lands without a restart.
+    void applyTheme();
+    // Seeds the APPEARANCE card from config (startup) without emitting.
+    void setAppearance(const QString &accent, int opacity,
+                       const QString &wallpaper, const QString &mode, int dim);
     // M88: containers that have stayed below the idle limits long enough.
     void setIdleContainers(const QList<IdleContainer> &idle,
                            const IdleLimits &limits);
@@ -498,6 +511,23 @@ private:
     QLabel *m_dockTileIssues = nullptr;
     QLabel *m_dockTileTotal = nullptr;
     QLabel *m_dockTileCgMem = nullptr;
+    QString consoleStyleSheet() const;
+    QString accentHex() const { return m_accentHex; }
+    int accentOpacity() const { return m_opacityPercent; }
+    QString wallpaperPath() const { return m_wallpaper; }
+    QString wallpaperMode() const { return m_wallpaperMode; }
+    int wallpaperDim() const { return m_wallpaperDim; }
+
+    QString m_accentHex = QStringLiteral("#4a86c4");
+    int m_opacityPercent = 100;
+    QString m_wallpaper;
+    QString m_wallpaperMode = QStringLiteral("fill");
+    int m_wallpaperDim = 45;
+    QLabel *m_accentSwatch = nullptr;
+    QSpinBox *m_opacitySpin = nullptr;
+    QLabel *m_wallpaperLabel = nullptr;
+    QComboBox *m_wallpaperModeBox = nullptr;
+    QSpinBox *m_wallpaperDimSpin = nullptr;
     QTreeWidget *m_dockerTable = nullptr;
     // M88: the docker table gains an IDLE column; the last snapshot is kept so
     // an idle update can re-render without waiting for the next poll.
