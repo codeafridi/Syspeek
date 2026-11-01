@@ -3,6 +3,7 @@
 #include "HistoryLog.h"
 #include "TimeseriesChart.h"
 #include "Theme.h"
+#include "WallpaperArt.h"
 #include "platform/PlatformFactory.h"
 #include "ProcessActions.h"
 #include "CloudStatus.h"
@@ -16,6 +17,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1579,57 +1581,56 @@ int main(int argc, char *argv[]) {
         hud.setKubeSnapshot(cost);
     }
 
-    // --- appearance: accent, collapsed opacity, wallpaper -------------------
+    // --- appearance: accent, curated backdrop, collapsed opacity ------------
     {
         const QString before = ui_theme::accent();
         OverlayConfig look;
         look.opacity = 65;
-        look.wallpaper = QStringLiteral("/nonexistent/wallpaper.png");
-        look.wallpaperMode = QStringLiteral("fit");
-        look.wallpaperDim = 50;
+        look.wallpaper = QStringLiteral("ember");
         hud.setAppearance(QStringLiteral("#b8813f"), look, QString());
         check(ui_theme::accent() == QStringLiteral("#b8813f"),
               "appearance: the accent reaches the theme");
         check(qAbs(hud.windowOpacity() - 0.65) < 0.01,
               "appearance: the collapsed strip takes the configured opacity");
         check(hud.findChild<QLabel *>(QStringLiteral("ddAccentSwatch")) != nullptr
-                  && hud.findChild<QSpinBox *>(QStringLiteral("ddOpacitySpin"))
-                         != nullptr
-                  && hud.findChild<QComboBox *>(
-                         QStringLiteral("ddWallpaperMode")) != nullptr,
+                  && hud.findChild<QSlider *>(QStringLiteral("ddOpacitySlider"))
+                         != nullptr,
               "appearance: the settings card carries the controls");
-        // A missing wallpaper must be inert, not an error path.
-        check(hud.findChild<QLabel *>(QStringLiteral("ddWallpaperLabel"))
-                      ->text()
-                      .contains(QStringLiteral("fit")),
-              "appearance: the wallpaper line states the mode");
+        int swatches = 0;
+        for (QToolButton *tile : hud.findChildren<QToolButton *>()) {
+            if (tile->objectName() == QStringLiteral("ddSwatch")) {
+                ++swatches;
+            }
+        }
+        check(swatches == wallpaperPresets().size(),
+              "appearance: one swatch per curated backdrop");
+        // A file path from an older config must collapse to the plain surface
+        // rather than attempting a load that cannot be guaranteed legible.
+        OverlayConfig legacy;
+        legacy.opacity = 100;
+        legacy.wallpaper = QStringLiteral("/home/me/wallpaper.jpg");
+        hud.setAppearance(before, legacy, QString());
+        check(qAbs(hud.windowOpacity() - 1.0) < 0.01,
+              "appearance: 100% opacity is fully solid again");
 
         // A live accent change has to reach the banners too: they are painted
         // with the accent at build time, not through the stylesheet.
-        {
-            auto *panel = hud.findChild<DashboardPanel *>();
-            QWidget *banner = nullptr;
-            for (QWidget *candidate : hud.findChildren<QWidget *>()) {
-                if (candidate->property("accentBanner").toBool()) {
-                    banner = candidate;
-                    break;
-                }
+        auto *panel = hud.findChild<DashboardPanel *>();
+        QWidget *banner = nullptr;
+        for (QWidget *candidate : hud.findChildren<QWidget *>()) {
+            if (candidate->property("accentBanner").toBool()) {
+                banner = candidate;
+                break;
             }
-            if (panel != nullptr) {
-                panel->applyTheme();
-            }
-            check(banner != nullptr, "appearance: accent banners are marked");
-            check(banner != nullptr
-                      && banner->styleSheet().contains(ui_theme::accent(),
-                                                       Qt::CaseInsensitive),
-                  "appearance: a theme re-apply re-tints the accent banners");
         }
-
-        OverlayConfig opaque;
-        opaque.opacity = 100;
-        hud.setAppearance(before, opaque, QString());
-        check(qAbs(hud.windowOpacity() - 1.0) < 0.01,
-              "appearance: 100% opacity is fully solid again");
+        if (panel != nullptr) {
+            panel->applyTheme();
+        }
+        check(banner != nullptr, "appearance: accent banners are marked");
+        check(banner != nullptr
+                  && banner->styleSheet().contains(ui_theme::accent(),
+                                                   Qt::CaseInsensitive),
+              "appearance: a theme re-apply re-tints the accent banners");
     }
 
     // --- M90: the Kubernetes page names the context it is describing --------

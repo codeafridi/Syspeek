@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QButtonGroup>
+
 #include "DisplaySnapshot.h"
 #include "MetricsExport.h"
 #include "DockerStatus.h"
@@ -110,16 +112,18 @@ public:
 
 signals:
     void appearanceChanged(const QString &accent, int opacity,
-                           const QString &wallpaper, const QString &mode,
-                           int dim);
+                           const QString &wallpaper);
 
 public:
     // Re-applies the console stylesheet and re-tints the accent banners, so a
     // colour change lands without a restart.
     void applyTheme();
+    // How opaque the page sits over the HUD backdrop. 255 = solid; a curated
+    // wallpaper lets a little through the page but never through a card.
+    void setBackdropAlpha(int alpha);
     // Seeds the APPEARANCE card from config (startup) without emitting.
     void setAppearance(const QString &accent, int opacity,
-                       const QString &wallpaper, const QString &mode, int dim);
+                       const QString &wallpaper);
     // M88: containers that have stayed below the idle limits long enough.
     void setIdleContainers(const QList<IdleContainer> &idle,
                            const IdleLimits &limits);
@@ -512,22 +516,18 @@ private:
     QLabel *m_dockTileTotal = nullptr;
     QLabel *m_dockTileCgMem = nullptr;
     QString consoleStyleSheet() const;
+    int m_surfaceAlpha = 255;
     QString accentHex() const { return m_accentHex; }
     int accentOpacity() const { return m_opacityPercent; }
-    QString wallpaperPath() const { return m_wallpaper; }
-    QString wallpaperMode() const { return m_wallpaperMode; }
-    int wallpaperDim() const { return m_wallpaperDim; }
+    QString wallpaperId() const { return m_wallpaper; }
 
     QString m_accentHex = QStringLiteral("#4a86c4");
     int m_opacityPercent = 100;
-    QString m_wallpaper;
-    QString m_wallpaperMode = QStringLiteral("fill");
-    int m_wallpaperDim = 45;
+    QString m_wallpaper = QStringLiteral("none");
     QLabel *m_accentSwatch = nullptr;
-    QSpinBox *m_opacitySpin = nullptr;
-    QLabel *m_wallpaperLabel = nullptr;
-    QComboBox *m_wallpaperModeBox = nullptr;
-    QSpinBox *m_wallpaperDimSpin = nullptr;
+    QSlider *m_opacitySlider = nullptr;
+    QLabel *m_opacityValue = nullptr;
+    QButtonGroup *m_wallpaperGroup = nullptr;
     QTreeWidget *m_dockerTable = nullptr;
     // M88: the docker table gains an IDLE column; the last snapshot is kept so
     // an idle update can re-render without waiting for the next poll.

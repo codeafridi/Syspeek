@@ -46,7 +46,7 @@
 #include "CloudSpendStatus.h"
 #include "IacStatus.h"
 #include "Theme.h"
-#include "Wallpaper.h"
+#include "WallpaperArt.h"
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
 #include "TickBudget.h"
@@ -2278,78 +2278,61 @@ int main(int argc, char *argv[]) {
     }
 
     {
-        check(wallpaperModeFromString(QStringLiteral("fit")) == WallpaperMode::Fit
-                  && wallpaperModeFromString(QStringLiteral("TILE"))
-                         == WallpaperMode::Tile
-                  && wallpaperModeFromString(QStringLiteral("center"))
-                         == WallpaperMode::Center
-                  && wallpaperModeFromString(QStringLiteral("nonsense"))
-                         == WallpaperMode::Fill,
-              "wallpaper: modes parse and an unknown one falls back to fill");
-        check(wallpaperModeName(WallpaperMode::Tile) == QStringLiteral("tile")
-                  && wallpaperModeNames().size() == 4,
-              "wallpaper: names round-trip and the picker lists four");
+        // Curated backdrops: every one is a very dark gradient, which is the
+        // property that keeps #f2f4f8 text readable without a scrim.
+        const QList<WallpaperPreset> presets = wallpaperPresets();
+        check(presets.size() >= 4, "wallpaper: there is a curated set");
+        bool allDark = true;
+        bool allNamed = true;
+        for (const WallpaperPreset &preset : presets) {
+            allNamed = allNamed && !preset.id.isEmpty() && !preset.name.isEmpty();
+            if (preset.id == QStringLiteral("none")) {
+                continue;
+            }
+            // Relative luminance of both gradient ends, same formula a
+            // contrast check uses; below 0.06 is what the strip needs.
+            const auto luminance = [](const QColor &c) {
+                const auto channel = [](double v) {
+                    v /= 255.0;
+                    return v <= 0.03928 ? v / 12.92
+                                        : std::pow((v + 0.055) / 1.055, 2.4);
+                };
+                return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green())
+                       + 0.0722 * channel(c.blue());
+            };
+            allDark = allDark && luminance(preset.top) < 0.06
+                      && luminance(preset.bottom) < 0.06;
+        }
+        check(allNamed, "wallpaper: every preset has an id and a label");
+        check(allDark,
+              "wallpaper: every backdrop stays dark enough for the readout");
 
-        // 1000x500 into a 400x400 strip: cover means the height decides.
-        const QRectF cover =
-            wallpaperSourceRect(WallpaperMode::Fill, QSizeF(1000, 500),
-                                QSizeF(400, 400));
-        check(qAbs(cover.width() - 500.0) < 0.01
-                  && qAbs(cover.height() - 500.0) < 0.01
-                  && qAbs(cover.x() - 250.0) < 0.01
-                  && qAbs(cover.y()) < 0.01,
-              "wallpaper: fill crops the long edge, centred");
+        check(wallpaperPresetExists(QStringLiteral("slate"))
+                  && wallpaperPresetExists(QStringLiteral("NONE"))
+                  && !wallpaperPresetExists(QStringLiteral("/home/me/pic.jpg"))
+                  && !wallpaperPresetExists(QStringLiteral("tile")),
+              "wallpaper: ids validate, a file path does not");
+        check(wallpaperPresetName(QStringLiteral("moss"))
+                  == QStringLiteral("Moss"),
+              "wallpaper: an id maps to its label");
 
-        const QRectF letterbox =
-            wallpaperTargetRect(WallpaperMode::Fit, QSizeF(1000, 500),
-                                QSizeF(400, 400));
-        check(qAbs(letterbox.width() - 400.0) < 0.01
-                  && qAbs(letterbox.height() - 200.0) < 0.01
-                  && qAbs(letterbox.y() - 100.0) < 0.01,
-              "wallpaper: fit letterboxes and centres");
+        check(wallpaperSurfaceAlpha(QStringLiteral("none"), true) == 255
+                  && wallpaperSurfaceAlpha(QStringLiteral("none"), false) == 255,
+              "wallpaper: the plain surface is fully opaque");
+        check(wallpaperSurfaceAlpha(QStringLiteral("ember"), true) < 255
+                  && wallpaperSurfaceAlpha(QStringLiteral("ember"), true) >= 224,
+              "wallpaper: the console page keeps a nearly solid tint");
 
-        const QRectF centred =
-            wallpaperTargetRect(WallpaperMode::Center, QSizeF(100, 80),
-                                QSizeF(400, 400));
-        check(qAbs(centred.x() - 150.0) < 0.01
-                  && qAbs(centred.y() - 160.0) < 0.01
-                  && qAbs(centred.width() - 100.0) < 0.01,
-              "wallpaper: center keeps native size");
+        const QPixmap preview = wallpaperPreview(QStringLiteral("dusk"),
+                                                 QSize(72, 34));
+        check(!preview.isNull() && preview.size() == QSize(72, 34),
+              "wallpaper: a swatch renders at the requested size");
 
-        check(qAbs(wallpaperScrimAlpha(45) - 0.45) < 1e-9
-                  && qAbs(wallpaperScrimAlpha(500) - 0.8) < 1e-9
-                  && qAbs(wallpaperScrimAlpha(-20)) < 1e-9,
-              "wallpaper: the scrim is clamped to 0..80%");
-
-        check(wallpaperSettingsLine(QString(), WallpaperMode::Fill, 45)
-                  .contains(QStringLiteral("off")),
-              "wallpaper: the off line names the config key");
-        check(wallpaperSettingsLine(QStringLiteral("/tmp/a.jpg"),
-                                    WallpaperMode::Tile, 30)
-                  .contains(QStringLiteral("tile"))
-                  && wallpaperSettingsLine(QStringLiteral("/tmp/a.jpg"),
-                                           WallpaperMode::Tile, 30)
-                         .contains(QStringLiteral("30%")),
-              "wallpaper: the settings line carries mode and dim");
-
-        check(loadWallpaper(QString()).isNull()
-                  && loadWallpaper(QStringLiteral("/nonexistent/x.png")).isNull(),
-              "wallpaper: a missing path is a null image, never a crash");
-
-        QTemporaryDir shotDir;
-        QImage tiny(16, 16, QImage::Format_RGB32);
-        tiny.fill(Qt::darkGray);
-        const QString tinyPath = shotDir.filePath(QStringLiteral("tiny.png"));
-        QImage big(128, 96, QImage::Format_RGB32);
-        big.fill(Qt::darkCyan);
-        const QString bigPath = shotDir.filePath(QStringLiteral("big.png"));
-        const bool wroteTiny = tiny.save(tinyPath);
-        const bool wroteBig = big.save(bigPath);
-        check(wroteTiny && wroteBig, "wallpaper: the fixtures were written");
-        check(loadWallpaper(tinyPath).isNull(),
-              "wallpaper: an image too small to be a backdrop is refused");
-        check(!loadWallpaper(bigPath).isNull(),
-              "wallpaper: a real image loads");
+        check(stylesheetColour(QStringLiteral("#101116"), 255)
+                      == QStringLiteral("#101116")
+                  && stylesheetColour(QStringLiteral("#101116"), 214)
+                         .startsWith(QStringLiteral("rgba(")),
+              "wallpaper: the surface colour becomes rgba only when it must");
     }
 
     // --- M92: billing-day normalisation + the IMDS identity fallback -------

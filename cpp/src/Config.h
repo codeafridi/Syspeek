@@ -186,13 +186,11 @@ struct OverlayConfig {
     // expanded console is always opaque - it is a data page, and a see-through
     // table is a readability bug, not a style.
     int opacity = 100;
-    // [overlay] wallpaper: an image painted behind the collapsed strip, with
-    // wallpaper_dim percent of the page colour laid over it so the readout
-    // stays legible on any photo. Empty = off.
-    QString wallpaper;
-    // [overlay] wallpaper_mode: fill | fit | tile | center.
-    QString wallpaperMode = QStringLiteral("fill");
-    int wallpaperDim = 45;
+    // [overlay] wallpaper: a curated backdrop id (none | graphite | slate |
+    // moss | ember | dusk). Not a file path on purpose - a photograph cannot
+    // promise that white 9 px text stays readable over it, and the attempt at
+    // allowing one ended with the PID and CPU numbers camouflaged.
+    QString wallpaper = QStringLiteral("none");
 };
 
 struct CloudConfig {

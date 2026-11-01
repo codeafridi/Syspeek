@@ -1,5 +1,7 @@
 #include "Config.h"
 
+#include "WallpaperArt.h"
+
 #include <QDateTime>
 #include <QFileInfo>
 #include <QProcessEnvironment>
@@ -346,24 +348,16 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         if (opacity > 0) {
             config.overlay.opacity = qBound(40, opacity, 100);
         }
+        // An id, validated against the curated set; an older config that holds
+        // a file path (or anything else) falls back to none instead of trying
+        // to load it.
         const QString wallpaper =
-            settings.value(QStringLiteral("wallpaper")).toString().trimmed();
-        if (!wallpaper.isEmpty()) {
-            config.overlay.wallpaper = wallpaper;
-        }
-        const QString mode =
-            settings.value(QStringLiteral("wallpaper_mode"))
+            settings.value(QStringLiteral("wallpaper"))
                 .toString()
                 .trimmed()
                 .toLower();
-        if (mode == QLatin1String("fill") || mode == QLatin1String("fit")
-            || mode == QLatin1String("tile")
-            || mode == QLatin1String("center")) {
-            config.overlay.wallpaperMode = mode;
-        }
-        const int dim = settings.value(QStringLiteral("wallpaper_dim")).toInt();
-        if (dim > 0) {
-            config.overlay.wallpaperDim = qBound(0, dim, 80);
+        if (wallpaperPresetExists(wallpaper)) {
+            config.overlay.wallpaper = wallpaper;
         }
         const int ttl =
             settings.value(QStringLiteral("focus_cache_ttl_ms")).toInt();
@@ -816,9 +810,6 @@ void saveOverlayConfig(const QString &path, const OverlayConfig &overlay) {
     settings.setValue(QStringLiteral("opacity"),
                       QString::number(overlay.opacity));
     settings.setValue(QStringLiteral("wallpaper"), overlay.wallpaper);
-    settings.setValue(QStringLiteral("wallpaper_mode"), overlay.wallpaperMode);
-    settings.setValue(QStringLiteral("wallpaper_dim"),
-                      QString::number(overlay.wallpaperDim));
     settings.endGroup();
     settings.sync();
 }

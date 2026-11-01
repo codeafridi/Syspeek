@@ -617,9 +617,7 @@ y = 120
 width = 820             ; last expanded size
 height = 560
 opacity = 100           ; how solid the COLLAPSED strip is, 40..100
-wallpaper =             ; image behind the collapsed strip (empty = off)
-wallpaper_mode = fill   ; fill | fit | tile | center
-wallpaper_dim = 45      ; page-colour scrim over it, 0..80
+wallpaper = none        ; curated backdrop: none | graphite | slate | moss | ember | dusk
 ```
 
 The footer **CLICK** button toggles click-through on X11 (X Shape `ShapeInput`),
@@ -648,10 +646,13 @@ restyle, on purpose:
 - **collapsed opacity** — the short form can go down to 40% so it sits quietly
   over an editor. The expanded console is always opaque; a translucent table is
   a readability bug, not a style.
-- **wallpaper** — an image behind the *collapsed* strip, always under a scrim of
-  the page colour (`wallpaper_dim`, default 45%) so the readout survives over
-  any photograph. A 64×64 minimum and a silent skip on an unreadable path keep
-  it from becoming a smear.
+- **backdrop** — six curated gradients, not a file picker. That is deliberate:
+  a photograph cannot promise that white 9 px mono stays readable over it, and
+  the one build that allowed one ended with the PID and CPU numbers camouflaged
+  into the image. Every preset is painted, sits in a very dark band (luminance
+  under 0.06, so the readout keeps 7:1 or better), and is used in **both**
+  shapes — full strength on the strip, a 40% tint behind the console page with
+  the cards left solid, so a table is never read over a gradient.
 
 ```ini
 [theme]

@@ -214,7 +214,7 @@ add_library(syspeek_core STATIC
     src/CloudPricing.h
     src/CloudSpendStatus.cpp
     src/IacStatus.cpp
-    src/Wallpaper.cpp
+    src/WallpaperArt.cpp
     src/CloudSpendStatus.h
     src/CloudSpendSource.cpp
     src/CloudSpendSource.h

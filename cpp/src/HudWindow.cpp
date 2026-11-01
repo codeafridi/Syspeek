@@ -283,13 +283,11 @@ HudWindow::HudWindow(QWidget *parent)
     // Appearance changes take effect immediately and are written back to the
     // same config file the overlay geometry uses.
     connect(m_panel, &DashboardPanel::appearanceChanged, this,
-            [this](const QString &accent, int opacity, const QString &wallpaper,
-                   const QString &mode, int dim) {
+            [this](const QString &accent, int opacity,
+                   const QString &wallpaper) {
                 OverlayConfig next = m_overlayConfig;
                 next.opacity = opacity;
                 next.wallpaper = wallpaper;
-                next.wallpaperMode = mode;
-                next.wallpaperDim = dim;
                 applyAppearance(accent, next, m_overlayPath);
                 if (!m_overlayPath.isEmpty()) {
                     saveThemeAccent(m_overlayPath, accent);
@@ -1350,21 +1348,7 @@ void HudWindow::setOverlayConfig(const OverlayConfig &config,
                                 const QString &path) {
     m_overlayConfig = config;
     m_overlayPath = path;
-    reloadWallpaper();
     applySurfaceAppearance();
-}
-
-void HudWindow::reloadWallpaper() {
-    const QString path = m_overlayConfig.wallpaper;
-    if (path.isEmpty()) {
-        m_wallpaper = QImage();
-    } else if (m_wallpaper.isNull() || m_wallpaperPath != path) {
-        m_wallpaper = loadWallpaper(path);
-    }
-    m_wallpaperPath = path;
-    m_wallpaperScaled = QImage();
-    m_wallpaperScaledFor = QSize();
-    update();
 }
 
 void HudWindow::applySurfaceAppearance() {
@@ -1377,6 +1361,13 @@ void HudWindow::applySurfaceAppearance() {
     if (!qFuzzyCompare(windowOpacity(), opacity)) {
         setWindowOpacity(opacity);
     }
+    // A curated backdrop lets a little of itself through the page, never
+    // through a card, so a table row is always on a solid surface.
+    if (m_panel != nullptr) {
+        m_panel->setBackdropAlpha(
+            wallpaperSurfaceAlpha(m_overlayConfig.wallpaper,
+                                  m_detailsExpanded));
+    }
     update();
 }
 
@@ -1388,8 +1379,7 @@ void HudWindow::setAppearance(const QString &accent,
     // edits write back to.
     setOverlayConfig(config, path);
     if (m_panel != nullptr) {
-        m_panel->setAppearance(accent, config.opacity, config.wallpaper,
-                               config.wallpaperMode, config.wallpaperDim);
+        m_panel->setAppearance(accent, config.opacity, config.wallpaper);
     }
 }
 
@@ -1406,38 +1396,18 @@ void HudWindow::applyAppearance(const QString &accent,
 }
 
 void HudWindow::paintEvent(QPaintEvent *event) {
-    // The wallpaper is a collapsed-strip backdrop only, and it is always laid
-    // under a scrim of the page colour so the readout stays legible on any
-    // photograph.
-    if (m_wallpaper.isNull() || m_detailsExpanded) {
+    // The backdrop is painted for BOTH shapes. In the console it sits under a
+    // slightly translucent page (cards stay solid), so it reads as a tint, not
+    // a photograph behind a table.
+    const QString wallpaper = m_overlayConfig.wallpaper;
+    if (wallpaper.isEmpty() || wallpaper == QLatin1String("none")) {
         QWidget::paintEvent(event);
         return;
     }
     QPainter painter(this);
-    const WallpaperMode mode =
-        wallpaperModeFromString(m_overlayConfig.wallpaperMode);
-    const QRectF target(rect());
-    const QSizeF source(m_wallpaper.size());
-    if (mode == WallpaperMode::Fill) {
-        painter.drawImage(target,
-                          m_wallpaper,
-                          wallpaperSourceRect(mode, source,
-                                              QSizeF(target.size())));
-    } else if (mode == WallpaperMode::Tile) {
-        painter.fillRect(rect(), QColor(ui_theme::bg()));
-        painter.drawTiledPixmap(rect(), QPixmap::fromImage(m_wallpaper));
-    } else {
-        painter.fillRect(rect(), QColor(ui_theme::bg()));
-        const QRectF place =
-            wallpaperTargetRect(mode, source, QSizeF(target.size()));
-        painter.drawImage(place, m_wallpaper);
-    }
-    QColor scrim(ui_theme::bg());
-    scrim.setAlphaF(wallpaperScrimAlpha(m_overlayConfig.wallpaperDim));
-    painter.fillRect(rect(), scrim);
-    QPen border(ui_theme::border());
-    border.setWidth(1);
-    painter.setPen(border);
+    painter.fillRect(rect(), QColor(ui_theme::bg()));
+    paintWallpaper(painter, rect(), wallpaper, m_detailsExpanded);
+    painter.setPen(QPen(QColor(ui_theme::border()), 1));
     painter.drawRect(rect().adjusted(0, 0, -1, -1));
 }
 

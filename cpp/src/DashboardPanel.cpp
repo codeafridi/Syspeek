@@ -1,6 +1,6 @@
 #include "DashboardPanel.h"
 
-#include "Wallpaper.h"
+#include "WallpaperArt.h"
 
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
@@ -19,6 +19,9 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QColor>
+#include <QIcon>
+#include <QButtonGroup>
+#include <QToolButton>
 #include <QColorDialog>
 #include <QFileDialog>
 #include <QDateTime>
@@ -455,6 +458,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
 QString DashboardPanel::consoleStyleSheet() const {
     return QStringLiteral(
         "#ddRoot { background-color: %BG%; }"
+        "#ddScrollContent { background-color: %BG%; }"
         "#ddTopbar { background-color: %RAISED%; border-bottom: 1px solid %BORDER%; }"
         "#ddChip { color: %ACCENT%; font-size: 9px; }"
         "#ddApp { color: %TEXT%; font-size: 13px; }"
@@ -632,6 +636,24 @@ QString DashboardPanel::consoleStyleSheet() const {
         " { background-color: %HOVER%; color: %ACCENT%; }"
         "QToolTip { background-color: #1f2229; color: %TEXT%;"
         "  border: 1px solid %BORDER%; padding: 4px 6px; }"
+        // A new label always needs an explicit colour rule: without one it
+        // inherits the surface and renders near-invisible (the M61c sweep).
+        "#ddOpacityValue { color: %TEXT%; }"
+        "#ddAccentSwatch { font-weight: bold; }"
+        "#ddPresetBtn { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 3px 9px; }"
+        "#ddPresetBtn:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddPresetBtn:checked { color: %ACCENT%; border-color: %ACCENT%; }"
+        "#ddSwatch { color: %DIM%; background-color: transparent;"
+        "  border: 1px solid %BORDER%; border-radius: 2px; padding: 4px 4px 2px 4px; }"
+        "#ddSwatch:hover { color: %TEXT%; border-color: %MUTED%; }"
+        "#ddSwatch:checked { color: %ACCENT%; border-color: %ACCENT%; }"
+        "QSlider::groove:horizontal { height: 3px; background: %BORDER%;"
+        "  border-radius: 1px; }"
+        "QSlider::sub-page:horizontal { background: %ACCENT%;"
+        "  border-radius: 1px; }"
+        "QSlider::handle:horizontal { width: 10px; height: 10px;"
+        "  margin: -4px 0; border-radius: 5px; background: %TEXT%; }"
         "QCheckBox { color: %DIM%; font-size: 9px; }"
         "QCheckBox::indicator { width: 11px; height: 11px;"
         "  border: 1px solid %BORDER%; border-radius: 2px;"
@@ -686,7 +708,8 @@ QString DashboardPanel::consoleStyleSheet() const {
         "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal"
         " { width: 0; }"
         "QPushButton { background-color: transparent; }")
-        .replace(QStringLiteral("%BG%"), ui_theme::bg())
+        .replace(QStringLiteral("%BG%"),
+                 stylesheetColour(ui_theme::bg(), m_surfaceAlpha))
         .replace(QStringLiteral("%RAIL%"), ui_theme::rail())
         .replace(QStringLiteral("%RAISED%"), ui_theme::raised())
         .replace(QStringLiteral("%BORDER%"), ui_theme::border())
@@ -700,37 +723,49 @@ QString DashboardPanel::consoleStyleSheet() const {
 }
 
 void DashboardPanel::setAppearance(const QString &accent, int opacity,
-                                   const QString &wallpaper,
-                                   const QString &mode, int dim) {
+                                   const QString &wallpaper) {
     if (ui_theme::isValidAccent(accent)) {
         m_accentHex = accent.toLower();
     }
     m_opacityPercent = qBound(40, opacity, 100);
-    m_wallpaper = wallpaper;
-    m_wallpaperMode = wallpaperModeName(wallpaperModeFromString(mode));
-    m_wallpaperDim = qBound(0, dim, 80);
+    // An unknown id (an older config that held a file path, say) falls back to
+    // the plain surface rather than an empty backdrop.
+    m_wallpaper = wallpaperPresetExists(wallpaper) ? wallpaper.trimmed().toLower()
+                                                   : QStringLiteral("none");
     if (m_accentSwatch != nullptr) {
         m_accentSwatch->setText(m_accentHex);
         m_accentSwatch->setStyleSheet(
             QStringLiteral("color: %1;").arg(m_accentHex));
     }
-    if (m_opacitySpin != nullptr) {
-        QSignalBlocker block(m_opacitySpin);
-        m_opacitySpin->setValue(m_opacityPercent);
+    if (m_opacitySlider != nullptr) {
+        QSignalBlocker block(m_opacitySlider);
+        m_opacitySlider->setValue(m_opacityPercent);
     }
-    if (m_wallpaperModeBox != nullptr) {
-        QSignalBlocker block(m_wallpaperModeBox);
-        m_wallpaperModeBox->setCurrentText(m_wallpaperMode);
+    if (m_opacityValue != nullptr) {
+        m_opacityValue->setText(
+            QStringLiteral("%1%").arg(m_opacityPercent));
     }
-    if (m_wallpaperDimSpin != nullptr) {
-        QSignalBlocker block(m_wallpaperDimSpin);
-        m_wallpaperDimSpin->setValue(m_wallpaperDim);
+    if (m_wallpaperGroup != nullptr) {
+        for (QAbstractButton *button : m_wallpaperGroup->buttons()) {
+            auto *tile = qobject_cast<QToolButton *>(button);
+            if (tile == nullptr) {
+                continue;
+            }
+            tile->setChecked(tile->text().compare(
+                                 wallpaperPresetName(m_wallpaper),
+                                 Qt::CaseInsensitive)
+                             == 0);
+        }
     }
-    if (m_wallpaperLabel != nullptr) {
-        m_wallpaperLabel->setText(wallpaperSettingsLine(
-            m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
-            m_wallpaperDim));
+}
+
+void DashboardPanel::setBackdropAlpha(int alpha) {
+    const int clamped = qBound(0, alpha, 255);
+    if (clamped == m_surfaceAlpha) {
+        return;
     }
+    m_surfaceAlpha = clamped;
+    applyTheme();
 }
 
 void DashboardPanel::applyTheme() {
@@ -956,8 +991,6 @@ QWidget *DashboardPanel::buildOverviewView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral("#ddScrollContent { background-color: %1; }")
-        .arg(ui_theme::bg()));
     content->setObjectName(QStringLiteral("ddScrollContent"));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -1126,8 +1159,6 @@ QWidget *DashboardPanel::buildMetricsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1212,8 +1243,6 @@ QWidget *DashboardPanel::buildSloView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1354,8 +1383,6 @@ QWidget *DashboardPanel::buildAlertsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1438,8 +1465,6 @@ QWidget *DashboardPanel::buildIncidentsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1535,8 +1560,6 @@ QWidget *DashboardPanel::buildProfilesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1774,8 +1797,6 @@ QWidget *DashboardPanel::buildProcessesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -1844,8 +1865,6 @@ QWidget *DashboardPanel::buildMemoryView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2003,8 +2022,6 @@ QWidget *DashboardPanel::buildNetworkView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2102,8 +2119,6 @@ QWidget *DashboardPanel::buildNetworkPathView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2279,8 +2294,6 @@ QWidget *DashboardPanel::buildContainersView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2438,8 +2451,6 @@ QWidget *DashboardPanel::buildKubernetesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2573,8 +2584,6 @@ QWidget *DashboardPanel::buildServicesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2633,8 +2642,6 @@ QWidget *DashboardPanel::buildDependenciesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2693,8 +2700,6 @@ QWidget *DashboardPanel::buildEndpointsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2771,8 +2776,6 @@ QWidget *DashboardPanel::buildSyntheticView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2830,8 +2833,6 @@ QWidget *DashboardPanel::buildInstrumentationView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -2928,8 +2929,6 @@ QWidget *DashboardPanel::buildDatabasesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -3033,8 +3032,6 @@ QWidget *DashboardPanel::buildLogsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -3092,8 +3089,6 @@ QWidget *DashboardPanel::buildErrorsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -3395,51 +3390,53 @@ QWidget *DashboardPanel::buildSettingsView() {
     reportRow->addWidget(copyReport);
     diagLayout->addLayout(reportRow);
 
-    // --- APPEARANCE: the accent, the collapsed strip's opacity and its
-    // wallpaper. Deliberately narrow: chrome colour and one backdrop, never
-    // the surface palette or the semantic trio.
+    // --- APPEARANCE -------------------------------------------------------
+    // Two decisions and nothing else: one chrome colour, and one backdrop from
+    // a curated set. There is no "pick any image" here on purpose - the one
+    // attempt at that ended with the PID and CPU readout camouflaged into a
+    // photograph, which is a correctness bug wearing a style hat.
     auto *appearanceCard = new QWidget(view);
     auto *appLayout = new QVBoxLayout(appearanceCard);
     appLayout->setContentsMargins(0, 0, 0, 0);
-    appLayout->setSpacing(6);
+    appLayout->setSpacing(12);
 
-    auto *presetRow = new QHBoxLayout;
-    presetRow->setSpacing(6);
-    auto *presetCaption = new QLabel(QStringLiteral("preset"), appearanceCard);
-    presetCaption->setFont(monoFont(9));
-    presetCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
-    presetRow->addWidget(presetCaption);
+    // --- accent: presets on the left, the exact value and a picker on the
+    // right, so the row reads as "choose" and "fine tune".
+    auto *accentRow = new QHBoxLayout;
+    accentRow->setSpacing(6);
+    auto *accentCaption = new QLabel(QStringLiteral("accent"), appearanceCard);
+    accentCaption->setFont(monoFont(9));
+    accentCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    accentCaption->setMinimumWidth(70);
+    accentRow->addWidget(accentCaption);
+    auto *accentGroup = new QButtonGroup(appearanceCard);
+    accentGroup->setExclusive(true);
     for (const QPair<QString, QString> &preset : ui_theme::accentPresets()) {
         auto *button = new QPushButton(preset.first, appearanceCard);
-        button->setObjectName(QStringLiteral("ddCopy"));
+        button->setObjectName(QStringLiteral("ddPresetBtn"));
         button->setFont(monoFont(9));
+        button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
         button->setFocusPolicy(Qt::NoFocus);
         button->setToolTip(preset.second);
+        if (preset.second == m_accentHex) {
+            button->setChecked(true);
+        }
+        accentGroup->addButton(button);
         const QString hex = preset.second;
-        connect(button, &QPushButton::clicked, this, [this, hex]() {
+        connect(button, &QPushButton::clicked, this, [this, hex, button]() {
             m_accentHex = hex;
             if (m_accentSwatch != nullptr) {
                 m_accentSwatch->setText(hex);
                 m_accentSwatch->setStyleSheet(
                     QStringLiteral("color: %1;").arg(hex));
             }
-            emit appearanceChanged(accentHex(), accentOpacity(),
-                                   wallpaperPath(), wallpaperMode(),
-                                   wallpaperDim());
+            Q_UNUSED(button);
+            emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
         });
-        presetRow->addWidget(button);
+        accentRow->addWidget(button);
     }
-    presetRow->addStretch(1);
-    appLayout->addLayout(presetRow);
-
-    auto *accentRow = new QHBoxLayout;
-    accentRow->setSpacing(8);
-    auto *accentCaption = new QLabel(QStringLiteral("accent"), appearanceCard);
-    accentCaption->setFont(monoFont(9));
-    accentCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
-    accentCaption->setMinimumWidth(64);
-    accentRow->addWidget(accentCaption);
+    accentRow->addSpacing(8);
     m_accentSwatch = new QLabel(m_accentHex, appearanceCard);
     m_accentSwatch->setObjectName(QStringLiteral("ddAccentSwatch"));
     m_accentSwatch->setFont(monoFont(10));
@@ -3447,157 +3444,118 @@ QWidget *DashboardPanel::buildSettingsView() {
         QStringLiteral("color: %1;").arg(m_accentHex));
     accentRow->addWidget(m_accentSwatch);
     auto *accentPick = new QPushButton(QStringLiteral("PICK"), appearanceCard);
-    accentPick->setObjectName(QStringLiteral("ddCopy"));
+    accentPick->setObjectName(QStringLiteral("ddPresetBtn"));
     accentPick->setFont(monoFont(9));
     accentPick->setCursor(Qt::PointingHandCursor);
     accentPick->setFocusPolicy(Qt::NoFocus);
     connect(accentPick, &QPushButton::clicked, this, [this]() {
-        const QColor picked =
-            QColorDialog::getColor(QColor(m_accentHex), this,
-                                   QStringLiteral("Accent colour"));
-        if (!picked.isValid()) {
+        // The HUD is an always-on-top tool window, so a dialog parented to it
+        // renders BEHIND it. A parentless dialog that asks for the same level
+        // is the only shape that reliably lands in front.
+        QColorDialog dialog{QColor(m_accentHex)};
+        dialog.setOption(QColorDialog::DontUseNativeDialog, true);
+        dialog.setWindowTitle(QStringLiteral("Accent colour"));
+        dialog.setWindowFlag(Qt::WindowStaysOnTopHint, true);
+        if (dialog.exec() != QDialog::Accepted) {
             return;
         }
-        m_accentHex = picked.name(QColor::HexRgb);
+        m_accentHex = dialog.selectedColor().name(QColor::HexRgb);
         m_accentSwatch->setText(m_accentHex);
         m_accentSwatch->setStyleSheet(
             QStringLiteral("color: %1;").arg(m_accentHex));
-        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
-                               wallpaperMode(), wallpaperDim());
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
     });
     accentRow->addWidget(accentPick);
-    auto *accentHint = new QLabel(
-        QStringLiteral("chrome only - the surface palette and ok/warn/crit "
-                       "stay put"),
-        appearanceCard);
-    accentHint->setFont(monoFont(9));
-    accentHint->setObjectName(QStringLiteral("ddSettingsLabel"));
-    accentHint->setMinimumWidth(1);
-    accentRow->addWidget(accentHint);
     accentRow->addStretch(1);
     appLayout->addLayout(accentRow);
 
-    auto *surfaceRow = new QHBoxLayout;
-    surfaceRow->setSpacing(8);
-    auto *surfaceCaption = new QLabel(QStringLiteral("collapsed"), appearanceCard);
-    surfaceCaption->setFont(monoFont(9));
-    surfaceCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
-    surfaceCaption->setMinimumWidth(64);
-    surfaceRow->addWidget(surfaceCaption);
-    m_opacitySpin = new QSpinBox(appearanceCard);
-    m_opacitySpin->setObjectName(QStringLiteral("ddOpacitySpin"));
-    m_opacitySpin->setRange(40, 100);
-    m_opacitySpin->setSuffix(QStringLiteral("% solid"));
-    m_opacitySpin->setValue(m_opacityPercent);
-    m_opacitySpin->setFont(monoFont(9));
-    m_opacitySpin->setFocusPolicy(Qt::ClickFocus);
-    connect(m_opacitySpin, &QSpinBox::valueChanged, this, [this](int value) {
-        m_opacityPercent = value;
-        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
-                               wallpaperMode(), wallpaperDim());
-    });
-    surfaceRow->addWidget(m_opacitySpin);
-    auto *surfaceHint = new QLabel(
-        QStringLiteral("the expanded console is always opaque"), appearanceCard);
-    surfaceHint->setFont(monoFont(9));
-    surfaceHint->setObjectName(QStringLiteral("ddSettingsLabel"));
-    surfaceHint->setMinimumWidth(1);
-    surfaceRow->addWidget(surfaceHint);
-    surfaceRow->addStretch(1);
-    appLayout->addLayout(surfaceRow);
-
-    auto *wallRow = new QHBoxLayout;
-    wallRow->setSpacing(8);
-    auto *wallCaption = new QLabel(QStringLiteral("wallpaper"), appearanceCard);
+    // --- wallpaper: a swatch grid drawn by the same painter the HUD uses, so
+    // a preview cannot promise a look the window does not deliver.
+    auto *swatchRow = new QHBoxLayout;
+    swatchRow->setSpacing(8);
+    auto *wallCaption = new QLabel(
+        QStringLiteral("backdrop"), appearanceCard);
     wallCaption->setFont(monoFont(9));
     wallCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
-    wallCaption->setMinimumWidth(64);
-    wallRow->addWidget(wallCaption);
-    m_wallpaperLabel = new QLabel(
-        wallpaperSettingsLine(m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
-                              m_wallpaperDim),
-        appearanceCard);
-    m_wallpaperLabel->setObjectName(QStringLiteral("ddWallpaperLabel"));
-    m_wallpaperLabel->setFont(monoFont(9));
-    m_wallpaperLabel->setMinimumWidth(1);
-    m_wallpaperLabel->setWordWrap(false);
-    wallRow->addWidget(m_wallpaperLabel, 1);
-    auto *wallPick = new QPushButton(QStringLiteral("CHOOSE"), appearanceCard);
-    wallPick->setObjectName(QStringLiteral("ddCopy"));
-    wallPick->setFont(monoFont(9));
-    wallPick->setCursor(Qt::PointingHandCursor);
-    wallPick->setFocusPolicy(Qt::NoFocus);
-    connect(wallPick, &QPushButton::clicked, this, [this]() {
-        const QString picked = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Wallpaper for the collapsed HUD"),
-            QDir::homePath(),
-            QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
-        if (picked.isEmpty()) {
-            return;
+    wallCaption->setMinimumWidth(70);
+    wallCaption->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    swatchRow->addWidget(wallCaption);
+    auto *swatches = new QHBoxLayout;
+    swatches->setSpacing(8);
+    m_wallpaperGroup = new QButtonGroup(appearanceCard);
+    m_wallpaperGroup->setExclusive(true);
+    for (const WallpaperPreset &preset : wallpaperPresets()) {
+        auto *tile = new QToolButton(appearanceCard);
+        tile->setObjectName(QStringLiteral("ddSwatch"));
+        tile->setCheckable(true);
+        tile->setChecked(preset.id == m_wallpaper);
+        tile->setCursor(Qt::PointingHandCursor);
+        tile->setFocusPolicy(Qt::NoFocus);
+        tile->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        tile->setIcon(QIcon(wallpaperPreview(preset.id, QSize(72, 34))));
+        tile->setIconSize(QSize(72, 34));
+        tile->setText(preset.name);
+        tile->setFont(monoFont(9));
+        tile->setMinimumWidth(84);
+        m_wallpaperGroup->addButton(tile);
+        const QString id = preset.id;
+        connect(tile, &QToolButton::clicked, this, [this, id]() {
+            m_wallpaper = id;
+            emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
+        });
+        swatches->addWidget(tile);
+    }
+    swatches->addStretch(1);
+    swatchRow->addLayout(swatches, 1);
+    appLayout->addLayout(swatchRow);
+
+    // --- collapsed opacity: a slider, because "how see-through" is a feel,
+    // not a number you type. The strip only; MORE is always fully solid.
+    auto *opacityRow = new QHBoxLayout;
+    opacityRow->setSpacing(10);
+    auto *opacityCaption = new QLabel(
+        QStringLiteral("strip opacity"), appearanceCard);
+    opacityCaption->setFont(monoFont(9));
+    opacityCaption->setObjectName(QStringLiteral("ddSettingsLabel"));
+    opacityCaption->setMinimumWidth(70);
+    opacityRow->addWidget(opacityCaption);
+    m_opacitySlider = new QSlider(Qt::Horizontal, appearanceCard);
+    m_opacitySlider->setObjectName(QStringLiteral("ddOpacitySlider"));
+    m_opacitySlider->setRange(40, 100);
+    m_opacitySlider->setSingleStep(5);
+    m_opacitySlider->setPageStep(10);
+    m_opacitySlider->setValue(m_opacityPercent);
+    m_opacitySlider->setFixedWidth(180);
+    m_opacitySlider->setFocusPolicy(Qt::ClickFocus);
+    m_opacityValue = new QLabel(QStringLiteral("%1%").arg(m_opacityPercent),
+                                appearanceCard);
+    m_opacityValue->setObjectName(QStringLiteral("ddOpacityValue"));
+    m_opacityValue->setFont(monoFont(10));
+    m_opacityValue->setMinimumWidth(36);
+    connect(m_opacitySlider, &QSlider::valueChanged, this, [this](int value) {
+        m_opacityPercent = value;
+        if (m_opacityValue != nullptr) {
+            m_opacityValue->setText(QStringLiteral("%1%").arg(value));
         }
-        m_wallpaper = picked;
-        m_wallpaperLabel->setText(wallpaperSettingsLine(
-            m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
-            m_wallpaperDim));
-        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
-                               wallpaperMode(), wallpaperDim());
+        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
     });
-    wallRow->addWidget(wallPick);
-    auto *wallClear = new QPushButton(QStringLiteral("CLEAR"), appearanceCard);
-    wallClear->setObjectName(QStringLiteral("ddCopy"));
-    wallClear->setFont(monoFont(9));
-    wallClear->setCursor(Qt::PointingHandCursor);
-    wallClear->setFocusPolicy(Qt::NoFocus);
-    connect(wallClear, &QPushButton::clicked, this, [this]() {
-        m_wallpaper.clear();
-        m_wallpaperLabel->setText(wallpaperSettingsLine(
-            QString(), wallpaperModeFromString(m_wallpaperMode), m_wallpaperDim));
-        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperPath(),
-                               wallpaperMode(), wallpaperDim());
-    });
-    wallRow->addWidget(wallClear);
-    m_wallpaperModeBox = new QComboBox(appearanceCard);
-    m_wallpaperModeBox->setObjectName(QStringLiteral("ddWallpaperMode"));
-    m_wallpaperModeBox->setFont(monoFont(9));
-    m_wallpaperModeBox->addItems(wallpaperModeNames());
-    m_wallpaperModeBox->setCurrentText(m_wallpaperMode);
-    m_wallpaperModeBox->setFocusPolicy(Qt::ClickFocus);
-    m_wallpaperModeBox->setMinimumWidth(1);
-    connect(m_wallpaperModeBox, &QComboBox::currentTextChanged, this,
-            [this](const QString &mode) {
-                m_wallpaperMode = mode;
-                m_wallpaperLabel->setText(wallpaperSettingsLine(
-                    m_wallpaper, wallpaperModeFromString(mode), m_wallpaperDim));
-                emit appearanceChanged(accentHex(), accentOpacity(),
-                                       wallpaperPath(), wallpaperMode(),
-                                       wallpaperDim());
-            });
-    wallRow->addWidget(m_wallpaperModeBox);
-    m_wallpaperDimSpin = new QSpinBox(appearanceCard);
-    m_wallpaperDimSpin->setRange(0, 80);
-    m_wallpaperDimSpin->setSuffix(QStringLiteral("% dim"));
-    m_wallpaperDimSpin->setValue(m_wallpaperDim);
-    m_wallpaperDimSpin->setFont(monoFont(9));
-    m_wallpaperDimSpin->setFocusPolicy(Qt::ClickFocus);
-    connect(m_wallpaperDimSpin, &QSpinBox::valueChanged, this,
-            [this](int value) {
-                m_wallpaperDim = value;
-                m_wallpaperLabel->setText(wallpaperSettingsLine(
-                    m_wallpaper, wallpaperModeFromString(m_wallpaperMode),
-                    m_wallpaperDim));
-                emit appearanceChanged(accentHex(), accentOpacity(),
-                                       wallpaperPath(), wallpaperMode(),
-                                       wallpaperDim());
-            });
-    wallRow->addWidget(m_wallpaperDimSpin);
-    wallRow->addStretch(0);
-    appLayout->addLayout(wallRow);
+    opacityRow->addWidget(m_opacitySlider);
+    opacityRow->addWidget(m_opacityValue);
+    auto *opacityHint = new QLabel(
+        QStringLiteral("collapsed HUD only - MORE is always fully solid"),
+        appearanceCard);
+    opacityHint->setFont(monoFont(9));
+    opacityHint->setObjectName(QStringLiteral("ddSettingsLabel"));
+    opacityHint->setMinimumWidth(1);
+    opacityRow->addWidget(opacityHint);
+    opacityRow->addStretch(1);
+    appLayout->addLayout(opacityRow);
 
     layout->addWidget(makeBanner(QStringLiteral("APPEARANCE"),
         ui_theme::accent(), view));
     layout->addWidget(
-        makeCard(QStringLiteral("accent, opacity, wallpaper"), appearanceCard,
-                 view));
+        makeCard(QStringLiteral("accent, backdrop, strip opacity"),
+                 appearanceCard, view));
 
     layout->addWidget(makeBanner(QStringLiteral("DIAGNOSTICS & SUPPORT"),
         ui_theme::warn(), view));
@@ -3617,8 +3575,6 @@ QWidget *DashboardPanel::buildSettingsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -4355,8 +4311,6 @@ QWidget *DashboardPanel::buildHistoryView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -4503,8 +4457,6 @@ QWidget *DashboardPanel::buildTimelineView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -4969,8 +4921,6 @@ QWidget *DashboardPanel::buildCloudView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5120,8 +5070,6 @@ QWidget *DashboardPanel::buildCostView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5243,8 +5191,6 @@ QWidget *DashboardPanel::buildDisksView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5347,8 +5293,6 @@ QWidget *DashboardPanel::buildGpuView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5475,8 +5419,6 @@ QWidget *DashboardPanel::buildSensorsView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5588,8 +5530,6 @@ QWidget *DashboardPanel::buildHostView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5680,8 +5620,6 @@ QWidget *DashboardPanel::buildSecurityView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5777,8 +5715,6 @@ QWidget *DashboardPanel::buildTracesView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -5842,8 +5778,6 @@ QWidget *DashboardPanel::buildSoftwareView() {
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     content->setAttribute(Qt::WA_StyledBackground, true);
-    content->setStyleSheet(QStringLiteral(
-        "#ddScrollContent { background-color: %1; }").arg(ui_theme::bg()));
     auto *outer = new QVBoxLayout(view);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);

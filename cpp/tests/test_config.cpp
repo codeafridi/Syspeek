@@ -238,29 +238,25 @@ int main(int argc, char *argv[]) {
             "accent=#B8813F\n"
             "[overlay]\n"
             "opacity=20\n"
-            "wallpaper=/tmp/w.png\n"
-            "wallpaper_mode=tile\n"
-            "wallpaper_dim=95\n"));
+            "wallpaper=slate\n"));
         QString error;
         const Config c = loadConfig(path, &error);
         check(c.theme.accent == QStringLiteral("#b8813f"),
               "theme: the accent loads lowercased");
         check(c.overlay.opacity == 40,
               "overlay: opacity below the floor is clamped to 40");
-        check(c.overlay.wallpaper == QStringLiteral("/tmp/w.png")
-                  && c.overlay.wallpaperMode == QStringLiteral("tile")
-                  && c.overlay.wallpaperDim == 80,
-              "overlay: wallpaper, mode and a clamped dim load");
+        check(c.overlay.wallpaper == QStringLiteral("slate"),
+              "overlay: a curated wallpaper id loads");
 
         const QString bad = writeConfig(dir93, QByteArrayLiteral(
             "[theme]\n"
             "accent=blue\n"
             "[overlay]\n"
-            "wallpaper_mode=stretch\n"));
+            "wallpaper=/home/me/wallpaper.jpg\n"));
         const Config badConfig = loadConfig(bad, &error);
         check(badConfig.theme.accent == QStringLiteral("#4a86c4")
-                  && badConfig.overlay.wallpaperMode == QStringLiteral("fill"),
-              "theme: invalid values keep the shipped defaults");
+                  && badConfig.overlay.wallpaper == QStringLiteral("none"),
+              "theme: an invalid accent and a file path fall back to none");
 
         OverlayConfig overlay = c.overlay;
         overlay.opacity = 70;
@@ -269,7 +265,7 @@ int main(int argc, char *argv[]) {
         const Config reloaded = loadConfig(path, &error);
         check(reloaded.overlay.opacity == 70
                   && reloaded.theme.accent == QStringLiteral("#5d8a63")
-                  && reloaded.overlay.wallpaper == QStringLiteral("/tmp/w.png"),
+                  && reloaded.overlay.wallpaper == QStringLiteral("slate"),
               "overlay: the appearance roundtrips through the config");
     }
         check(kept, "alerts: save roundtrip keeps group, owner and cadence");

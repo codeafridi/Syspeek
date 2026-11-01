@@ -3,7 +3,7 @@
 #include "DisplaySnapshot.h"
 #include "HistoryLog.h"
 #include "DockerStatus.h"
-#include "Wallpaper.h"
+#include "WallpaperArt.h"
 #include "JournalStatus.h"
 #include "KubeStatus.h"
 #include "ProcessActions.h"
@@ -239,14 +239,7 @@ private:
     void refreshOverlayState();
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
-    // Wallpaper state. Loaded once per config change, scaled once per size.
-    QImage m_wallpaper;
-    QImage m_wallpaperScaled;
-    QSize m_wallpaperScaledFor;
-    WallpaperMode m_wallpaperScaledMode = WallpaperMode::Fill;
-    QString m_wallpaperPath;
     void applySurfaceAppearance();
-    void reloadWallpaper();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
