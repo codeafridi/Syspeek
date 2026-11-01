@@ -215,6 +215,10 @@ struct CloudConfig {
     // [cloud] terraform_state: the file `terraform show -json` wrote (or a raw
     // .tfstate). Empty means IaC drift is off and nothing is read.
     QString terraformStatePath;
+    // [cloud] identity=<provider>/<region>[/<account>]: used ONLY when the
+    // instance metadata service answers nothing (IMDS blocked by network
+    // policy, or a local emulator). A real IMDS answer always wins.
+    QString identityOverride;
 };
 
 struct Config {

@@ -940,6 +940,30 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
         m_cloudBase.note = probe.error;
         m_cloudBase.sampledAtMs = now;
 
+        // [cloud] identity= is a FALLBACK, never an override: it is consulted
+        // only after the metadata sweep found nothing, so a stale config file
+        // cannot relabel a real instance. What it buys is a host behind an
+        // IMDS-blocking network policy (and every local emulator) still being
+        // able to list the account and read the bill through the provider CLI.
+        {
+            QString fallbackNote;
+            QString identityError;
+            const CloudIdentity resolved = cloudIdentityResolved(
+                probe.identity, m_cloud.identityOverride, &fallbackNote,
+                &identityError);
+            if (resolved.provider != CloudProvider::None) {
+                m_cloudBase.identity = resolved;
+                m_cloudBase.available = true;
+                if (!fallbackNote.isEmpty()) {
+                    m_cloudBase.note = fallbackNote;
+                }
+            } else if (!identityError.isEmpty()) {
+                m_cloudBase.note =
+                    QStringLiteral("cloud: [cloud] identity=%1 is invalid (%2)")
+                        .arg(m_cloud.identityOverride, identityError);
+            }
+        }
+
         m_cloudRatesPath = m_cloud.ratesPath.isEmpty()
             ? defaultCloudRatePath()
             : m_cloud.ratesPath;

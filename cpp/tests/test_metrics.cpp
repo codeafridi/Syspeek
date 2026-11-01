@@ -2243,6 +2243,113 @@ int main(int argc, char *argv[]) {
               "iac: the settings line carries the counts");
     }
 
+    // --- M92: billing-day normalisation + the IMDS identity fallback -------
+    {
+        // A local emulator (and Azure's usageStart) returns full timestamps in
+        // TimePeriod where Cost Explorer returns dates. The parser normalises
+        // both, or every day reads as "not today" and the burn baseline
+        // becomes a 250x spike.
+        const QByteArray stamped = R"({
+          "ResultsByTime": [
+            {"TimePeriod": {"Start": "2026-11-01T00:00:00Z",
+                            "End": "2026-11-02T00:00:00Z"},
+             "Total": {"UnblendedCost": {"Amount": "0.4992", "Unit": "USD"}},
+             "Groups": [{"Keys": ["AmazonEC2"],
+                         "Metrics": {"UnblendedCost": {"Amount": "0.4992",
+                                                       "Unit": "USD"}}},
+                        {"Keys": ["AmazonDynamoDB"],
+                         "Metrics": {"UnblendedCost": {"Amount": "0.0000000000",
+                                                       "Unit": "USD"}}}],
+             "Estimated": false}
+          ]
+        })";
+        QString spendError;
+        const CloudSpendStatus stampedSpend =
+            parseAwsCostAndUsage(stamped, &spendError);
+        check(stampedSpend.available && stampedSpend.days.size() == 1
+                  && stampedSpend.days.first().date
+                         == QStringLiteral("2026-11-01"),
+              "spend: a timestamped TimePeriod is normalised to a day key");
+        check(stampedSpend.periodStart == QStringLiteral("2026-11-01")
+                  && stampedSpend.periodEnd == QStringLiteral("2026-11-02"),
+              "spend: the period is normalised to dates");
+        check(stampedSpend.services.size() == 1
+                  && stampedSpend.services.first().name
+                         == QStringLiteral("AmazonEC2"),
+              "spend: a zero-cost service row is dropped from the breakdown");
+
+        const QByteArray dated = R"({
+          "ResultsByTime": [
+            {"TimePeriod": {"Start": "2026-11-01", "End": "2026-11-02"},
+             "Total": {"UnblendedCost": {"Amount": "1.5", "Unit": "USD"}},
+             "Estimated": true}
+          ]
+        })";
+        const CloudSpendStatus datedSpend =
+            parseAwsCostAndUsage(dated, &spendError);
+        check(datedSpend.available
+                  && datedSpend.periodStart == QStringLiteral("2026-11-01")
+                  && datedSpend.estimated,
+              "spend: a date-only TimePeriod parses unchanged");
+    }
+
+    {
+        // [cloud] identity=: the fallback that lets a host without a metadata
+        // service (network policy, or a local emulator) still list the account.
+        CloudIdentity parsed;
+        QString identityError;
+        check(parseCloudIdentityOverride(QStringLiteral("aws/eu-west-1/123456789012"),
+                                         &parsed, &identityError)
+                  && parsed.provider == CloudProvider::Aws
+                  && parsed.region == QStringLiteral("eu-west-1")
+                  && parsed.accountId == QStringLiteral("123456789012"),
+              "identity: provider/region/account parses");
+        check(parseCloudIdentityOverride(QStringLiteral("azure/eastus"), &parsed,
+                                         &identityError)
+                  && parsed.provider == CloudProvider::Azure
+                  && parsed.accountId.isEmpty(),
+              "identity: the account is optional");
+        check(!parseCloudIdentityOverride(QStringLiteral("moon/nowhere"), &parsed,
+                                          &identityError)
+                  && identityError.contains(QStringLiteral("unknown provider")),
+              "identity: an unknown provider is refused with a reason");
+        check(!parseCloudIdentityOverride(QStringLiteral("aws"), &parsed,
+                                          &identityError),
+              "identity: a missing region is refused");
+
+        // Precedence: the metadata service is the authority on what machine
+        // this is; a stale config file can never relabel a real instance.
+        CloudIdentity real;
+        real.provider = CloudProvider::Gcp;
+        real.region = QStringLiteral("us-central1");
+        real.instanceId = QStringLiteral("gce-1");
+        const CloudIdentity kept = cloudIdentityResolved(
+            real, QStringLiteral("aws/eu-west-1/123456789012"), nullptr, nullptr);
+        check(kept.provider == CloudProvider::Gcp
+                  && kept.region == QStringLiteral("us-central1")
+                  && kept.instanceId == QStringLiteral("gce-1"),
+              "identity: a metadata answer beats the config fallback");
+
+        QString fallbackNote;
+        const CloudIdentity fallback = cloudIdentityResolved(
+            CloudIdentity{}, QStringLiteral("aws/us-east-1/000000000000"),
+            &fallbackNote, nullptr);
+        check(fallback.provider == CloudProvider::Aws
+                  && fallback.region == QStringLiteral("us-east-1")
+                  && fallbackNote.contains(QStringLiteral("config fallback")),
+              "identity: an empty probe falls back to the config");
+
+        const CloudIdentity none =
+            cloudIdentityResolved(CloudIdentity{}, QString(), nullptr, nullptr);
+        check(none.provider == CloudProvider::None,
+              "identity: no probe and no override stays gated");
+
+        const CloudIdentity bad = cloudIdentityResolved(
+            CloudIdentity{}, QStringLiteral("bogus/x"), nullptr, nullptr);
+        check(bad.provider == CloudProvider::None,
+              "identity: an invalid override fails closed");
+    }
+
     // --- M88: cost burn rate against the account's own baseline ------------
     {
         // 2026-11-15T12:00Z: 14 whole days plus 12 hours into the month.
@@ -5945,6 +6052,10 @@ int main(int argc, char *argv[]) {
             "powershell -NoProfile -ExecutionPolicy Bypass -File "
             "\"%~dp0fake.ps1\" %*\r\n";
         const QByteArray ps1 =
+            "if ($env:SPEND_FORECAST_FAIL -and $args.Count -ge 2 -and "
+            "$args[1] -eq 'get-cost-forecast') { "
+            "[Console]::Error.WriteLine('An error occurred "
+            "(UnknownOperationException)'); exit 1 }\r\n"
             "$out = if ($args.Count -ge 2 -and $args[1] -eq "
             "'get-cost-forecast') { $env:SPEND_FORECAST } else { "
             "$env:SPEND_COST }\r\n"
@@ -5956,7 +6067,11 @@ int main(int argc, char *argv[]) {
         const QByteArray script =
             "#!/bin/sh\n"
             "printf '%s\\n' \"$*\" >> \"$SPEND_ARGV_LOG\"\n"
-            "case \"$2\" in get-cost-forecast) cat \"$SPEND_FORECAST\";; "
+            "case \"$2\" in get-cost-forecast)\n"
+            "  if [ -n \"$SPEND_FORECAST_FAIL\" ]; then\n"
+            "    echo 'An error occurred (UnknownOperationException) when "
+            "calling the GetCostForecast operation' >&2; exit 1; fi\n"
+            "  cat \"$SPEND_FORECAST\";;\n"
             "*) cat \"$SPEND_COST\";; esac\n";
 #endif
         bool wrote = write(awsName, script);
@@ -6064,6 +6179,37 @@ int main(int argc, char *argv[]) {
             check(worstUpdateMs < 1200,
                   "spend: no runner update blocks the sampler thread");
             runner.stop();
+        }
+
+        // The forecast is a SECOND step: when the provider rejects it (a
+        // policy that grants only ce:GetCostAndUsage, or an emulator without
+        // GetCostForecast), the billed month-to-date from step one must
+        // survive. Verified against a local emulator that answers
+        // GetCostAndUsage and refuses GetCostForecast with
+        // UnknownOperationException.
+        {
+            qputenv("SPEND_FORECAST_FAIL", "1");
+            QFile::remove(argvLog);
+            CloudSpendRunner runner;
+            runner.setOptions(options);
+            // Bounded pump: the runner is signal-driven, so the event loop
+            // has to turn for each step to finish.
+            for (int i = 0; i < 60; ++i) {
+                runner.update(identity, QDateTime::currentMSecsSinceEpoch());
+                app.processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            check(runner.status().available
+                      && qAbs(runner.status().monthToDateUsd - 100.0) < 1e-9,
+                  "spend: a refused forecast keeps the billed month to date");
+            check(runner.status().forecastUsd < 0.0,
+                  "spend: a refused forecast leaves the projection unknown");
+            check(runner.status().note.contains(
+                      QStringLiteral("month end unavailable")),
+                  "spend: the refused forecast says why the projection is "
+                  "missing");
+            runner.stop();
+            qunsetenv("SPEND_FORECAST_FAIL");
         }
 
         qputenv("PATH", oldPath.toUtf8());

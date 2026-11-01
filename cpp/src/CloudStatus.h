@@ -137,6 +137,28 @@ struct CloudFootprint {
     QString ratesPath;
 };
 
+// [cloud] identity=<provider>/<region>[/<account>]
+//
+// The fleet and spend listings are gated on an identity, and that identity
+// comes from the instance metadata service. A host behind a network policy
+// that blocks 169.254.169.254 - and every local AWS emulator - therefore shows
+// "no cloud instance identified" and never spawns the CLI. This is the
+// documented fallback for exactly those two cases.
+//
+// IMDS ALWAYS WINS: the override is only consulted when the probe found
+// nothing, so a stale config file can never relabel a real instance.
+bool parseCloudIdentityOverride(const QString &text, CloudIdentity *out,
+                                QString *error);
+QString cloudIdentityOverrideText(const CloudIdentity &identity);
+QString cloudIdentityFallbackNote(const CloudIdentity &identity);
+
+// The one place the precedence lives, so the sampler and --dump cannot drift:
+// a probed identity always wins; the override is used only when the probe
+// found nothing. `note` receives the fallback explanation (empty otherwise).
+CloudIdentity cloudIdentityResolved(const CloudIdentity &probed,
+                                    const QString &overrideText,
+                                    QString *note, QString *error);
+
 struct CloudSnapshot {
     bool available = false;
     bool warming = false;

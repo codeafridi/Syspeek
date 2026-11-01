@@ -14,4 +14,10 @@ enum class CloudProvider {
 };
 
 QString cloudProviderName(CloudProvider provider);
+// "aws"/"amazon"/"ec2", "azure", "gcp"/"google", "oci"/"oracle" -> the enum;
+// anything else is None. Used by the [cloud] identity= fallback parser.
+CloudProvider cloudProviderFromName(const QString &name);
+// "aws"/"amazon"/"ec2", "azure"/"az", "gcp"/"google", "oci"/"oracle" -> the
+// enum; anything else is None.
+CloudProvider cloudProviderFromName(const QString &name);
 QString cloudProviderLabel(CloudProvider provider);

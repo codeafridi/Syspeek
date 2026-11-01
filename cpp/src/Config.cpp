@@ -394,6 +394,8 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             settings.value(QStringLiteral("terraform_state"))
                 .toString()
                 .trimmed();
+        config.cloud.identityOverride =
+            settings.value(QStringLiteral("identity")).toString().trimmed();
     }
     settings.endGroup();
 
