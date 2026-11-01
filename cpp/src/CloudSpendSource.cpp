@@ -196,7 +196,9 @@ CloudSpendStatus probeCloudSpend(const CloudIdentity &identity,
     }
 
     const QString cli = cloudFleetCli(identity.provider);
-    const QString cliPath = cliExecutable(cli);
+    const QString cliPath = options.cliPath.isEmpty()
+                                ? cliExecutable(cli)
+                                : options.cliPath;
     if (cliPath.isEmpty()) {
         return failure(identity, cloudSpendCliMissingText(cli), nowMs);
     }
@@ -345,7 +347,9 @@ void CloudSpendRunner::begin(const CloudIdentity &identity, qint64 nowMs) {
     m_status.note = QStringLiteral("billed spend: asking %1 for the month to date ...")
                         .arg(m_status.cliName);
 
-    const QString cliPath = cliExecutable(m_status.cliName);
+    const QString cliPath = m_options.cliPath.isEmpty()
+                                ? cliExecutable(m_status.cliName)
+                                : m_options.cliPath;
     if (cliPath.isEmpty()) {
         fail(cloudSpendCliMissingText(m_status.cliName), nowMs);
         return;
@@ -371,7 +375,9 @@ void CloudSpendRunner::advance(qint64 nowMs) {
         finish(nowMs);
         return;
     }
-    const QString cliPath = cliExecutable(m_status.cliName);
+    const QString cliPath = m_options.cliPath.isEmpty()
+                                ? cliExecutable(m_status.cliName)
+                                : m_options.cliPath;
     auto *process = new QProcess(this);
     startProcess(process, cliPath, cloudSpendArguments(m_identity, m_step, nowMs));
     m_process = process;

@@ -5639,6 +5639,11 @@ int main(int argc, char *argv[]) {
         // the fake's very first run. The hang case below keeps its own tiny
         // budget on purpose.
         cliOptions.timeoutMs = 15000;
+        // Pin the binary instead of trusting PATH. The runners keep the real
+        // aws/az on some images, and which of the two wins is exactly the race
+        // that made this test fail on windows while the PATH assertion above
+        // still passed.
+        cliOptions.cliPath = binDir + QStringLiteral("/aws") + suffix;
         const qint64 cliNow = 1'700'000'000'000LL;
 
         setFake(awsListing, QByteArray(), 0);
@@ -5654,6 +5659,7 @@ int main(int argc, char *argv[]) {
                   && awsFleet.rows.first().ageSec == cliNow / 1000 - 1685613600,
               "cloud cli: the aws listing parses into a row with its age");
 
+        cliOptions.cliPath = binDir + QStringLiteral("/az") + suffix;
         setFake(QByteArrayLiteral(
                     "[{\"name\":\"vm-a\",\"location\":\"westus\","
                     "\"powerState\":\"VM running\","
@@ -5729,6 +5735,7 @@ int main(int argc, char *argv[]) {
         qputenv("SYSPEEK_FAKE_SLEEP", "6");
         CloudFleetOptions hangOptions;
         hangOptions.timeoutMs = 2000;
+        hangOptions.cliPath = binDir + QStringLiteral("/aws") + suffix;
         QElapsedTimer timeoutClock;
         timeoutClock.start();
         const CloudFleetStatus hung =
@@ -5746,8 +5753,12 @@ int main(int argc, char *argv[]) {
         const QString emptyDir = binDir + QStringLiteral("/empty");
         QDir().mkpath(emptyDir);
         qputenv("PATH", emptyDir.toUtf8());
+        // Path resolution is what this case is about, so the pinned CLI from
+        // the cases above has to be dropped for it.
+        CloudFleetOptions missingOptions = cliOptions;
+        missingOptions.cliPath.clear();
         const CloudFleetStatus missing =
-            probeCloudFleet(awsId, cliOptions, cliNow);
+            probeCloudFleet(awsId, missingOptions, cliNow);
         check(!missing.available
                   && missing.note == fleetCliMissingText(QStringLiteral("aws")),
               "cloud cli: a missing CLI states the gate and the fix");
@@ -5760,6 +5771,7 @@ int main(int argc, char *argv[]) {
             CloudFleetRunner runner;
             CloudFleetOptions runnerOptions;
             runnerOptions.timeoutMs = 5000;
+            runnerOptions.cliPath = binDir + QStringLiteral("/aws") + suffix;
             runner.setOptions(runnerOptions);
             QElapsedTimer pollClock;
             pollClock.start();
@@ -6116,6 +6128,8 @@ int main(int argc, char *argv[]) {
         identity.accountId = QStringLiteral("123456789012");
         CloudSpendOptions options;
         options.timeoutMs = 10000;
+        // Pin the binary: see the fleet block above.
+        options.cliPath = awsName;
         const qint64 nowMs = 1'760'000'000'000LL;   // 2025-10-09 UTC
 
         const CloudSpendStatus spend = probeCloudSpend(identity, options, nowMs);

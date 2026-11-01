@@ -290,7 +290,9 @@ CloudFleetStatus probeCloudFleet(const CloudIdentity &identity,
         return status;
     }
     const QString cli = cloudFleetCli(identity.provider);
-    const QString cliPath = cloudFleetExecutable(cli);
+    const QString cliPath = options.cliPath.isEmpty()
+                                ? cloudFleetExecutable(cli)
+                                : options.cliPath;
     if (cliPath.isEmpty()) {
         return cloudFleetFailure(identity, options,
                                  fleetCliMissingText(cli), nowMs);
@@ -394,7 +396,9 @@ void CloudFleetRunner::begin(const CloudIdentity &identity, qint64 nowMs) {
                  m_status.scope.isEmpty() ? QStringLiteral("account")
                                           : m_status.scope);
 
-    const QString cliPath = cloudFleetExecutable(m_status.cliName);
+    const QString cliPath = m_options.cliPath.isEmpty()
+                                ? cloudFleetExecutable(m_status.cliName)
+                                : m_options.cliPath;
     if (cliPath.isEmpty()) {
         fail(fleetCliMissingText(m_status.cliName), nowMs);
         return;

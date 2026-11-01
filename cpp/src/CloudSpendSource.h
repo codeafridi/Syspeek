@@ -17,6 +17,8 @@ class QProcess;
 struct CloudSpendOptions {
     bool enabled = true;
     int timeoutMs = 30000;
+    // See CloudFleetOptions::cliPath.
+    QString cliPath;
 };
 
 // The argv each provider's client gets. AWS runs `ce get-cost-and-usage` then

@@ -42,6 +42,10 @@ class QProcess;
 struct CloudFleetOptions {
     bool enabled = true;
     int timeoutMs = 25000;
+    // Absolute path to the provider CLI. Empty means "resolve through PATH";
+    // a test (or an operator with several aws installs) pins it so the binary
+    // that runs is the one that was verified, not whichever PATH wins.
+    QString cliPath;
 };
 
 QString cloudFleetCli(CloudProvider provider);
