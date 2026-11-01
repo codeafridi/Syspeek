@@ -1,5 +1,10 @@
 name: CI
 
+# macos-15, not macos-14: GitHub scheduled a brownout for the macos-14
+# image ahead of its 2026-11-02 retirement, and every job on that label is now
+# cancelled with no steps ("This job failed because of a scheduled macOS 14
+# runner image brownout").
+
 # re-run marker: an empty commit does not trigger this workflow (no paths
 # changed), so a cancelled run has to be re-triggered with a real diff.
 
@@ -30,7 +35,7 @@ jobs:
         # Pinned, not ubuntu-latest: the shipped .deb links the
         # distribution's own Qt, so the build must be tested on the
         # oldest distro that ships it (see the deb-platform job).
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
