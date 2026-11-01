@@ -64,6 +64,9 @@ struct AlertInput {
     double tempCelsius = 0.0;          // hottest hwmon sensor
     bool batteryValid = false;
     double batteryPercent = 100.0;     // lowest battery charge
+    // M88: the account's current spend per hour against its trailing baseline.
+    bool cloudBurnValid = false;
+    double cloudBurnUsdHour = 0.0;
 };
 
 class AlertEngine {

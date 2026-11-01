@@ -455,3 +455,92 @@ QString cloudSpendForecastEnd(qint64 nowMs) {
         .addMonths(1)
         .toString(Qt::ISODate);
 }
+
+CloudBurnRate cloudBurnRate(const CloudSpendStatus &spend, qint64 nowMs) {
+    CloudBurnRate burn;
+    if (!spend.available || spend.monthToDateUsd < 0.0) {
+        return burn;
+    }
+    burn.valid = true;
+    const QDateTime now = qtcompat::fromMSecsSinceEpochUtc(nowMs);
+    const QDate today = now.date();
+    const QDate monthStart(today.year(), today.month(), 1);
+    // Hours elapsed in the UTC month: whole days plus the hours into today.
+    const double hoursElapsed = qMax(
+        1.0, (today.day() - 1) * 24.0 + now.time().hour()
+                 + now.time().minute() / 60.0);
+    burn.currentPerHour = spend.monthToDateUsd / hoursElapsed;
+
+    // The baseline is the mean of the whole days the provider reported
+    // (today is partial and would drag it down).
+    const QString todayIso = today.toString(Qt::ISODate);
+    double sum = 0.0;
+    int days = 0;
+    for (const CloudSpendDay &day : spend.days) {
+        if (day.usd < 0.0 || day.date == todayIso) {
+            continue;
+        }
+        sum += day.usd;
+        ++days;
+    }
+    if (days == 0) {
+        // Only today's row exists: the month-to-date rate is the only honest
+        // baseline, so nothing reads as an anomaly.
+        burn.baselinePerHour = burn.currentPerHour;
+        burn.ratio = 1.0;
+    } else {
+        burn.baselinePerHour = (sum / days) / 24.0;
+        burn.ratio = burn.baselinePerHour > 0.0
+                         ? burn.currentPerHour / burn.baselinePerHour
+                         : -1.0;
+    }
+
+    if (spend.forecastUsd >= 0.0) {
+        const QDateTime monthEnd(monthStart.addMonths(1), QTime(0, 0),
+                                 qtcompat::utcZone());
+        const double remainingHours = qMax<qint64>(
+                                          0, monthEnd.toMSecsSinceEpoch() - nowMs)
+                                      / 3600000.0;
+        if (remainingHours > 0.0) {
+            burn.projectedPerHour =
+                qMax(0.0, spend.forecastUsd - spend.monthToDateUsd)
+                / remainingHours;
+        }
+    }
+
+    if (burn.ratio >= 3.0) {
+        burn.severity = 2;
+    } else if (burn.ratio >= 1.5) {
+        burn.severity = 1;
+    }
+    burn.text = cloudBurnText(burn);
+    return burn;
+}
+
+QString cloudBurnText(const CloudBurnRate &burn) {
+    if (!burn.valid) {
+        return QStringLiteral(
+            "burn: no billed spend yet - the cost query runs on the spend "
+            "cadence once a provider CLI answers");
+    }
+    QString text = QStringLiteral("now %1/h")
+                       .arg(formatCostMoney(burn.currentPerHour));
+    if (burn.baselinePerHour >= 0.0) {
+        text += QStringLiteral("  baseline %1/h")
+                    .arg(formatCostMoney(burn.baselinePerHour));
+    }
+    if (burn.ratio >= 0.0) {
+        text += QStringLiteral("  %1x").arg(burn.ratio, 0, 'f', 2);
+    }
+    if (burn.projectedPerHour >= 0.0) {
+        text += QStringLiteral("  month end %1/h projected")
+                    .arg(formatCostMoney(burn.projectedPerHour));
+    }
+    if (burn.severity >= 2) {
+        text += QStringLiteral("  (critical: the account is burning 3x its "
+                               "baseline)");
+    } else if (burn.severity == 1) {
+        text += QStringLiteral("  (warning: 1.5x baseline)");
+    }
+    return text;
+}

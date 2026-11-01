@@ -194,5 +194,8 @@ struct DisplaySnapshot {
     SelfCost self;
     TickCost tick;
     AlertExposure alerts;
+    // M88: containers the console has watched stay idle long enough to stop.
+    // -1 until the console has reported one.
+    int idleContainers = -1;
     quint64 sequence = 0;
 };

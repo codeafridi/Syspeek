@@ -1047,6 +1047,9 @@ void SamplerWorker::fillCloud(DisplaySnapshot &snapshot) {
         m_cloudSpend->update(cloud.identity, now);
         cloud.spend = m_cloudSpend->status();
     }
+    // M88: burn rate against the account's own trailing baseline, from the
+    // billed spend the cost query returned.
+    cloud.burn = cloudBurnRate(cloud.spend, now);
     cloud.footprint = footprint;
     snapshot.cloud = cloud;
 }

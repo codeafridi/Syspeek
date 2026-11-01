@@ -654,6 +654,8 @@ int main(int argc, char *argv[]) {
                          &MetricsServer::setSnapshot);
         QObject::connect(&hud, &HudWindow::alertStateChanged, metricsServer,
                          &MetricsServer::setAlertState);
+        QObject::connect(&hud, &HudWindow::idleContainersChanged, metricsServer,
+                         &MetricsServer::setIdleContainers);
     }
 
     quint64 lastSequence = 0;

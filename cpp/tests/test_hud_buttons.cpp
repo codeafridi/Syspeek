@@ -1620,6 +1620,62 @@ int main(int argc, char *argv[]) {
               "M87: the incident row shows the assigned owner");
     }
 
+    // --- M88: idle containers reach the containers table and the card -------
+    {
+        DockerSnapshot docker;
+        docker.state = DockerState::Ok;
+        DockerContainer web;
+        web.id = QStringLiteral("c0ffee");
+        web.name = QStringLiteral("web1");
+        web.image = QStringLiteral("nginx:alpine");
+        web.state = QStringLiteral("running");
+        web.status = QStringLiteral("Up 3 hours");
+        web.hasDepth = true;
+        web.depth.cpuPercent = 0.1;
+        web.depth.hasNet = true;
+        web.depth.netRxBytes = 4096;
+        web.depth.netTxBytes = 1024;
+        docker.containers = {web};
+        docker.runningCount = 1;
+        hud.setDockerSnapshot(docker);
+
+        auto *panel2 = hud.findChild<DashboardPanel *>();
+        IdleLimits limits;
+        IdleContainer idle;
+        idle.id = QStringLiteral("c0ffee");
+        idle.name = QStringLiteral("web1");
+        idle.cpuPercent = 0.1;
+        idle.netBytesPerSec = 12.0;
+        idle.idleSeconds = 1080;
+        if (panel2 != nullptr) {
+            panel2->setIdleContainers({idle}, limits);
+        }
+        auto *dockerTable =
+            hud.findChild<QTreeWidget *>(QStringLiteral("ddDockerTable"));
+        check(panel2 != nullptr && dockerTable != nullptr
+                  && dockerTable->columnCount() == 9,
+              "M88: the containers table gained an IDLE column");
+        check(dockerTable != nullptr
+                  && dockerTable->topLevelItemCount() == 1
+                  && dockerTable->topLevelItem(0)->text(8)
+                         == QStringLiteral("18m"),
+              "M88: an idle container shows how long it has been quiet");
+        auto *dockerCard = hud.findChild<QLabel *>(QStringLiteral("ddDocker"));
+        check(dockerCard != nullptr
+                  && dockerCard->text().contains(
+                      QStringLiteral("1 idle container(s)"))
+                  && dockerCard->text().contains(QStringLiteral("web1 18m")),
+              "M88: the containers card summarises the idle set");
+
+        // A busy container clears the idle line again.
+        if (panel2 != nullptr) {
+            panel2->setIdleContainers({}, limits);
+        }
+        check(dockerTable != nullptr
+                  && dockerTable->topLevelItem(0)->text(8).isEmpty(),
+              "M88: a container that resumes work loses the idle marker");
+    }
+
     SyntheticSnapshot synthetic;
     ProbeResult probe;
     probe.url = QStringLiteral("https://example.com");
@@ -1746,6 +1802,12 @@ int main(int argc, char *argv[]) {
                                                            QLatin1Char('0')),
                           12.0 + day % 5});
     }
+    // M88: the burn line rides the spend detail.
+    cloudSnap.cloud.burn.valid = true;
+    cloudSnap.cloud.burn.currentPerHour = 0.68;
+    cloudSnap.cloud.burn.baselinePerHour = 0.64;
+    cloudSnap.cloud.burn.ratio = 1.06;
+    cloudSnap.cloud.burn.projectedPerHour = 0.57;
     hud.setSnapshot(cloudSnap);
     hud.setSnapshot(cloudSnap);
 
@@ -1874,6 +1936,12 @@ int main(int argc, char *argv[]) {
         hud.findChild<QTreeWidget *>(QStringLiteral("ddCloudSpendServices"));
     auto *cloudSpendChart =
         hud.findChild<TimeseriesChart *>(QStringLiteral("ddCloudSpendChart"));
+    check(cloudSpendDetail != nullptr
+              && cloudSpendDetail->text().contains(
+                  QStringLiteral("now $0.6800/h"))
+              && cloudSpendDetail->text().contains(
+                  QStringLiteral("baseline $0.6400/h")),
+          "M88: the spend card states the burn rate and the baseline");
     check(cloudSpendSummary != nullptr
               && cloudSpendSummary->text().contains(
                   QStringLiteral("month to date $452.10"))

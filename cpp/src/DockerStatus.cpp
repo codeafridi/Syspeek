@@ -1,9 +1,13 @@
 #include "DockerStatus.h"
 
+#include "ProcessNetStatus.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStringList>
+
+#include <algorithm>
 
 namespace {
 
@@ -378,3 +382,113 @@ void DockerStateTracker::update(QList<DockerContainer> &containers) {
     m_previousState = next;
 }
 
+IdleContainerTracker::IdleContainerTracker(const IdleLimits &limits)
+    : m_limits(limits) {
+}
+
+void IdleContainerTracker::update(const QList<DockerContainer> &containers,
+                                  qint64 nowMs) {
+    m_idle.clear();
+    QSet<QString> live;
+    for (const DockerContainer &container : containers) {
+        if (!container.hasDepth || container.depth.cpuPercent < 0.0) {
+            continue;
+        }
+        const QString key = container.id.isEmpty() ? container.name
+                                                   : container.id;
+        live.insert(key);
+        State &state = m_state[key];
+
+        double netRate = -1.0;
+        if (state.haveSample && nowMs > state.lastMs) {
+            const unsigned long long rx =
+                container.depth.hasNet ? container.depth.netRxBytes : 0ULL;
+            const unsigned long long tx =
+                container.depth.hasNet ? container.depth.netTxBytes : 0ULL;
+            // A restarted container resets its counters; a regression means
+            // "no rate this tick", never a negative one.
+            if (rx >= state.lastRx && tx >= state.lastTx) {
+                const double seconds = (nowMs - state.lastMs) / 1000.0;
+                netRate = static_cast<double>((rx - state.lastRx)
+                                              + (tx - state.lastTx))
+                          / seconds;
+            }
+        }
+        state.lastMs = nowMs;
+        state.lastRx = container.depth.hasNet ? container.depth.netRxBytes : 0ULL;
+        state.lastTx = container.depth.hasNet ? container.depth.netTxBytes : 0ULL;
+        state.haveCounters = true;
+        state.haveSample = true;
+
+        // Without a rate sample the traffic is unknown, so the tick is not
+        // evidence of idleness - a fresh container gets one tick to settle.
+        const bool lowCpu = container.depth.cpuPercent < m_limits.cpuPercent;
+        const bool lowNet = netRate >= 0.0 && netRate < m_limits.netBytesPerSec;
+        if (lowCpu && lowNet) {
+            if (state.lowSinceMs == 0) {
+                state.lowSinceMs = nowMs;
+            }
+            const qint64 idleMs = nowMs - state.lowSinceMs;
+            if (idleMs >= m_limits.idleAfterMs) {
+                IdleContainer row;
+                row.id = container.id;
+                row.name = container.name;
+                row.cpuPercent = container.depth.cpuPercent;
+                row.netBytesPerSec = netRate;
+                row.idleSeconds = idleMs / 1000;
+                m_idle.append(row);
+            }
+        } else {
+            state.lowSinceMs = 0;
+        }
+    }
+
+    for (auto it = m_state.begin(); it != m_state.end();) {
+        if (!live.contains(it.key())) {
+            it = m_state.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    std::sort(m_idle.begin(), m_idle.end(),
+              [](const IdleContainer &a, const IdleContainer &b) {
+                  return a.idleSeconds > b.idleSeconds;
+              });
+}
+
+void IdleContainerTracker::reset() {
+    m_state.clear();
+    m_idle.clear();
+}
+
+QString idleContainerSummaryText(const QList<IdleContainer> &idle,
+                                 const IdleLimits &limits) {
+    if (idle.isEmpty()) {
+        return QStringLiteral(
+                   "no idle container - nothing has stayed under %1% cpu and %2 "
+                   "for %3m")
+            .arg(limits.cpuPercent, 0, 'f', 1)
+            .arg(formatNetRate(limits.netBytesPerSec))
+            .arg(limits.idleAfterMs / 60000);
+    }
+    QStringList parts;
+    int shown = 0;
+    for (const IdleContainer &row : idle) {
+        if (shown++ >= 3) {
+            break;
+        }
+        parts << QStringLiteral("%1 %2m").arg(
+            row.name, QString::number(row.idleSeconds / 60));
+    }
+    if (idle.size() > shown) {
+        parts << QStringLiteral("+%1 more").arg(idle.size() - shown);
+    }
+    return QStringLiteral("%1 idle container(s): %2 - under %3% cpu and %4 for "
+                          "%5m")
+        .arg(idle.size())
+        .arg(parts.join(QStringLiteral(", ")))
+        .arg(limits.cpuPercent, 0, 'f', 1)
+        .arg(formatNetRate(limits.netBytesPerSec))
+        .arg(limits.idleAfterMs / 60000);
+}

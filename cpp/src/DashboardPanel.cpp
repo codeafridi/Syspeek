@@ -2080,7 +2080,7 @@ QWidget *DashboardPanel::buildContainersView() {
 
     m_dockerTable = new QTreeWidget(view);
     m_dockerTable->setObjectName(QStringLiteral("ddDockerTable"));
-    m_dockerTable->setColumnCount(8);
+    m_dockerTable->setColumnCount(9);
     m_dockerTable->setHeaderLabels({QStringLiteral("Container"),
                                     QStringLiteral("Image"),
                                     QStringLiteral("State"),
@@ -2088,13 +2088,14 @@ QWidget *DashboardPanel::buildContainersView() {
                                     QStringLiteral("CPU %"),
                                     QStringLiteral("MEM USAGE"),
                                     QStringLiteral("NET I/O"),
-                                    QStringLiteral("PIDS")});
+                                    QStringLiteral("PIDS"),
+                                    QStringLiteral("IDLE")});
     m_dockerTable->setRootIsDecorated(false);
     m_dockerTable->setSelectionMode(QAbstractItemView::NoSelection);
     m_dockerTable->setFocusPolicy(Qt::NoFocus);
     m_dockerTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_dockerTable->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    for (int i = 2; i < 8; ++i) {
+    for (int i = 2; i < 9; ++i) {
         m_dockerTable->header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
     }
 
@@ -6649,47 +6650,8 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
             : QStringLiteral("color: %1;").arg(ui_theme::text()));
     m_dockTileTotal->setText(QString::number(snapshot.containers.size()));
 
-    m_dockerTable->clear();
-    for (const DockerContainer &container : snapshot.containers) {
-        auto *item = new QTreeWidgetItem(m_dockerTable);
-        item->setData(0, Qt::UserRole, container.id);
-        item->setText(0, container.name.isEmpty() ? container.id
-                                                  : container.name);
-        item->setText(1, container.image);
-        item->setText(2, container.state);
-        item->setText(3, container.status);
-        if (container.hasDepth) {
-            const DockerDepth &depth = container.depth;
-            if (depth.cpuPercent >= 0.0) {
-                item->setText(4,
-                              QStringLiteral("%1 %").arg(depth.cpuPercent, 0,
-                                                         'f', 1));
-            }
-            if (depth.hasMem) {
-                const QString limit =
-                    depth.memLimitBytes > 0
-                        ? formatBytesCompact(depth.memLimitBytes)
-                        : QStringLiteral("unlimited");
-                item->setText(5, QStringLiteral("%1 / %2")
-                                     .arg(formatBytesCompact(depth.memUsedBytes),
-                                          limit));
-            }
-            if (depth.hasNet) {
-                item->setText(6, QStringLiteral("%1 / %2")
-                                     .arg(formatBytesCompact(depth.netRxBytes),
-                                          formatBytesCompact(depth.netTxBytes)));
-            }
-            if (depth.pids >= 0) {
-                item->setText(7, QString::number(depth.pids));
-            }
-        }
-        const bool bad = container.crashed
-            || container.health == QLatin1String("unhealthy")
-            || (container.state != QLatin1String("running")
-                && container.state != QLatin1String("healthy"));
-        item->setForeground(2, QBrush(QColor(
-            bad ? ui_theme::crit() : ui_theme::ok())));
-    }
+    m_lastDocker = snapshot;
+    fillDockerTable();
 
     const QString summary = dockerSummaryText(snapshot);
     const QString details = dockerDetailText(snapshot);
@@ -6697,7 +6659,18 @@ void DashboardPanel::setDockerSnapshot(const DockerSnapshot &snapshot) {
     if (!details.isEmpty() && details != QStringLiteral("no issues")) {
         text += QStringLiteral("\n") + details;
     }
-    m_docker->setText(text.isEmpty() ? QStringLiteral("--") : text);
+    m_dockerBaseText = text;
+    if (m_docker != nullptr) {
+        // The idle line is appended by setIdleContainers, which runs right
+        // after this tick; keep the base so a re-render never loses it.
+        const QString combined =
+            m_idleSummary.isEmpty()
+                ? text
+                : (text.isEmpty() ? m_idleSummary
+                                  : text + QStringLiteral("\n") + m_idleSummary);
+        m_docker->setText(combined.isEmpty() ? QStringLiteral("--")
+                                             : combined);
+    }
 
     if (m_chartDocker != nullptr
         && (snapshot.state == DockerState::Ok
@@ -7402,7 +7375,13 @@ void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {
     if (m_cloudSpendSummary != nullptr) {
         const CloudSpendStatus &spend = cloud.spend;
         m_cloudSpendSummary->setText(cloudSpendSummaryText(spend));
-        m_cloudSpendDetail->setText(cloudSpendDetailText(spend));
+        // M88: the burn line rides the spend detail - it is the same data
+        // expressed as a rate, and it is pointless when nothing was billed.
+        m_cloudSpendDetail->setText(
+            spend.available
+                ? cloudSpendDetailText(spend) + QStringLiteral("\n")
+                      + cloudBurnText(snapshot.cloud.burn)
+                : cloudSpendDetailText(spend));
         m_cloudSpendServices->clear();
         for (const CloudSpendService &service : spend.services) {
             auto *item =
@@ -8242,3 +8221,85 @@ void DashboardPanel::setContainerStatus(const QString &text, bool ok) {
         QStringLiteral("color: %1;").arg(ok ? ui_theme::ok() : ui_theme::crit()));
     m_containerStatus->setText(text);
 }
+void DashboardPanel::fillDockerTable() {
+    if (m_dockerTable == nullptr) {
+        return;
+    }
+    m_dockerTable->clear();
+    for (const DockerContainer &container : m_lastDocker.containers) {
+        auto *item = new QTreeWidgetItem(m_dockerTable);
+        item->setData(0, Qt::UserRole, container.id);
+        item->setText(0, container.name.isEmpty() ? container.id
+                                                  : container.name);
+        item->setText(1, container.image);
+        item->setText(2, container.state);
+        item->setText(3, container.status);
+        if (container.hasDepth) {
+            const DockerDepth &depth = container.depth;
+            if (depth.cpuPercent >= 0.0) {
+                item->setText(4,
+                              QStringLiteral("%1 %").arg(depth.cpuPercent, 0,
+                                                         'f', 1));
+            }
+            if (depth.hasMem) {
+                const QString limit =
+                    depth.memLimitBytes > 0
+                        ? formatBytesCompact(depth.memLimitBytes)
+                        : QStringLiteral("unlimited");
+                item->setText(5, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.memUsedBytes),
+                                          limit));
+            }
+            if (depth.hasNet) {
+                item->setText(6, QStringLiteral("%1 / %2")
+                                     .arg(formatBytesCompact(depth.netRxBytes),
+                                          formatBytesCompact(depth.netTxBytes)));
+            }
+            if (depth.pids >= 0) {
+                item->setText(7, QString::number(depth.pids));
+            }
+        }
+        // M88: how long this container has been below the idle limits.
+        const qint64 idleSeconds =
+            m_idleSeconds.value(container.id.isEmpty() ? container.name
+                                                       : container.id,
+                                -1);
+        if (idleSeconds >= 0) {
+            item->setText(8, idleSeconds >= 3600
+                                 ? QStringLiteral("%1h").arg(idleSeconds / 3600)
+                                 : QStringLiteral("%1m")
+                                       .arg(idleSeconds / 60));
+            item->setForeground(8, QBrush(QColor(ui_theme::warn())));
+        }
+        const bool bad = container.crashed
+            || container.health == QLatin1String("unhealthy")
+            || (container.state != QLatin1String("running")
+                && container.state != QLatin1String("healthy"));
+        item->setForeground(2, QBrush(QColor(
+            bad ? ui_theme::crit() : ui_theme::ok())));
+    }
+
+}
+
+void DashboardPanel::setIdleContainers(const QList<IdleContainer> &idle,
+                                       const IdleLimits &limits) {
+    m_idleSeconds.clear();
+    for (const IdleContainer &row : idle) {
+        m_idleSeconds.insert(row.id.isEmpty() ? row.name : row.id,
+                             row.idleSeconds);
+    }
+    if (m_docker != nullptr && !m_lastDocker.containers.isEmpty()) {
+        fillDockerTable();
+    }
+    m_idleSummary = idleContainerSummaryText(idle, limits);
+    if (m_docker != nullptr) {
+        QString text = m_dockerBaseText;
+        if (text.isEmpty()) {
+            text = m_idleSummary;
+        } else {
+            text += QStringLiteral("\n") + m_idleSummary;
+        }
+        m_docker->setText(text);
+    }
+}
+

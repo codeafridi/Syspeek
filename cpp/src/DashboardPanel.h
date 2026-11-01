@@ -107,6 +107,9 @@ public:
     void setSnapshot(const DisplaySnapshot &snapshot);
     void setDockerSnapshot(const DockerSnapshot &snapshot);
     void setKubeSnapshot(const KubeSnapshot &snapshot);
+    // M88: containers that have stayed below the idle limits long enough.
+    void setIdleContainers(const QList<IdleContainer> &idle,
+                           const IdleLimits &limits);
     void setServicesSnapshot(const ServicesSnapshot &snapshot);
     void setJournalSnapshot(const JournalSnapshot &snapshot);
     void setAlerts(const QList<Alert> &alerts);
@@ -494,6 +497,13 @@ private:
     QLabel *m_dockTileTotal = nullptr;
     QLabel *m_dockTileCgMem = nullptr;
     QTreeWidget *m_dockerTable = nullptr;
+    // M88: the docker table gains an IDLE column; the last snapshot is kept so
+    // an idle update can re-render without waiting for the next poll.
+    DockerSnapshot m_lastDocker;
+    QHash<QString, qint64> m_idleSeconds;
+    QString m_idleSummary;
+    QString m_dockerBaseText;
+    void fillDockerTable();
     TimeseriesChart *m_chartDocker = nullptr;
 
     // Datadog-style Kubernetes page (M64): cluster tiles + workloads.

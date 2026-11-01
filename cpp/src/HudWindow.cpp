@@ -406,6 +406,14 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     } else {
         m_alertInput.batteryValid = false;
     }
+    // M88: the billed-spend burn rate is a monitor input like any other; a
+    // host with no billed spend leaves it invalid and the rule never fires.
+    if (snapshot.cloud.burn.valid) {
+        m_alertInput.cloudBurnValid = true;
+        m_alertInput.cloudBurnUsdHour = snapshot.cloud.burn.currentPerHour;
+    } else {
+        m_alertInput.cloudBurnValid = false;
+    }
     if (snapshot.kernelLimits.available && snapshot.kernelLimits.fdMax > 0) {
         m_alertInput.kernelFdValid = true;
         m_alertInput.kernelFdPct =
@@ -488,9 +496,16 @@ void HudWindow::setDockerSnapshot(const DockerSnapshot &snapshot) {
         }
     }
 
+    // M88: accumulated low-activity state per container. The tracker needs the
+    // per-tick sample, so it lives here where the docker snapshot lands.
+    m_idleContainers.update(snapshot.containers,
+                            QDateTime::currentMSecsSinceEpoch());
     if (m_panel != nullptr) {
         m_panel->setDockerSnapshot(snapshot);
+        m_panel->setIdleContainers(m_idleContainers.idle(),
+                                   m_idleContainers.limits());
     }
+    emit idleContainersChanged(m_idleContainers.idleCount());
 }
 
 void HudWindow::toggleDockerDetails() {

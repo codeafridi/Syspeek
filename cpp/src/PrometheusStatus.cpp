@@ -533,6 +533,34 @@ QString prometheusText(const DisplaySnapshot &s) {
         }
     }
 
+    // M88: cost burn (from the billed-spend sweep) and idle containers (an
+    // accumulation the console owns, so -1 means "not reported yet").
+    if (s.cloud.burn.valid) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_cloud_burn_usd_hour Current account spend per hour "
+            "against the trailing baseline."));
+        lines.append(
+            QStringLiteral("# TYPE syspeek_cloud_burn_usd_hour gauge"));
+        lines.append(gauge("syspeek_cloud_burn_usd_hour",
+                           s.cloud.burn.currentPerHour));
+        if (s.cloud.burn.ratio >= 0.0) {
+            lines.append(QStringLiteral(
+                "# HELP syspeek_cloud_burn_ratio Current spend over the "
+                "trailing daily average."));
+            lines.append(
+                QStringLiteral("# TYPE syspeek_cloud_burn_ratio gauge"));
+            lines.append(gauge("syspeek_cloud_burn_ratio", s.cloud.burn.ratio));
+        }
+    }
+    if (s.idleContainers >= 0) {
+        lines.append(QStringLiteral(
+            "# HELP syspeek_idle_containers Containers below the idle limits "
+            "long enough to stop."));
+        lines.append(QStringLiteral("# TYPE syspeek_idle_containers gauge"));
+        lines.append(
+            gaugeInt("syspeek_idle_containers", s.idleContainers));
+    }
+
     // M87: correlation state from the console. Emitted only once the HUD has
     // actually reported, so a scrape against a fresh sampler does not read a
     // fabricated zero incidents.

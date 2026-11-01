@@ -354,6 +354,31 @@ int main(int argc, char *argv[]) {
               && immediate.at(0).id == QStringLiteral("services_failed"),
           "alert: service failure fires immediately");
 
+    // M88: the billed-spend burn rate is a monitor input; a host with no
+    // billed spend never fires it.
+    {
+        AlertEngine burnEngine;
+        AlertInput burn;
+        burn.cloudBurnValid = true;
+        burn.cloudBurnUsdHour = 12.0;
+        burnEngine.update(burn, 10);
+        burnEngine.update(burn, 11);
+        const QList<Alert> burnFired = burnEngine.update(burn, 12);
+        check(burnFired.size() == 1
+                  && burnFired.first().id == QStringLiteral("cloud_burn")
+                  && burnFired.first().group == QStringLiteral("cost"),
+              "alert: a high burn rate fires at the sustained count");
+
+        AlertEngine quietEngine;
+        AlertInput quiet;
+        quiet.cloudBurnValid = false;
+        for (int i = 0; i < 5; ++i) {
+            quietEngine.update(quiet, 20 + i);
+        }
+        check(quietEngine.active().isEmpty(),
+              "alert: no billed spend never fires the burn rule");
+    }
+
     engine.reset();
     AlertInput memInput;
     memInput.hostMemValid = true;
@@ -1565,7 +1590,7 @@ int main(int argc, char *argv[]) {
         const QString detail =
             tracker.incidents().isEmpty()
                 ? QString()
-                : tracker.incidents().first().timeline.join(QLatin1Char('\\n'));
+                : tracker.incidents().first().timeline.join(QLatin1Char('\n'));
         check(detail.contains(QStringLiteral("notified")),
               "notify: the incident timeline records the notification");
     }
@@ -2084,6 +2109,85 @@ int main(int argc, char *argv[]) {
             check(!stream.running(), "fim: non-mac stream stub inert");
         }
 #endif
+    }
+
+    // --- M88: cost burn rate against the account's own baseline ------------
+    {
+        // 2026-11-15T12:00Z: 14 whole days plus 12 hours into the month.
+        const qint64 nowMs = QDateTime(QDate(2026, 11, 15), QTime(12, 0),
+                                       QTimeZone(QByteArrayLiteral("UTC")))
+                                 .toMSecsSinceEpoch();
+        CloudSpendStatus spend;
+        spend.available = true;
+        spend.monthToDateUsd = 420.0;
+        for (int day = 1; day <= 14; ++day) {
+            CloudSpendDay row;
+            row.date = QDate(2026, 11, day).toString(Qt::ISODate);
+            row.usd = 24.0;   // $1/h across a whole day
+            spend.days.append(row);
+        }
+        spend.days.append({QDate(2026, 11, 15).toString(Qt::ISODate), 12.0});
+        spend.forecastUsd = 900.0;
+
+        const CloudBurnRate burn = cloudBurnRate(spend, nowMs);
+        // 348 h elapsed (14 x 24 + 12) -> 420 / 348
+        check(burn.valid
+                  && std::fabs(burn.currentPerHour - 420.0 / 348.0) < 1e-6,
+              "burn: current rate is month to date over the elapsed hours");
+        check(std::fabs(burn.baselinePerHour - 1.0) < 1e-9,
+              "burn: the baseline is the mean whole day, today excluded");
+        check(std::fabs(burn.ratio - (420.0 / 348.0)) < 1e-6
+                  && burn.severity == 0,
+              "burn: 1.21x baseline stays below the warning band");
+
+        CloudSpendStatus warm = spend;
+        warm.monthToDateUsd = 560.0;   // 1.61x the $1/h baseline
+        check(cloudBurnRate(warm, nowMs).severity == 1,
+              "burn: 1.6x baseline is the warning band");
+        check(burn.projectedPerHour > 0.0,
+              "burn: the forecast projects a rest-of-month rate");
+        check(burn.text.contains(QStringLiteral("baseline"))
+                  && burn.text.contains(QStringLiteral("x")),
+              "burn: the text states the rate, the baseline and the ratio");
+
+        CloudSpendStatus spike = spend;
+        for (CloudSpendDay &day : spike.days) {
+            day.usd = 4.0;   // $0.167/h baseline
+        }
+        const CloudBurnRate sharp = cloudBurnRate(spike, nowMs);
+        check(sharp.severity == 2,
+              "burn: 5x baseline is critical");
+
+        CloudSpendStatus todayOnly;
+        todayOnly.available = true;
+        todayOnly.monthToDateUsd = 9.0;
+        todayOnly.days = {{QDate(2026, 11, 15).toString(Qt::ISODate), 9.0}};
+        const CloudBurnRate flat = cloudBurnRate(todayOnly, nowMs);
+        check(flat.valid && flat.ratio == 1.0 && flat.severity == 0,
+              "burn: only today's row means the baseline is the current rate");
+
+        CloudSpendStatus none;
+        check(!cloudBurnRate(none, nowMs).valid,
+              "burn: no billed spend is invalid, not zero");
+        check(cloudBurnText(CloudBurnRate{})
+                  .contains(QStringLiteral("no billed spend yet")),
+              "burn: the invalid state says why");
+
+        DisplaySnapshot scrape;
+        check(!prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_cloud_burn_usd_hour")),
+              "prometheus: no burn gauge without billed spend");
+        scrape.cloud.burn = burn;
+        const QString text = prometheusText(scrape);
+        check(text.contains(QStringLiteral("syspeek_cloud_burn_usd_hour "))
+                  && text.contains(QStringLiteral("syspeek_cloud_burn_ratio ")),
+              "prometheus: the burn gauge and ratio are exported");
+        check(!text.contains(QStringLiteral("syspeek_idle_containers")),
+              "prometheus: idle containers absent until the console reports");
+        scrape.idleContainers = 2;
+        check(prometheusText(scrape).contains(
+                  QStringLiteral("syspeek_idle_containers 2")),
+              "prometheus: the idle container gauge is exported");
     }
 
     // --- alert webhooks (M69): payload schema grounded on Alertmanager 0.34.1

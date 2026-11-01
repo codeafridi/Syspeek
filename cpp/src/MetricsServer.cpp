@@ -96,8 +96,15 @@ void MetricsServer::setSnapshot(const DisplaySnapshot &snapshot) {
     // The sampler knows nothing about alerts; keep the console-pushed state
     // across a snapshot replace so a scrape never flaps to zero.
     const AlertExposure alerts = m_snapshot.alerts;
+    const int idle = m_snapshot.idleContainers;
     m_snapshot = snapshot;
     m_snapshot.alerts = alerts;
+    m_snapshot.idleContainers = idle;
+    m_body = prometheusText(m_snapshot).toUtf8();
+}
+
+void MetricsServer::setIdleContainers(int count) {
+    m_snapshot.idleContainers = count;
     m_body = prometheusText(m_snapshot).toUtf8();
 }
 

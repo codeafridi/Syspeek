@@ -82,6 +82,9 @@ signals:
     // M87: the console owns the correlation state; the scrape endpoint needs
     // it pushed (the sampler knows nothing about alerts).
     void alertStateChanged(const AlertExposure &state);
+    // M88: idle containers are a console-side accumulation (the docker source
+    // hands the HUD one snapshot at a time), so the count is pushed too.
+    void idleContainersChanged(int count);
     void serviceRestartRequested(const QString &unit);
     void containerActionRequested(const QString &id, const QString &verb);
 
@@ -193,6 +196,7 @@ private:
     QRect m_savedGeometry;
     AlertEngine m_alerts;
     IncidentTracker m_incidents;
+    IdleContainerTracker m_idleContainers;
     QList<SilenceRule> m_silences;
     QList<double> m_cpuHistory;
     QList<double> m_hostCpuHistory;

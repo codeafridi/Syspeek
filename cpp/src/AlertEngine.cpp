@@ -43,6 +43,9 @@ bool metricFor(const AlertRule &rule, const AlertInput &input, double &value,
     } else if (rule.id == QLatin1String("battery_low")) {
         value = input.batteryPercent;
         valid = input.batteryValid;
+    } else if (rule.id == QLatin1String("cloud_burn")) {
+        value = input.cloudBurnUsdHour;
+        valid = input.cloudBurnValid;
     } else {
         valid = false;
     }
@@ -114,6 +117,8 @@ QList<AlertRule> defaultAlertRules() {
              QStringLiteral(" \u00b0C"), "thermal"),
         make("battery_low", "Battery low", "warning", 20.0, false, 3,
              QStringLiteral("%"), "thermal"),
+        make("cloud_burn", "Cloud cost burn high", "warning", 5.0, true, 3,
+             QStringLiteral(" $/h"), "cost"),
     };
 }
 
