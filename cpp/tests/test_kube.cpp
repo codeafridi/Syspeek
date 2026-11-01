@@ -711,6 +711,30 @@ int main() {
                   .contains(QStringLiteral("install metrics-server")),
               "right-sizing: no metrics sample states the gate");
 
+        // A recommendation is never zero: an idle pod that requests 8 cores
+        // must not be told to ask for 0 (BestEffort is a different QoS class).
+        KubePod idle;
+        idle.ns = QStringLiteral("staging");
+        idle.name = QStringLiteral("nightly-rollup");
+        idle.cpuRequestCores = 8.0;
+        idle.memRequestBytes = 4.0 * 1024.0 * 1024.0 * 1024.0;
+        idle.cpuMillis = 1.0;                                   // 1 millicore
+        idle.memBytes = 8LL * 1024 * 1024;                      // 8 MiB
+        const QList<PodRightSizing> floored =
+            computePodRightSizing({idle}, cpuRate, memRate);
+        check(floored.size() == 1
+                  && std::fabs(floored.first().suggestedCpuCores
+                               - kRightSizingCpuFloorCores)
+                         < 1e-12
+                  && std::fabs(floored.first().suggestedMemBytes
+                               - kRightSizingMemFloorBytes)
+                         < 1.0,
+              "right-sizing: an idle pod is floored, never told to ask for 0");
+        const QString flooredText = podRightSizingText(floored.first());
+        check(!flooredText.contains(QStringLiteral("-> 0.00 cores"))
+                  && flooredText.contains(QStringLiteral("save $")),
+              "right-sizing: the floored row still reads as a saving");
+
         const QList<PodRightSizing> looser =
             computePodRightSizing({big}, cpuRate, memRate, 1.4);
         check(looser.size() == 1

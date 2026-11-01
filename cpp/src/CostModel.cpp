@@ -1,5 +1,7 @@
 #include "CostModel.h"
 
+#include "MemoryFormat.h"
+
 #include "Theme.h"
 
 #include <QHash>
@@ -244,13 +246,15 @@ QList<PodRightSizing> computePodRightSizing(const QList<KubePod> &pods,
         if (cpuSample && pod.cpuRequestCores > 0.0) {
             row.hasCpu = true;
             row.cpuRatio = row.cpuUsageCores / pod.cpuRequestCores;
-            row.suggestedCpuCores = row.cpuUsageCores * buffer;
+            row.suggestedCpuCores = qMax(row.cpuUsageCores * buffer,
+                                         kRightSizingCpuFloorCores);
             row.underCpu = row.cpuUsageCores > pod.cpuRequestCores;
         }
         if (memSample && pod.memRequestBytes > 0.0) {
             row.hasMem = true;
             row.memRatio = row.memUsageBytes / pod.memRequestBytes;
-            row.suggestedMemBytes = row.memUsageBytes * buffer;
+            row.suggestedMemBytes = qMax(row.memUsageBytes * buffer,
+                                         kRightSizingMemFloorBytes);
             row.underMem = row.memUsageBytes > pod.memRequestBytes;
         }
         // A pod with no declared request cannot be right-sized against one -
@@ -300,9 +304,14 @@ QString podRightSizingText(const PodRightSizing &row) {
                               : QString());
     }
     if (row.hasMem) {
-        parts << QStringLiteral("mem %1 -> %2 GB%3")
-                     .arg(gbOf(row.memRequestBytes), 0, 'f', 1)
-                     .arg(gbOf(row.suggestedMemBytes), 0, 'f', 1)
+        // Compact units, not "GB" with one decimal: a floored 32 Mi
+        // suggestion rounded to "0.0 GB", which read as the zero request the
+        // floor exists to prevent.
+        parts << QStringLiteral("mem %1 -> %2%3")
+                     .arg(formatBytesCompact(static_cast<unsigned long long>(
+                              row.memRequestBytes)),
+                          formatBytesCompact(static_cast<unsigned long long>(
+                              row.suggestedMemBytes)))
                      .arg(row.underMem
                               ? QStringLiteral(" (under-provisioned: raise)")
                               : QString());

@@ -57,6 +57,14 @@ struct CostEfficiency {
 // headroom over measured usage (its own default of 1.2).
 inline constexpr double kOpenCostBuffer = 1.2;
 
+// A recommendation is never zero. A pod with no cpu or memory request is
+// BestEffort - a different scheduling and eviction class - so "shrink to 0" is
+// a QoS downgrade, not a right-size. Measured on a live cluster: a nightly job
+// requesting 8 cores while idle would have been told to ask for 0.00. The
+// floors are the smallest values that still read as a real request.
+inline constexpr double kRightSizingCpuFloorCores = 0.025;             // 25m
+inline constexpr double kRightSizingMemFloorBytes = 32.0 * 1024 * 1024; // 32Mi
+
 // Per-pod right-sizing: OpenCost computes usage/request efficiency, recommends
 // a request at usage x buffer_multiplier, and prices the headroom the current
 // request declares above that recommendation.

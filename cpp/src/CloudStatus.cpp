@@ -495,6 +495,13 @@ QString cloudSummaryText(const CloudSnapshot &snapshot) {
     if (snapshot.identity.spot) {
         text += QStringLiteral(" - spot");
     }
+    // Whatever the identity came from, say so when it was not the metadata
+    // service: the config fallback (M92) and a degraded probe both land here,
+    // and a page that silently mixes the two would be lying about which
+    // machine it is describing.
+    if (!snapshot.note.isEmpty()) {
+        text += QStringLiteral("\n") + snapshot.note;
+    }
     return text;
 }
 

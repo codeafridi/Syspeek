@@ -2343,6 +2343,14 @@ int main(int argc, char *argv[]) {
             cloudIdentityResolved(CloudIdentity{}, QString(), nullptr, nullptr);
         check(none.provider == CloudProvider::None,
               "identity: no probe and no override stays gated");
+        // The page says where the identity came from: a fallback that stayed
+        // silent would read exactly like a real metadata answer.
+        CloudSnapshot shown;
+        shown.available = true;
+        shown.identity = fallback;
+        shown.note = fallbackNote;
+        check(cloudSummaryText(shown).contains(QStringLiteral("config fallback")),
+              "identity: the cloud summary names the config fallback");
 
         const CloudIdentity bad = cloudIdentityResolved(
             CloudIdentity{}, QStringLiteral("bogus/x"), nullptr, nullptr);
