@@ -1,4 +1,5 @@
 #include "HudWindow.h"
+#include "Config.h"
 #include "DashboardPanel.h"
 #include "HistoryLog.h"
 #include "TimeseriesChart.h"
@@ -1612,6 +1613,59 @@ int main(int argc, char *argv[]) {
         hud.setAppearance(before, legacy, QString());
         check(qAbs(hud.windowOpacity() - 1.0) < 0.01,
               "appearance: 100% opacity is fully solid again");
+
+        // Dragging the opacity slider must stay on the cheap path: one window
+        // property per step, no full appearance change (that re-emitted every
+        // step is what made the slider crawl - it rebuilt the console
+        // stylesheet and synced the ini on each pixel).
+        {
+            auto *panel = hud.findChild<DashboardPanel *>();
+            auto *slider =
+                hud.findChild<QSlider *>(QStringLiteral("ddOpacitySlider"));
+            int appearanceEmissions = 0;
+            if (panel != nullptr) {
+                QObject::connect(panel, &DashboardPanel::appearanceChanged,
+                                 panel,
+                                 [&appearanceEmissions](const QString &, int,
+                                                        const QString &) {
+                                     ++appearanceEmissions;
+                                 });
+            }
+            if (slider != nullptr) {
+                for (int value = 40; value <= 100; value += 4) {
+                    slider->setValue(value);
+                }
+            }
+            check(slider != nullptr, "appearance: the opacity slider exists");
+            check(appearanceEmissions == 0,
+                  "appearance: a drag does not re-emit the full appearance "
+                  "change");
+            check(slider != nullptr
+                      && qAbs(hud.windowOpacity() - 100.0 / 100.0) < 0.01,
+                  "appearance: the drag still reaches the window");
+
+            // ... and the debounce still persists the last value, just not
+            // once per pixel.
+            QTemporaryDir lookDir;
+            const QString lookPath = lookDir.filePath(QStringLiteral("hud.ini"));
+            OverlayConfig savedLook = look;
+            savedLook.opacity = 55;
+            hud.setAppearance(ui_theme::accent(), savedLook, lookPath);
+            if (slider != nullptr) {
+                slider->setValue(72);
+            }
+            QElapsedTimer settle;
+            settle.start();
+            while (settle.elapsed() < 900) {
+                QApplication::processEvents(QEventLoop::AllEvents, 10);
+                QThread::msleep(10);
+            }
+            QString lookError;
+            const Config reloadedLook = loadConfig(lookPath, &lookError);
+            check(reloadedLook.overlay.opacity == 72,
+                  "appearance: the drag's last value is written once, after "
+                  "the debounce");
+        }
 
         // A live accent change has to reach the banners too: they are painted
         // with the accent at build time, not through the stylesheet.

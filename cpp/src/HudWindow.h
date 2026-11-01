@@ -221,6 +221,9 @@ private:
     QPushButton *m_showHideButton = nullptr;
     QPushButton *m_clickButton = nullptr;
     QTimer *m_overlaySaveTimer = nullptr;
+    // Debounces appearance writes: a slider drag is dozens of value changes and
+    // the file only needs the last one.
+    QTimer *m_appearanceSave = nullptr;
     OverlaySession m_overlaySession = OverlaySession::Unknown;
     OverlayState m_overlay;
     OverlayConfig m_overlayConfig;
@@ -240,6 +243,7 @@ private:
     DisplaySnapshot m_lastSnapshot;
     bool m_detailsExpanded = false;
     void applySurfaceAppearance();
+    void scheduleAppearanceSave();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

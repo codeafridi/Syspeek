@@ -289,10 +289,16 @@ HudWindow::HudWindow(QWidget *parent)
                 next.opacity = opacity;
                 next.wallpaper = wallpaper;
                 applyAppearance(accent, next, m_overlayPath);
-                if (!m_overlayPath.isEmpty()) {
-                    saveThemeAccent(m_overlayPath, accent);
-                    saveOverlayConfig(m_overlayPath, next);
-                }
+                scheduleAppearanceSave();
+            });
+    // Dragging the slider must stay cheap: no stylesheet rebuild, no config
+    // write per step, just the window property and the value label the panel
+    // already updated.
+    connect(m_panel, &DashboardPanel::opacityChanged, this,
+            [this](int opacity) {
+                m_overlayConfig.opacity = opacity;
+                applySurfaceAppearance();
+                scheduleAppearanceSave();
             });
     connect(m_panel, &DashboardPanel::historyExportRequested, this,
             &HudWindow::exportHistory);
@@ -1386,13 +1392,43 @@ void HudWindow::setAppearance(const QString &accent,
 void HudWindow::applyAppearance(const QString &accent,
                                 const OverlayConfig &config,
                                 const QString &path) {
-    ui_theme::setAccent(accent);
-    setOverlayConfig(config, path);
-    if (m_panel != nullptr) {
-        m_panel->applyTheme();
+    const bool accentMoved =
+        !accent.isEmpty() && accent.compare(ui_theme::accent(),
+                                            Qt::CaseInsensitive) != 0;
+    if (accentMoved) {
+        // Rebuilding the console stylesheet and re-polishing every widget is
+        // expensive; it happens when the colour changes, and only then. A
+        // wallpaper click must not pay it.
+        ui_theme::setAccent(accent);
     }
-    qApp->setPalette(ui_theme::darkPalette());
+    setOverlayConfig(config, path);
+    if (accentMoved) {
+        if (m_panel != nullptr) {
+            m_panel->applyTheme();
+        }
+        qApp->setPalette(ui_theme::darkPalette());
+    }
     update();
+}
+
+void HudWindow::scheduleAppearanceSave() {
+    if (m_overlayPath.isEmpty()) {
+        return;
+    }
+    // A drag is several dozen value changes; the file only needs the last one.
+    // Same 400 ms single-shot idea as the geometry persistence.
+    if (m_appearanceSave == nullptr) {
+        m_appearanceSave = new QTimer(this);
+        m_appearanceSave->setSingleShot(true);
+        connect(m_appearanceSave, &QTimer::timeout, this, [this]() {
+            if (m_overlayPath.isEmpty()) {
+                return;
+            }
+            saveThemeAccent(m_overlayPath, ui_theme::accent());
+            saveOverlayConfig(m_overlayPath, m_overlayConfig);
+        });
+    }
+    m_appearanceSave->start(400);
 }
 
 void HudWindow::paintEvent(QPaintEvent *event) {

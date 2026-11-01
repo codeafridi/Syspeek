@@ -3537,7 +3537,7 @@ QWidget *DashboardPanel::buildSettingsView() {
         if (m_opacityValue != nullptr) {
             m_opacityValue->setText(QStringLiteral("%1%").arg(value));
         }
-        emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
+        emit opacityChanged(value);
     });
     opacityRow->addWidget(m_opacitySlider);
     opacityRow->addWidget(m_opacityValue);

@@ -113,6 +113,10 @@ public:
 signals:
     void appearanceChanged(const QString &accent, int opacity,
                            const QString &wallpaper);
+    // Dragging the opacity slider changes ONE window property. It gets its own
+    // signal so a drag never rebuilds the console stylesheet or writes the
+    // config file on every pixel - that is what made the slider crawl.
+    void opacityChanged(int opacity);
 
 public:
     // Re-applies the console stylesheet and re-tints the accent banners, so a
