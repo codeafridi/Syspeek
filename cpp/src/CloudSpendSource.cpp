@@ -396,11 +396,25 @@ void CloudSpendRunner::collectStep(qint64 nowMs) {
     cleanup();
 
     if (!normalExit || exitCode != 0) {
-        fail(cloudFleetNeedsCredentials(m_identity.provider, errors)
-                 ? fleetCredentialsText(m_identity.provider)
-                 : cloudSpendFailureText(m_status.cliName, exitCode,
-                                         firstLine(errors)),
-             nowMs);
+        const QString reason =
+            cloudFleetNeedsCredentials(m_identity.provider, errors)
+                ? fleetCredentialsText(m_identity.provider)
+                : cloudSpendFailureText(m_status.cliName, exitCode,
+                                        firstLine(errors));
+        // Only the FIRST step is fatal. A later step (the AWS forecast, or any
+        // step a provider adds) failing must not throw away the month-to-date
+        // the first step already returned: a user whose IAM policy grants
+        // ce:GetCostAndUsage but not ce:GetCostForecast still gets their
+        // billed figure, with the missing projection stated. Verified against
+        // a local emulator that answers GetCostAndUsage and rejects
+        // GetCostForecast with UnknownOperationException.
+        if (m_step == 0 || !m_status.available) {
+            fail(reason, nowMs);
+            return;
+        }
+        m_status.note = QStringLiteral("%1 (month end unavailable)")
+                            .arg(reason);
+        finish(nowMs);
         return;
     }
     if (m_step == 0) {

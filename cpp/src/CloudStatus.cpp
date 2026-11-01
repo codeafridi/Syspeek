@@ -48,6 +48,24 @@ QString cloudProviderName(CloudProvider provider) {
     return QStringLiteral("-");
 }
 
+CloudProvider cloudProviderFromName(const QString &name) {
+    const QString key = name.trimmed().toLower();
+    if (key == QLatin1String("aws") || key == QLatin1String("amazon")
+        || key == QLatin1String("ec2")) {
+        return CloudProvider::Aws;
+    }
+    if (key == QLatin1String("azure") || key == QLatin1String("az")) {
+        return CloudProvider::Azure;
+    }
+    if (key == QLatin1String("gcp") || key == QLatin1String("google")) {
+        return CloudProvider::Gcp;
+    }
+    if (key == QLatin1String("oci") || key == QLatin1String("oracle")) {
+        return CloudProvider::Oci;
+    }
+    return CloudProvider::None;
+}
+
 QString cloudProviderLabel(CloudProvider provider) {
     switch (provider) {
     case CloudProvider::Aws:
@@ -477,6 +495,13 @@ QString cloudSummaryText(const CloudSnapshot &snapshot) {
     if (snapshot.identity.spot) {
         text += QStringLiteral(" - spot");
     }
+    // Whatever the identity came from, say so when it was not the metadata
+    // service: the config fallback (M92) and a degraded probe both land here,
+    // and a page that silently mixes the two would be lying about which
+    // machine it is describing.
+    if (!snapshot.note.isEmpty()) {
+        text += QStringLiteral("\n") + snapshot.note;
+    }
     return text;
 }
 
@@ -706,4 +731,102 @@ QString cloudFootprintText(const CloudFootprint &footprint) {
         "writes     none - no credential is read or stored, no instance is "
         "ever started, stopped or terminated"));
     return lines.join(QLatin1Char('\n'));
+}
+
+bool parseCloudIdentityOverride(const QString &text, CloudIdentity *out,
+                                QString *error) {
+    if (error != nullptr) {
+        error->clear();
+    }
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("empty");
+        }
+        return false;
+    }
+    // provider/region[/account]. A trailing slash is tolerated, and the
+    // account is optional because Azure/GCP account ids are long and often
+    // unknown offline.
+    QStringList parts = trimmed.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    if (parts.size() < 2) {
+        if (error != nullptr) {
+            *error = QStringLiteral(
+                "expected <provider>/<region>[/<account>]");
+        }
+        return false;
+    }
+    const CloudProvider provider = cloudProviderFromName(parts.at(0));
+    if (provider == CloudProvider::None) {
+        if (error != nullptr) {
+            *error = QStringLiteral("unknown provider '%1' - use aws, azure, "
+                                    "gcp or oci")
+                         .arg(parts.at(0));
+        }
+        return false;
+    }
+    if (parts.at(1).trimmed().isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("region is empty");
+        }
+        return false;
+    }
+    CloudIdentity identity;
+    identity.provider = provider;
+    identity.region = parts.at(1).trimmed();
+    if (parts.size() >= 3) {
+        identity.accountId = parts.at(2).trimmed();
+    }
+    identity.note = cloudIdentityFallbackNote(identity);
+    if (out != nullptr) {
+        *out = identity;
+    }
+    return true;
+}
+
+QString cloudIdentityOverrideText(const CloudIdentity &identity) {
+    QString text = cloudProviderName(identity.provider)
+                   + QLatin1Char('/') + identity.region;
+    if (!identity.accountId.isEmpty()) {
+        text += QLatin1Char('/') + identity.accountId;
+    }
+    return text;
+}
+
+QString cloudIdentityFallbackNote(const CloudIdentity &identity) {
+    return QStringLiteral(
+               "identity: config fallback %1 (the instance metadata service "
+               "answered nothing) - the account listing and the billed spend "
+               "still run through the provider CLI")
+        .arg(cloudIdentityOverrideText(identity));
+}
+
+CloudIdentity cloudIdentityResolved(const CloudIdentity &probed,
+                                    const QString &overrideText,
+                                    QString *note, QString *error) {
+    if (note != nullptr) {
+        note->clear();
+    }
+    if (error != nullptr) {
+        error->clear();
+    }
+    // The metadata service is the authority on what machine this is.
+    if (probed.provider != CloudProvider::None) {
+        return probed;
+    }
+    if (overrideText.trimmed().isEmpty()) {
+        return probed;
+    }
+    CloudIdentity fallback;
+    QString identityError;
+    if (!parseCloudIdentityOverride(overrideText, &fallback, &identityError)) {
+        if (error != nullptr) {
+            *error = identityError;
+        }
+        return probed;
+    }
+    if (note != nullptr) {
+        *note = fallback.note;
+    }
+    return fallback;
 }

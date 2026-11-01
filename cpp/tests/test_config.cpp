@@ -232,6 +232,26 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M92: the identity fallback is opt-in and trimmed; an untouched config
+        // leaves the metadata service as the only source.
+        QTemporaryDir dir92;
+        const QString path = writeConfig(dir92, QByteArrayLiteral(
+            "[cloud]\n"
+            "identity=  aws/us-east-1/000000000000  \n"
+            "terraform_state=/tmp/tf.json\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.cloud.identityOverride
+                  == QStringLiteral("aws/us-east-1/000000000000"),
+              "cloud: [cloud] identity loads trimmed");
+        check(c.cloud.terraformStatePath == QStringLiteral("/tmp/tf.json"),
+              "cloud: [cloud] terraform_state loads");
+        const Config bare = defaultConfig();
+        check(bare.cloud.identityOverride.isEmpty(),
+              "cloud: no identity override by default");
+    }
+
+    {
         // M75: [silences] — a rolling duration authored in the file and an
         // absolute window the HUD wrote (survives a restart).
         QTemporaryDir dirSilence;

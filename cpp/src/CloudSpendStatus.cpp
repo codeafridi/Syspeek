@@ -16,6 +16,33 @@
 
 namespace {
 
+// A billing day key is a DATE, whatever the provider put in TimePeriod. AWS
+// Cost Explorer returns "2026-10-01"; a local emulator (and Azure's usageStart)
+// hands back "2026-10-01T00:00:00Z". Comparing an un-normalised value against
+// QDate::toString(Qt::ISODate) silently misses, which made every day look
+// like "not today" and turned the cost burn-rate baseline into a 250x spike.
+QString billingDayKey(const QString &text) {
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        return QString();
+    }
+    if (trimmed.size() >= 10
+        && trimmed.at(4) == QLatin1Char('-')
+        && trimmed.at(7) == QLatin1Char('-')) {
+        const QDate date = QDate::fromString(trimmed.left(10), Qt::ISODate);
+        if (date.isValid()) {
+            return date.toString(Qt::ISODate);
+        }
+    }
+    const QDateTime moment = qtcompat::fromMSecsSinceEpochUtc(
+        QDateTime::fromString(trimmed, Qt::ISODate).toMSecsSinceEpoch());
+    if (moment.isValid()) {
+        return moment.date().toString(Qt::ISODate);
+    }
+    return trimmed;
+}
+
+
 constexpr const char *kUnblended = "UnblendedCost";
 
 double jsonAmount(const QJsonObject &metrics, const char *metric) {
@@ -104,12 +131,15 @@ CloudSpendStatus parseAwsCostAndUsage(const QByteArray &json, QString *error) {
         if (row.value(QStringLiteral("Estimated")).toBool()) {
             spend.estimated = true;
         }
-        if (spend.periodStart.isEmpty() && !start.isEmpty()) {
-            spend.periodStart = start;
+        const QString day = billingDayKey(start);
+        if (spend.periodStart.isEmpty() && !day.isEmpty()) {
+            spend.periodStart = day;
         }
-        if (!start.isEmpty()) {
-            spend.periodEnd = period.value(QStringLiteral("End")).toString();
-            spend.days.append(CloudSpendDay{start, dayTotal});
+        if (!day.isEmpty()) {
+            const QString end =
+                billingDayKey(period.value(QStringLiteral("End")).toString());
+            spend.periodEnd = end.isEmpty() ? day : end;
+            spend.days.append(CloudSpendDay{day, dayTotal});
         }
         total += dayTotal;
     }
@@ -258,6 +288,15 @@ void spendSortServices(CloudSpendStatus *spend, int cap) {
     if (spend == nullptr) {
         return;
     }
+    // Cost Explorer only ever returns services that billed something; an
+    // emulator (and some exports) list every service with 0.0000000000. A
+    // breakdown of zeroes is not information, so those rows are dropped.
+    spend->services.erase(
+        std::remove_if(spend->services.begin(), spend->services.end(),
+                       [](const CloudSpendService &row) {
+                           return row.usd >= 0.0 && row.usd < 0.0000005;
+                       }),
+        spend->services.end());
     std::sort(spend->services.begin(), spend->services.end(),
               [](const CloudSpendService &a, const CloudSpendService &b) {
                   return a.usd > b.usd;

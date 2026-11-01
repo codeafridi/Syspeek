@@ -2,6 +2,7 @@
 
 #include "CloudProbe.h"
 #include "CloudStatus.h"
+#include "Config.h"
 #include "HistoryLog.h"
 #include "TickBudget.h"
 #include "MetricsEndpoint.h"
@@ -593,17 +594,60 @@ QString dumpReportJson(int maxProcs) {
         CloudProbeOptions options;
         options.timeoutMs = 600;
         const CloudProbeResult probe = probeCloudIdentity(options);
-        const bool available = probe.identity.provider != CloudProvider::None;
+        // [cloud] identity= is honoured here too, through the same resolver the
+        // sampler uses: --dump must describe the identity the running app
+        // would use, or a host without IMDS could never prove the fallback.
+        QString configError;
+        const Config dumpConfig = loadConfig(defaultConfigPath(), &configError);
+        QString fallbackNote;
+        QString identityError;
+        const CloudIdentity identity = cloudIdentityResolved(
+            probe.identity, dumpConfig.cloud.identityOverride, &fallbackNote,
+            &identityError);
+        const bool available = identity.provider != CloudProvider::None;
         cloud.insert(QStringLiteral("available"), available);
         cloud.insert(QStringLiteral("attempted"), probe.attempted);
         cloud.insert(QStringLiteral("provider"),
-                     cloudProviderName(probe.identity.provider));
+                     cloudProviderName(identity.provider));
+        cloud.insert(QStringLiteral("identityOverride"),
+                     dumpConfig.cloud.identityOverride);
+        cloud.insert(QStringLiteral("identityFallback"),
+                     !fallbackNote.isEmpty());
+        // The precedence rule, asserted in CI: a metadata answer always beats
+        // the config fallback, so a stale file cannot relabel a real instance.
+        cloud.insert(QStringLiteral("identityPrecedenceOk"),
+                     cloudIdentityResolved(
+                         CloudIdentity{}, QString(), nullptr, nullptr)
+                             .provider
+                         == CloudProvider::None
+                         && cloudIdentityResolved(
+                                [] {
+                                    CloudIdentity real;
+                                    real.provider = CloudProvider::Gcp;
+                                    real.region = QStringLiteral("us-central1");
+                                    return real;
+                                }(),
+                                QStringLiteral("aws/eu-west-1/123456789012"),
+                                nullptr, nullptr)
+                                .provider
+                                == CloudProvider::Gcp
+                         && cloudIdentityResolved(
+                                CloudIdentity{},
+                                QStringLiteral("aws/eu-west-1/123456789012"),
+                                nullptr, nullptr)
+                                .provider
+                                == CloudProvider::Aws
+                         && cloudIdentityResolved(
+                                CloudIdentity{}, QStringLiteral("bogus/x"),
+                                nullptr, nullptr)
+                                .provider
+                                == CloudProvider::None);
         if (!available) {
             cloud.insert(QStringLiteral("note"),
                          probe.error.isEmpty() ? cloudUnreachableText()
                                                : probe.error);
         } else {
-            const CloudIdentity &id = probe.identity;
+            const CloudIdentity &id = identity;
             cloud.insert(QStringLiteral("instanceId"), id.instanceId);
             cloud.insert(QStringLiteral("instanceType"), id.instanceType);
             cloud.insert(QStringLiteral("region"), id.region);
@@ -632,11 +676,11 @@ QString dumpReportJson(int maxProcs) {
                                         QDateTime::currentMSecsSinceEpoch()));
 
         if (available) {
-            const double rate = cloudRateFor(table, probe.identity.provider,
-                                             probe.identity.instanceType);
+            const double rate = cloudRateFor(table, identity.provider,
+                                             identity.instanceType);
             cloud.insert(QStringLiteral("rateKey"),
-                         cloudRateKey(probe.identity.provider,
-                                      probe.identity.instanceType));
+                         cloudRateKey(identity.provider,
+                                      identity.instanceType));
             cloud.insert(QStringLiteral("ratePerHour"), rate);
             const CloudCostMath math = computeCloudCost(rate, uptime);
             cloud.insert(QStringLiteral("accruedUsd"), math.accruedUsd);
@@ -689,7 +733,7 @@ QString dumpReportJson(int maxProcs) {
         CloudFleetOptions fleetOptions;
         fleetOptions.timeoutMs = 8000;
         const CloudFleetStatus listing =
-            probeCloudFleet(probe.identity, fleetOptions);
+            probeCloudFleet(identity, fleetOptions);
         QJsonObject fleet;
         fleet.insert(QStringLiteral("attempted"), listing.attempted);
         fleet.insert(QStringLiteral("available"), listing.available);
@@ -760,7 +804,7 @@ QString dumpReportJson(int maxProcs) {
         CloudSpendOptions spendOptions;
         spendOptions.timeoutMs = 12000;
         const CloudSpendStatus spend =
-            probeCloudSpend(probe.identity, spendOptions);
+            probeCloudSpend(identity, spendOptions);
         QJsonObject spendJson;
         spendJson.insert(QStringLiteral("attempted"), spend.attempted);
         spendJson.insert(QStringLiteral("available"), spend.available);
