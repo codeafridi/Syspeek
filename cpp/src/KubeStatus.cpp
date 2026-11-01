@@ -940,61 +940,6 @@ QString kubeNodesText(const QList<KubeNode> &nodes) {
     return text.trimmed();
 }
 
-// Right-sizing recommendation per pod
-KubeRightSizing kubeRightSizing(const KubePod &pod) {
-    KubeRightSizing result;
-    result.hasRequests = pod.cpuRequestCores > 0.0 || pod.memRequestBytes > 0.0;
-    
-    if (result.hasRequests && pod.cpuMillis >= 0.0) {
-        // Calculate usage ratio: actual usage / requested
-        // cpuMillis is in millicores, pod.cpuRequestCores is in cores
-        double usageCpu = (pod.cpuMillis / 1000.0) / pod.cpuRequestCores;
-        result.usageRatioCpu = qBound(0.0, usageCpu, 10.0);
-        
-        // Suggested request = usage × 1.2 (OpenCost buffer)
-        result.suggestedRequestCores = result.usageRatioCpu * OPENCOST_BUFFER;
-        
-        if (pod.memRequestBytes > 0 && pod.memBytes > 0) {
-            double usageMem = (double)pod.memBytes / pod.memRequestBytes;
-            result.usageRatioMem = qBound(0.0, usageMem, 10.0);
-            result.suggestedRequestBytes = result.usageRatioMem * OPENCOST_BUFFER * pod.memRequestBytes;
-        }
-        
-        // Monthly savings: (current request - suggested) × 730h × rate
-        // We estimate rate from the cost model, or use a default
-        result.monthlySavings = (pod.cpuRequestCores - result.suggestedRequestCores) * 730.0 * 0.031611;  // approx $/core-hr
-        if (pod.memRequestBytes > 0) {
-            result.monthlySavings += (double)pod.memRequestBytes / (1024.0 * 1024.0 * 1024.0) * 730.0 * 0.004237;  // approx $/GB-hr
-        }
-    }
-    
-    // Detail text
-    if (result.hasRequests) {
-        result.detail = QStringLiteral("usage: CPU %1%% mem %2%% — suggest %3 cores mem %4 GB — save $5/mo")
-            .arg(QString::number(result.usageRatioCpu * 100.0, 'f', 1))
-            .arg(QString::number(result.usageRatioMem * 100.0, 'f', 1))
-            .arg(QString::number(result.suggestedRequestCores, 'f', 2))
-            .arg(QString::number(result.suggestedRequestBytes / (1024.0 * 1024.0 * 1024.0), 'f', 2));
-    } else {
-        result.detail = QStringLiteral("no requests — cannot right-size");
-    }
-    
-    return result;
-}
-
-// Right-size all pods, sorted by savings descending
-QList<KubeRightSizing> kubeRightSizingAll(const QList<KubePod> &pods) {
-    QList<KubeRightSizing> results;
-    for (const KubePod &pod : pods) {
-        results.append(kubeRightSizing(pod));
-    }
-    // Sort by monthly savings descending
-    std::sort(results.begin(), results.end(), [](const KubeRightSizing &a, const KubeRightSizing &b) {
-        return a.monthlySavings > b.monthlySavings;
-    });
-    return results;
-}
-
 // Context tracking for multi-cluster
 QList<KubeContext> kubeAllContexts() {
     // In a real implementation, this would parse kubeconfig

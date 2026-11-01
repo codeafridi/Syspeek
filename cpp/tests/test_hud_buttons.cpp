@@ -1449,6 +1449,33 @@ int main(int argc, char *argv[]) {
         cost.costTopWorkloads = {
             qMakePair(QStringLiteral("prod/api-7f9c"), 812.0),
             qMakePair(QStringLiteral("prod/web-5f8d"), 288.0)};
+        {
+            // M89: one over-requested pod and one under-provisioned pod, as
+            // computePodRightSizing would report them.
+            PodRightSizing shrink;
+            shrink.ns = QStringLiteral("prod");
+            shrink.pod = QStringLiteral("api-7f9c");
+            shrink.cpuRequestCores = 2.0;
+            shrink.cpuUsageCores = 0.25;
+            shrink.suggestedCpuCores = 0.30;
+            shrink.memRequestBytes = 4.0 * 1024.0 * 1024.0 * 1024.0;
+            shrink.memUsageBytes = 0.5 * 1024.0 * 1024.0 * 1024.0;
+            shrink.suggestedMemBytes = 0.6 * 1024.0 * 1024.0 * 1024.0;
+            shrink.hasCpu = true;
+            shrink.hasMem = true;
+            shrink.monthlySavings = 49.75;
+            PodRightSizing raise;
+            raise.ns = QStringLiteral("prod");
+            raise.pod = QStringLiteral("web-5f8d");
+            raise.cpuRequestCores = 0.50;
+            raise.cpuUsageCores = 0.90;
+            raise.suggestedCpuCores = 1.08;
+            raise.hasCpu = true;
+            raise.underCpu = true;
+            cost.costRightSizing = {shrink, raise};
+            cost.costRightSizingPods = 2;
+            cost.costRightSizingSavings = 49.75;
+        }
         hud.setKubeSnapshot(cost);
 
         auto *tileMonthly =
@@ -1514,6 +1541,29 @@ int main(int argc, char *argv[]) {
               "cost: workload table formats money");
         check(costChart != nullptr && costChart->sampleCount() >= 1,
               "cost: the estimate history is charted");
+        auto *costRightSizing =
+            hud.findChild<QTreeWidget *>(QStringLiteral("ddCostRightSizing"));
+        check(costRightSizing != nullptr
+                  && costRightSizing->topLevelItemCount() == 2,
+              "M89: the cost page lists a row per measured pod");
+        check(costRightSizing != nullptr
+                  && costRightSizing->topLevelItem(0)->text(0)
+                         == QStringLiteral("prod/api-7f9c")
+                  && costRightSizing->topLevelItem(0)->text(1)
+                         .contains(QStringLiteral("cpu 2.00 -> 0.30 cores"))
+                  && costRightSizing->topLevelItem(0)->text(2)
+                         == QStringLiteral("$49.75"),
+              "M89: the suggestion reads request -> usage x buffer, priced");
+        check(costRightSizing != nullptr
+                  && costRightSizing->topLevelItem(1)->text(1)
+                         .contains(QStringLiteral("under-provisioned"))
+                  && costRightSizing->topLevelItem(1)->text(2)
+                         == QStringLiteral("--"),
+              "M89: an under-provisioned pod shows a raise, no money");
+        check(costWarnings != nullptr
+                  && costWarnings->text().contains(
+                      QStringLiteral("2 of 2 pod(s) measured")),
+              "M89: the right-sizing card counts what was measured");
 
         KubeSnapshot noCost;
         noCost.state = KubeState::NotConfigured;

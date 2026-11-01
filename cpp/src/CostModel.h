@@ -53,6 +53,37 @@ struct CostEfficiency {
     double wastedMonthly = 0.0;
 };
 
+// OpenCost's EfficiencyBufferMultiplier: the recommendation asks for 20%
+// headroom over measured usage (its own default of 1.2).
+inline constexpr double kOpenCostBuffer = 1.2;
+
+// Per-pod right-sizing: OpenCost computes usage/request efficiency, recommends
+// a request at usage x buffer_multiplier, and prices the headroom the current
+// request declares above that recommendation.
+//
+// Grounding (shipped OpenCost image /go/bin/app, strings kept
+// /tmp/opencode/m81/opencost.strings):
+//   "Computes CPU and memory efficiency (usage/request ratio), provides
+//    recommended resource requests, and calculates potential cost savings.
+//    Optional buffer_multiplier parameter (default: 1.2 for 20% headroom) can
+//    be set to values like 1.4 for 40% headroom."
+//   "EfficiencyBufferMultiplier", "CostModel: node pricing has illegal
+//    CostPerCPUHr; replacing with custom pricing",
+//   "node_cpu_hourly_cost" / "node_ram_hourly_cost".
+// Rows for the pods that report BOTH a request and a usage sample
+// (metrics.k8s.io), sorted by monthly savings descending.
+QList<PodRightSizing> computePodRightSizing(const QList<KubePod> &pods,
+                                            double cpuPricePerCoreHour,
+                                            double memPricePerGbHour,
+                                            double bufferMultiplier = kOpenCostBuffer);
+
+// "cpu 2.00 -> 0.31 cores, mem 4.0 -> 1.2 GB, save $42.10/mo"
+// "cpu 0.50 -> 0.60 cores (under-provisioned: raise)"
+QString podRightSizingText(const PodRightSizing &row);
+
+// Aggregate: "5 of 12 pods measured - 3 shrink suggestions, $128.40/mo"
+QString rightSizingSummaryText(const QList<PodRightSizing> &rows, int pods);
+
 // Requests-based monthly estimate (OpenCost-style allocation).
 CostSummary computeClusterCost(const QList<KubePod> &pods,
                                double cpuPricePerCoreHour,

@@ -373,6 +373,14 @@ void KubeSource::emitSnapshot(KubeState state, const QString &message,
         snapshot.costMemEfficiency = costMemEfficiency(efficiency);
         snapshot.costWastedMonthly = efficiency.wastedMonthly;
         snapshot.costEfficiencyPods = efficiency.podsMeasured;
+        snapshot.costRightSizing = computePodRightSizing(
+            resources.pods, m_costConfig.cpuPerCoreHour,
+            m_costConfig.memPerGbHour);
+        snapshot.costRightSizingPods = resources.pods.size();
+        snapshot.costRightSizingSavings = 0.0;
+        for (const PodRightSizing &row : snapshot.costRightSizing) {
+            snapshot.costRightSizingSavings += row.monthlySavings;
+        }
         snapshot.costTopWorkloads.clear();
         for (const WorkloadCost &workload : cost.topWorkloads) {
             snapshot.costTopWorkloads.append(qMakePair(

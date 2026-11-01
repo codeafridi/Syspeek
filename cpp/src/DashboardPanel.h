@@ -277,6 +277,7 @@ private:
     QLabel *m_nodes = nullptr;
     QLabel *m_costSummary = nullptr;
     QLabel *m_costWarnings = nullptr;
+    QTreeWidget *m_costRightSizing = nullptr;
     QTreeWidget *m_costNamespaces = nullptr;
     QTreeWidget *m_costWorkloads = nullptr;
     QLabel *m_costTileMonthly = nullptr;

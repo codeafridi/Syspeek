@@ -210,3 +210,136 @@ QString costEfficiencyTextFromRatios(double cpuEfficiency,
                          "(OpenCost buffer 1.2)");
     return text;
 }
+
+namespace {
+
+double gbOf(double bytes) {
+    return bytes / (1024.0 * 1024.0 * 1024.0);
+}
+
+} // namespace
+
+QList<PodRightSizing> computePodRightSizing(const QList<KubePod> &pods,
+                                            double cpuPricePerCoreHour,
+                                            double memPricePerGbHour,
+                                            double bufferMultiplier) {
+    // OpenCost's buffer_multiplier is 1.2 by default and must be > 1 to mean
+    // anything; anything else falls back to the documented default.
+    const double buffer = bufferMultiplier > 1.0 ? bufferMultiplier
+                                                 : kOpenCostBuffer;
+    QList<PodRightSizing> rows;
+    for (const KubePod &pod : pods) {
+        const bool cpuSample = pod.cpuMillis >= 0.0;
+        const bool memSample = pod.memBytes >= 0;
+        if (!cpuSample && !memSample) {
+            continue;
+        }
+        PodRightSizing row;
+        row.ns = pod.ns;
+        row.pod = pod.name;
+        row.cpuUsageCores = cpuSample ? pod.cpuMillis / 1000.0 : 0.0;
+        row.cpuRequestCores = pod.cpuRequestCores;
+        row.memUsageBytes = memSample ? static_cast<double>(pod.memBytes) : 0.0;
+        row.memRequestBytes = pod.memRequestBytes;
+        if (cpuSample && pod.cpuRequestCores > 0.0) {
+            row.hasCpu = true;
+            row.cpuRatio = row.cpuUsageCores / pod.cpuRequestCores;
+            row.suggestedCpuCores = row.cpuUsageCores * buffer;
+            row.underCpu = row.cpuUsageCores > pod.cpuRequestCores;
+        }
+        if (memSample && pod.memRequestBytes > 0.0) {
+            row.hasMem = true;
+            row.memRatio = row.memUsageBytes / pod.memRequestBytes;
+            row.suggestedMemBytes = row.memUsageBytes * buffer;
+            row.underMem = row.memUsageBytes > pod.memRequestBytes;
+        }
+        // A pod with no declared request cannot be right-sized against one -
+        // it is already unpriced, which the allocation card states instead.
+        if (!row.hasCpu && !row.hasMem) {
+            continue;
+        }
+        // A pod that needs MORE of either resource is not a savings
+        // candidate: its recommendation is a raise, and pricing the other
+        // resource's headroom next to it would read as free money.
+        double savings = 0.0;
+        if (!row.underCpu && !row.underMem) {
+            if (row.hasCpu) {
+                savings += (pod.cpuRequestCores - row.suggestedCpuCores)
+                           * cpuPricePerCoreHour * kCostHoursPerMonth;
+            }
+            if (row.hasMem) {
+                savings += gbOf(row.memRequestBytes - row.suggestedMemBytes)
+                           * memPricePerGbHour * kCostHoursPerMonth;
+            }
+        }
+        row.monthlySavings = savings > 0.0 ? savings : 0.0;
+        rows.append(row);
+    }
+    std::sort(rows.begin(), rows.end(),
+              [](const PodRightSizing &a, const PodRightSizing &b) {
+                  if (!qFuzzyCompare(a.monthlySavings + 1.0,
+                                     b.monthlySavings + 1.0)) {
+                      return a.monthlySavings > b.monthlySavings;
+                  }
+                  if (a.ns != b.ns) {
+                      return a.ns < b.ns;
+                  }
+                  return a.pod < b.pod;
+              });
+    return rows;
+}
+
+QString podRightSizingText(const PodRightSizing &row) {
+    QStringList parts;
+    if (row.hasCpu) {
+        parts << QStringLiteral("cpu %1 -> %2 cores%3")
+                     .arg(row.cpuRequestCores, 0, 'f', 2)
+                     .arg(row.suggestedCpuCores, 0, 'f', 2)
+                     .arg(row.underCpu
+                              ? QStringLiteral(" (under-provisioned: raise)")
+                              : QString());
+    }
+    if (row.hasMem) {
+        parts << QStringLiteral("mem %1 -> %2 GB%3")
+                     .arg(gbOf(row.memRequestBytes), 0, 'f', 1)
+                     .arg(gbOf(row.suggestedMemBytes), 0, 'f', 1)
+                     .arg(row.underMem
+                              ? QStringLiteral(" (under-provisioned: raise)")
+                              : QString());
+    }
+    QString text = parts.join(QStringLiteral(", "));
+    if (!row.underCpu && !row.underMem) {
+        text += QStringLiteral(", save %1/mo")
+                    .arg(formatCostMoney(row.monthlySavings));
+    }
+    return text;
+}
+
+QString rightSizingSummaryText(const QList<PodRightSizing> &rows, int pods) {
+    if (rows.isEmpty()) {
+        return QStringLiteral(
+            "right-sizing: no pod reports both a request and a usage sample "
+            "(metrics.k8s.io) - install metrics-server to measure");
+    }
+    double savings = 0.0;
+    int shrink = 0;
+    int under = 0;
+    for (const PodRightSizing &row : rows) {
+        savings += row.monthlySavings;
+        if (row.underCpu || row.underMem) {
+            ++under;
+        } else {
+            ++shrink;
+        }
+    }
+    return QStringLiteral(
+               "%1 of %2 pod(s) measured - %3 shrink suggestion(s), %4 "
+               "under-provisioned - %5/month of request headroom at the "
+               "buffer of %6")
+        .arg(rows.size())
+        .arg(pods)
+        .arg(shrink)
+        .arg(under)
+        .arg(formatCostMoney(savings))
+        .arg(kOpenCostBuffer, 0, 'f', 1);
+}

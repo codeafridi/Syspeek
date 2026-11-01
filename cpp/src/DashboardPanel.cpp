@@ -4745,6 +4745,26 @@ QWidget *DashboardPanel::buildCostView() {
     layout->addWidget(makeCard(QStringLiteral("usage vs requests"),
                                m_costWarnings, view));
 
+    // --- Per-pod recommendations (OpenCost's right-sizing surface: a
+    // request at measured usage x buffer, and the headroom it frees).
+    m_costRightSizing = new QTreeWidget(view);
+    m_costRightSizing->setObjectName(QStringLiteral("ddCostRightSizing"));
+    m_costRightSizing->setColumnCount(3);
+    m_costRightSizing->setHeaderLabels({QStringLiteral("Pod"),
+                                        QStringLiteral("Recommendation"),
+                                        QStringLiteral("$/month")});
+    m_costRightSizing->setRootIsDecorated(false);
+    m_costRightSizing->setSelectionMode(QAbstractItemView::NoSelection);
+    m_costRightSizing->setFocusPolicy(Qt::NoFocus);
+    m_costRightSizing->header()->setSectionResizeMode(0,
+                                                      QHeaderView::ResizeToContents);
+    m_costRightSizing->header()->setSectionResizeMode(1,
+                                                      QHeaderView::Stretch);
+    m_costRightSizing->header()->setSectionResizeMode(
+        2, QHeaderView::ResizeToContents);
+    layout->addWidget(makeCard(QStringLiteral("per-pod suggestions"),
+                               m_costRightSizing, view));
+
     // --- Estimate history (Syspeek-own: OpenCost's monthlyCost recomputed
     // per poll from the live request set).
     m_chartCost = new TimeseriesChart(view);
@@ -6920,9 +6940,43 @@ void DashboardPanel::setKubeSnapshot(const KubeSnapshot &snapshot) {
                                      .arg(ui_theme::ok()));
         }
         m_costSummary->setText(allocation);
-        m_costWarnings->setText(costEfficiencyTextFromRatios(
-            snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
-            snapshot.costEfficiencyPods, snapshot.costWastedMonthly));
+        m_costWarnings->setText(
+            costEfficiencyTextFromRatios(
+                snapshot.costCpuEfficiency, snapshot.costMemEfficiency,
+                snapshot.costEfficiencyPods, snapshot.costWastedMonthly)
+            + QStringLiteral("\n")
+            + rightSizingSummaryText(snapshot.costRightSizing,
+                                     snapshot.costRightSizingPods));
+
+        if (m_costRightSizing != nullptr) {
+            m_costRightSizing->clear();
+            if (snapshot.costRightSizing.isEmpty()) {
+                auto *item = new QTreeWidgetItem();
+                item->setText(0, QStringLiteral("no measured pods"));
+                item->setText(1, QStringLiteral("--"));
+                item->setText(2, QStringLiteral("--"));
+                m_costRightSizing->addTopLevelItem(item);
+            } else {
+                int shown = 0;
+                for (const PodRightSizing &row : snapshot.costRightSizing) {
+                    if (shown++ >= 10) {
+                        break;
+                    }
+                    auto *item = new QTreeWidgetItem();
+                    item->setText(0, row.ns + QStringLiteral("/") + row.pod);
+                    item->setText(1, podRightSizingText(row));
+                    item->setText(2,
+                                  row.underCpu || row.underMem
+                                      ? QStringLiteral("--")
+                                      : formatCostMoney(row.monthlySavings));
+                    if (row.underCpu || row.underMem) {
+                        item->setForeground(
+                            1, QBrush(QColor(ui_theme::warn())));
+                    }
+                    m_costRightSizing->addTopLevelItem(item);
+                }
+            }
+        }
 
         auto fillTable = [&snapshot](QTreeWidget *tree,
                                      const QList<QPair<QString, double>> &rows) {

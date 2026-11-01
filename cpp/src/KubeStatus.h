@@ -26,6 +26,32 @@ struct KubePod {
     long long memBytes = -1;
 };
 
+// Per-pod right-sizing (M89): OpenCost computes usage/request efficiency,
+// recommends a request at usage x buffer_multiplier (its default 1.2 for 20%
+// headroom), and prices the headroom the declared request carries above that
+// recommendation. The maths lives in CostModel (computePodRightSizing); the
+// row is declared here because a KubeSnapshot carries it.
+struct PodRightSizing {
+    QString ns;
+    QString pod;
+    double cpuUsageCores = 0.0;
+    double cpuRequestCores = 0.0;
+    double memUsageBytes = 0.0;
+    double memRequestBytes = 0.0;
+    double cpuRatio = 0.0;          // usage/request (0 when no request)
+    double memRatio = 0.0;
+    double suggestedCpuCores = 0.0; // usage x buffer
+    double suggestedMemBytes = 0.0;
+    // Headroom above the recommendation, priced at this cluster's rates.
+    // 0 when the pod is under-provisioned (usage above its request) - the
+    // recommendation is then a raise, and it saves nothing.
+    double monthlySavings = 0.0;
+    bool hasCpu = false;       // both a request and a usage sample
+    bool hasMem = false;
+    bool underCpu = false;     // usage is already above the request
+    bool underMem = false;
+};
+
 struct KubeDeployment {
     QString ns;
     QString name;
@@ -124,6 +150,11 @@ struct KubeSnapshot {
     int costPods = 0;
     QList<QPair<QString, double>> costByNamespace;
     QList<QPair<QString, double>> costTopWorkloads;
+    // M89: per-pod right-sizing (OpenCost buffer model), computed by KubeSource
+    // once the metrics sample and the rates are both known.
+    QList<PodRightSizing> costRightSizing;
+    int costRightSizingPods = 0;
+    double costRightSizingSavings = 0.0;
     // OpenCost-style pricing detail (M81): the rates actually applied, the
     // cpu/ram split of the estimate, and usage/request efficiency over the
     // pods that report both (metrics.k8s.io) - -1 when unmeasurable.
@@ -182,25 +213,6 @@ QString kubeTimelineText(const QList<KubeChange> &changes);
 QString kubeNodesText(const QList<KubeNode> &nodes);
 
 // Right-sizing recommendation per pod
-struct KubeRightSizing {
-    double usageRatioCpu = 0.0;       // cpu used / requested
-    double usageRatioMem = 0.0;       // mem used / requested
-    double suggestedRequestCores = 0.0;  // usage × 1.2 (OpenCost buffer)
-    double suggestedRequestBytes = 0.0;  // mem suggested
-    double monthlySavings = 0.0;      // wasted monthly
-    bool hasRequests = false;         // pod has cpu/mem requests
-    QString detail;                   // human-readable explanation
-};
-
-// Right-size a single pod
-KubeRightSizing kubeRightSizing(const KubePod &pod);
-
-// Right-size all pods, sorted by savings descending
-QList<KubeRightSizing> kubeRightSizingAll(const QList<KubePod> &pods);
-
-// OpenCost's EfficiencyBufferMultiplier (1.2 headroom)
-static const double OPENCOST_BUFFER = 1.2;
-
 // Context tracking for multi-cluster
 struct KubeContext {
     QString name;

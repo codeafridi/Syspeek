@@ -575,6 +575,102 @@ int main() {
               "kube: matched node gains usage depth");
     }
 
+    // --- M89: per-pod right-sizing (OpenCost buffer model) ----------------
+    {
+        const double cpuRate = 0.031611;   // $/core-hour
+        const double memRate = 0.004237;   // $/GB-hour
+
+        KubePod big;
+        big.ns = QStringLiteral("shop");
+        big.name = QStringLiteral("api-7d9f");
+        big.cpuRequestCores = 2.0;
+        big.memRequestBytes = 4.0 * 1024.0 * 1024.0 * 1024.0;
+        big.cpuMillis = 250.0;                                  // 0.25 cores
+        big.memBytes = static_cast<long long>(512.0 * 1024.0 * 1024.0);
+
+        KubePod lean;                                          // under-provisioned
+        lean.ns = QStringLiteral("shop");
+        lean.name = QStringLiteral("worker");
+        lean.cpuRequestCores = 0.5;
+        lean.memRequestBytes = 1.0 * 1024.0 * 1024.0 * 1024.0;
+        lean.cpuMillis = 900.0;                                // 0.9 cores
+        lean.memBytes = static_cast<long long>(256.0 * 1024.0 * 1024.0);
+
+        KubePod unmeasured;                                    // no metrics sample
+        unmeasured.ns = QStringLiteral("shop");
+        unmeasured.name = QStringLiteral("cron");
+        unmeasured.cpuRequestCores = 1.0;
+        unmeasured.memRequestBytes = 1.0 * 1024.0 * 1024.0 * 1024.0;
+
+        KubePod noRequest;
+        noRequest.ns = QStringLiteral("shop");
+        noRequest.name = QStringLiteral("adhoc");
+        noRequest.cpuMillis = 400.0;
+        noRequest.memBytes = 100LL * 1024 * 1024;
+
+        const QList<PodRightSizing> rows = computePodRightSizing(
+            {lean, unmeasured, noRequest, big}, cpuRate, memRate);
+        check(rows.size() == 2,
+              "right-sizing: only measured pods with a request are sized");
+
+        // Sorted by savings, so the big over-requested pod leads.
+        check(rows.first().pod == QStringLiteral("api-7d9f")
+                  && rows.first().ns == QStringLiteral("shop"),
+              "right-sizing: rows carry pod identity, best saving first");
+        check(std::fabs(rows.first().suggestedCpuCores - 0.30) < 1e-9,
+              "right-sizing: cpu suggestion is usage x 1.2, not the ratio");
+        check(std::fabs(rows.first().suggestedMemBytes
+                        - 512.0 * 1024.0 * 1024.0 * 1.2)
+                  < 1.0,
+              "right-sizing: mem suggestion is usage x 1.2");
+        const double expectCpu = (2.0 - 0.30) * cpuRate * 730.0;
+        const double expectMem = (4.0 - 0.6) * memRate * 730.0;
+        check(std::fabs(rows.first().monthlySavings
+                        - (expectCpu + expectMem))
+                  < 0.02,
+              "right-sizing: savings price the headroom at the cluster rates");
+
+        bool underFound = false;
+        for (const PodRightSizing &row : rows) {
+            if (row.pod == QStringLiteral("worker")) {
+                underFound = row.underCpu && !row.underMem
+                             && row.monthlySavings == 0.0;
+            }
+        }
+        check(underFound,
+              "right-sizing: an under-provisioned pod saves nothing");
+
+        const QString text = podRightSizingText(rows.first());
+        check(text.contains(QStringLiteral("cpu 2.00 -> 0.30 cores"))
+                  && text.contains(QStringLiteral("save $")),
+              "right-sizing: the row reads request -> suggestion, saving");
+
+        QString raise;
+        for (const PodRightSizing &row : rows) {
+            if (row.pod == QStringLiteral("worker")) {
+                raise = podRightSizingText(row);
+            }
+        }
+        check(raise.contains(QStringLiteral("under-provisioned: raise")),
+              "right-sizing: an under-provisioned row says raise");
+
+        const QString summary = rightSizingSummaryText(rows, 12);
+        check(summary.contains(QStringLiteral("2 of 12 pod(s) measured"))
+                  && summary.contains(QStringLiteral("1 shrink"))
+                  && summary.contains(QStringLiteral("1 under-provisioned")),
+              "right-sizing: the summary counts measured, shrink and under");
+
+        check(rightSizingSummaryText({}, 4)
+                  .contains(QStringLiteral("install metrics-server")),
+              "right-sizing: no metrics sample states the gate");
+
+        const QList<PodRightSizing> looser =
+            computePodRightSizing({big}, cpuRate, memRate, 1.4);
+        check(looser.size() == 1
+                  && std::fabs(looser.first().suggestedCpuCores - 0.35) < 1e-9,
+              "right-sizing: a 1.4 buffer asks for more headroom");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
