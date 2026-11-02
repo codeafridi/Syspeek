@@ -659,6 +659,27 @@ restyle, on purpose:
 accent = #4a86c4
 ```
 
+**Investigation bundle** — the thing you hand to somebody else. One file
+carries the event stream, the samples around it, host and focused-app state, the
+incidents and the monitors that were armed:
+
+```bash
+syspeek bundle                                  # ~10 s headless sample
+syspeek bundle --samples=30 --out=/tmp/box.json # longer window, explicit path
+syspeek bundle --inspect=/tmp/box.json          # read one back, no Syspeek needed
+```
+
+The HUD has the same thing as **Settings → DIAGNOSTICS → SAVE BUNDLE**, which is
+the version worth sharing: it carries the timeline the console has been
+collecting. Reading one back is a plain text summary — the recipient does not
+need Syspeek installed to see what happened.
+
+The file carries a SHA-256 digest of its own body, so a truncated or edited
+bundle is refused on open with a sentence saying so. Integrity, not
+authenticity: there is no key and no PKI here, and the manifest does not pretend
+otherwise. Nothing is uploaded — the file lands where you ask, and that is the
+whole mechanism.
+
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:
 Settings → DIAGNOSTICS → **EXPORT CSV** / **EXPORT JSON** (files land in

@@ -1,6 +1,8 @@
 #include "HudWindow.h"
 
 #include "DashboardPanel.h"
+
+#include "BundleStatus.h"
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
@@ -14,6 +16,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
@@ -302,6 +306,8 @@ HudWindow::HudWindow(QWidget *parent)
             });
     connect(m_panel, &DashboardPanel::historyExportRequested, this,
             &HudWindow::exportHistory);
+    connect(m_panel, &DashboardPanel::bundleRequested, this,
+            &HudWindow::saveBundle);
     connect(m_panel, &DashboardPanel::historySeekRequested, this,
             &HudWindow::seekHistory);
     connect(m_panel, &DashboardPanel::silenceRequested, this,
@@ -666,6 +672,46 @@ void HudWindow::setWebhookConfig(const WebhookConfig &config) {
 void HudWindow::setExportIntervalMs(int intervalMs) {
     if (intervalMs > 0) {
         m_exportIntervalMs = intervalMs;
+    }
+}
+
+void HudWindow::saveBundle() {
+    BundleLimits limits;
+    const QJsonObject body = bundleBody(
+        m_lastSnapshot, m_events, m_exportRows, m_incidents.incidents(),
+        m_alerts.rules(), limits, QDateTime::currentMSecsSinceEpoch());
+    const QByteArray payload = bundleEncode(
+        body, QString::fromLatin1(SYSPEEK_APP_VERSION));
+
+    QString dir =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (dir.isEmpty()) {
+        dir = QDir::homePath();
+    }
+    QDir().mkpath(dir);
+    const QString path =
+        dir + QLatin1Char('/') + bundleFileName(
+            QDateTime::currentMSecsSinceEpoch());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (m_panel != nullptr) {
+            m_panel->setExportLine(
+                QStringLiteral("bundle failed - could not write %1").arg(path));
+        }
+        return;
+    }
+    file.write(payload);
+    file.close();
+    if (m_panel != nullptr) {
+        m_panel->setExportLine(QStringLiteral("bundle %1 event(s), %2 sample(s) "
+                                              "-> %3")
+                                   .arg(body.value(QStringLiteral("events"))
+                                            .toArray()
+                                            .size())
+                                   .arg(body.value(QStringLiteral("samples"))
+                                            .toArray()
+                                            .size())
+                                   .arg(path));
     }
 }
 

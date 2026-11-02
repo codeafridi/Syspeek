@@ -178,6 +178,8 @@ signals:
     void monitorChanged(const AlertRule &rule);
     void monitorsResetRequested();
     void historyExportRequested(const QString &format);
+    // Write a shareable investigation bundle (events + samples + state).
+    void bundleRequested();
     void historySeekRequested(int index);
     void silenceRequested(const QString &monitorId, int minutes);
     void silenceExpireRequested(const QString &monitorId);

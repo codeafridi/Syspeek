@@ -22,6 +22,7 @@
 #include "AppLog.h"
 #include "ProbeRun.h"
 #include "ExportRun.h"
+#include "BundleRun.h"
 #include "CloudPricing.h"
 #include "DashboardPanel.h"
 #include "TlsSource.h"
@@ -266,7 +267,7 @@ QString settingsAutostartLine() {
 QString settingsVerbsLine() {
 #if defined(Q_OS_WIN)
     return QStringLiteral("syspeek start|stop|restart|status|disable"
-                          "|uninstall|logs|--dump|--probe|--record");
+                          "|uninstall|logs|bundle|--dump|--probe|--record");
 #elif defined(Q_OS_MACOS)
     return QStringLiteral("install_macos.sh run|start|stop|restart|status"
                           "|enable|disable|update|uninstall|logs");
@@ -498,6 +499,11 @@ int main(int argc, char *argv[]) {
             const QByteArray report = dumpReportJson().toUtf8();
             std::fwrite(report.constData(), 1, report.size(), stdout);
             return 0;
+        }
+        if (arg == QByteArrayLiteral("--bundle")
+            || arg == QByteArrayLiteral("bundle")
+            || arg.startsWith(QByteArrayLiteral("--inspect="))) {
+            return bundleRun(argc, argv);
         }
         if (arg.startsWith(QByteArrayLiteral("--probe"))) {
             return probeRun(argc, argv);

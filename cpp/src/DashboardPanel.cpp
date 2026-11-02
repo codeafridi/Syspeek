@@ -3468,6 +3468,28 @@ QWidget *DashboardPanel::buildSettingsView() {
     exportRow->addWidget(exportJson);
     diagLayout->addLayout(exportRow);
 
+    // A bundle is the thing you hand somebody: the events, the samples around
+    // them and this machine's state in one file. Local, and nothing is sent.
+    auto *bundleRow = new QHBoxLayout();
+    bundleRow->setSpacing(8);
+    auto *bundleWhat = new QLabel(
+        QStringLiteral("save an investigation bundle to share"), diagCard);
+    bundleWhat->setObjectName(QStringLiteral("ddSettingsLabel"));
+    bundleWhat->setFont(monoFont(10));
+    bundleWhat->setMinimumWidth(1);
+    auto *saveBundle = new QPushButton(QStringLiteral("SAVE BUNDLE"), diagCard);
+    saveBundle->setObjectName(QStringLiteral("ddSaveBundle"));
+    saveBundle->setCursor(Qt::PointingHandCursor);
+    saveBundle->setFocusPolicy(Qt::NoFocus);
+    saveBundle->setToolTip(QStringLiteral(
+        "one file: the event stream, the samples around it, host and focused "
+        "app state, and the monitors that were armed"));
+    connect(saveBundle, &QPushButton::clicked, this,
+            &DashboardPanel::bundleRequested);
+    bundleRow->addWidget(bundleWhat, 1);
+    bundleRow->addWidget(saveBundle);
+    diagLayout->addLayout(bundleRow);
+
     auto *reportRow = new QHBoxLayout();
     reportRow->setSpacing(8);
     auto *reportWhat = new QLabel(
