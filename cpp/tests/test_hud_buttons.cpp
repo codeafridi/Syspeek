@@ -383,7 +383,7 @@ int main(int argc, char *argv[]) {
               && (perProcDisk
                       ? procDiskNote->text().contains(QStringLiteral("block i/o"))
                       : procDiskNote->text().contains(
-                            QStringLiteral("not supported on this OS"))),
+                            QStringLiteral("per-process block i/o is Linux-only"))),
           "panel states the block i/o attribution surface per OS");
     auto *diskTopNote = hud.findChild<QLabel *>(QStringLiteral("ddDiskTopNote"));
     auto *diskTop = hud.findChild<QLabel *>(QStringLiteral("ddDiskTop"));
@@ -401,7 +401,7 @@ int main(int argc, char *argv[]) {
     } else {
         check(diskTopNote != nullptr
                   && diskTopNote->text().contains(
-                      QStringLiteral("not supported on this OS"))
+                      QStringLiteral("no per-process block i/o on"))
                   && diskTop != nullptr
                   && diskTop->text() == QStringLiteral("--"),
               "panel gates the top disk card on this OS");
@@ -461,7 +461,7 @@ int main(int argc, char *argv[]) {
                       && gpuTable->topLevelItemCount() == 0
                       && gpuSummary != nullptr
                       && gpuSummary->text().contains(
-                             QStringLiteral("not supported on this OS")),
+                             QStringLiteral("no GPU counter found on")),
                   "panel gates the gpu page on unsupported OSes");
         }
     }
@@ -1207,7 +1207,7 @@ int main(int argc, char *argv[]) {
                       ? focusDetail->text().contains(
                             QStringLiteral("net tcp  2 KB/s down / 512 B/s up"))
                       : focusDetail->text().contains(
-                            QStringLiteral("net tcp  not supported on this OS"))),
+                            QStringLiteral("net tcp  per-process sockets"))),
           "panel focus detail carries the app tcp rate");
     auto *openFiles = hud.findChild<QLabel *>(QStringLiteral("ddOpenFiles"));
     check(openFiles != nullptr
@@ -1254,15 +1254,15 @@ int main(int argc, char *argv[]) {
     } else {
         check(netNote != nullptr
                   && netNote->text().contains(
-                      QStringLiteral("not supported on this OS")),
+                      QStringLiteral("per-process sockets are Linux-only")),
               "panel gates the net columns on this OS");
         check(talkers != nullptr
                   && talkers->text().contains(
-                      QStringLiteral("not supported on this OS")),
+                      QStringLiteral("per-process socket accounting is Linux-only")),
               "panel talker card is gated instead of empty");
         check(talkerSummary != nullptr
                   && talkerSummary->text().contains(
-                      QStringLiteral("not supported on this OS")),
+                      QStringLiteral("per-process socket accounting is Linux-only")),
               "panel talker summary is gated instead of empty");
     }
 

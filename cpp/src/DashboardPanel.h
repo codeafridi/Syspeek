@@ -230,7 +230,7 @@ private:
     void copySettingCommand();
     void copyDiagnosticsReport();
 
-    QString unsupportedOsText() const;
+    QString unsupportedOsText(const QString &surface = QString()) const;
 
     bool m_osTcpCounters = true;
     bool m_osCgroups = true;

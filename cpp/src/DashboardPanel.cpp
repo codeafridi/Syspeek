@@ -250,8 +250,105 @@ QWidget *makeBanner(const QString &title, const QString &color,
 
 } // namespace
 
-QString DashboardPanel::unsupportedOsText() const {
-    return QStringLiteral("not supported on this OS (%1)").arg(m_osName);
+QString DashboardPanel::unsupportedOsText(const QString &surface) const {
+    // A surface this OS does not expose is a fact with a cause and, usually, a
+    // switch - never a defect to apologise for. Each line says what the reader
+    // still has, then the one thing that would lift the gate. "Not supported
+    // on this OS" is true and useless; it also reads as an unfinished product
+    // to anyone evaluating it.
+    if (surface == QLatin1String("tcp")) {
+        return QStringLiteral(
+                   "%1 keeps per-protocol TCP counters behind root - run "
+                   "`sudo syspeek` for retransmits and resets")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("talkers")) {
+        return QStringLiteral(
+                   "per-process socket accounting is Linux-only - the totals "
+                   "on this page are still real");
+    }
+    if (surface == QLatin1String("processNet")) {
+        return QStringLiteral(
+                   "per-process sockets are Linux-only - the interface totals "
+                   "above still show this machine's real traffic");
+    }
+    if (surface == QLatin1String("processDisk")) {
+        return QStringLiteral(
+                   "per-process block i/o is Linux-only - the device totals are "
+                   "on the Disks page");
+    }
+    if (surface == QLatin1String("diskTop")) {
+        return QStringLiteral(
+                   "no per-process block i/o on %1 - the device totals are on "
+                   "the Disks page")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("cgroup")) {
+        return QStringLiteral(
+                   "no cgroups on %1 - limits, OOM counts and pid caps are a "
+                   "Linux container surface")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("psi")) {
+        return QStringLiteral(
+                   "no pressure stall information on %1 - PSI is a Linux kernel "
+                   "feature; device utilisation above is still real")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("security")) {
+        return QStringLiteral(
+                   "no namespaces on %1 - the exposure grade reads Linux "
+                   "sandbox state, so it has nothing to score here")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("kernel")) {
+        return QStringLiteral(
+                   "kernel limits are a Linux /proc surface - fd table, "
+                   "scheduler and overcommit live there");
+    }
+    if (surface == QLatin1String("sbom")) {
+        return QStringLiteral(
+                   "no package database on %1 - loaded libraries still resolve "
+                   "under Dependencies")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("journal")) {
+        return QStringLiteral(
+                   "no journald on %1 - Syspeek reads the OS log store instead, "
+                   "so the cards below still fill")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("sensors")) {
+        return QStringLiteral(
+                   "no hwmon on %1 - temperatures, fans and power come from the "
+                   "platform's own sensors, which this machine does not publish")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("gpu")) {
+        return QStringLiteral(
+                   "no GPU counter found on %1 - install the vendor tool for "
+                   "device utilisation and VRAM")
+            .arg(m_osName);
+    }
+    if (surface == QLatin1String("gpuProcess")) {
+        return QStringLiteral(
+                   "per-process GPU needs a driver counter - the device totals "
+                   "above are still real");
+    }
+    if (surface == QLatin1String("actions")) {
+        return QStringLiteral(
+                   "this OS allows terminate only - renice, io priority, oom "
+                   "score and pause are Linux-only");
+    }
+    if (surface == QLatin1String("fim")) {
+        return QStringLiteral(
+                   "no paths to watch yet - set [fim] paths= to the directories "
+                   "that matter and changes land here");
+    }
+    return QStringLiteral(
+               "%1 does not publish this surface - the rest of the page is "
+               "still live")
+        .arg(m_osName);
 }
 
 DashboardPanel::DashboardPanel(QWidget *parent)
@@ -1732,7 +1829,7 @@ QWidget *DashboardPanel::buildProcessesView() {
                                actionBox, view));
 
     if (!m_osProcessSignals) {
-        m_procActionsNote->setText(unsupportedOsText());
+        m_procActionsNote->setText(unsupportedOsText(QStringLiteral("actions")));
     } else {
         QStringList missing;
         if (!m_osProcessIonice) {
@@ -5824,7 +5921,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     if (m_procNetNote != nullptr) {
         if (!m_osProcessNet) {
             m_procNetNote->setText(
-                QStringLiteral("net / ports: %1").arg(unsupportedOsText()));
+                unsupportedOsText(QStringLiteral("processNet")));
         } else if (snapshot.processNetWarming) {
             m_procNetNote->setText(
                 QStringLiteral("net / ports: warming up (tcp only)"));
@@ -5839,7 +5936,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     if (m_procDiskNote != nullptr) {
         if (!m_osProcessDisk) {
             m_procDiskNote->setText(
-                QStringLiteral("disk: %1").arg(unsupportedOsText()));
+                unsupportedOsText(QStringLiteral("processDisk")));
         } else if (snapshot.processes.isEmpty()) {
             m_procDiskNote->setText(
                 QStringLiteral("disk: no focused process group"));
@@ -5863,8 +5960,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     if (m_diskTopNote != nullptr && m_diskTop != nullptr) {
         if (!m_osProcessDiskScan) {
             m_diskTopNote->setText(
-                QStringLiteral("block i/o per process: %1")
-                    .arg(unsupportedOsText()));
+                unsupportedOsText(QStringLiteral("diskTop")));
             m_diskTop->setText(QStringLiteral("--"));
         } else {
             m_diskTopNote->setText(processDiskSummaryText(
@@ -5879,14 +5975,14 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_gpuTable->clear();
         if (!m_osGpu) {
             m_gpuSummary->setText(
-                QStringLiteral("gpu: %1").arg(unsupportedOsText()));
+                unsupportedOsText(QStringLiteral("gpu")));
             m_gpuTileUtil->setText(QStringLiteral("--"));
             m_gpuTileMem->setText(QStringLiteral("--"));
             m_gpuTileTemp->setText(QStringLiteral("--"));
             m_gpuTileProcs->setText(QStringLiteral("--"));
             m_gpuDevices->setText(QStringLiteral("--"));
             m_gpuProcessNote->setText(
-                QStringLiteral("per-process gpu: %1").arg(unsupportedOsText()));
+                unsupportedOsText(QStringLiteral("gpuProcess")));
         } else if (!gpu.ok) {
             m_gpuSummary->setText(
                 gpuSummaryText(gpu, false, false, 0));
@@ -6362,8 +6458,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
 
     if (m_talkers != nullptr) {
         if (!m_osProcessNet) {
-            m_talkerSummary->setText(unsupportedOsText());
-            m_talkers->setText(unsupportedOsText());
+            m_talkerSummary->setText(unsupportedOsText(QStringLiteral("talkers")));
+            m_talkers->setText(unsupportedOsText(QStringLiteral("talkers")));
         } else {
             m_talkerSummary->setText(processNetSummaryText(
                 snapshot.processNetTracked,
@@ -6396,8 +6492,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_tcpSummary->setText(tcpHealthSummaryText(snapshot.tcpHealth));
         m_tcp->setText(tcpHealthDetailText(snapshot.tcpHealth));
     } else if (!m_osTcpCounters) {
-        m_tcpSummary->setText(unsupportedOsText());
-        m_tcp->setText(unsupportedOsText());
+        m_tcpSummary->setText(unsupportedOsText(QStringLiteral("tcp")));
+        m_tcp->setText(unsupportedOsText(QStringLiteral("tcp")));
     } else {
         m_tcpSummary->setText(QStringLiteral("warming up"));
         m_tcp->setText(QStringLiteral("--"));
@@ -6445,7 +6541,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_dockTileCgMem->setText(
             formatMemoryKb(snapshot.cgroupMemUsage / 1024));
     } else if (!m_osCgroups) {
-        m_cgroup->setText(unsupportedOsText());
+        m_cgroup->setText(unsupportedOsText(QStringLiteral("cgroup")));
         m_dockTileCgMem->setText(QStringLiteral("n/a"));
     } else {
         m_cgroup->setText(QStringLiteral("no cgroup stats"));
@@ -6556,7 +6652,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                 .arg(snapshot.ioPressure.fullAvg60, 0, 'f', 2)
                 .arg(snapshot.ioPressure.fullAvg300, 0, 'f', 2));
     } else if (!m_osPsi) {
-        m_diskPressure->setText(unsupportedOsText());
+        m_diskPressure->setText(unsupportedOsText(QStringLiteral("psi")));
     } else {
         m_diskPressure->setText(QStringLiteral("not available"));
     }
@@ -6625,7 +6721,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
                                    snapshot.hostStealPercent, 'f', 1));
             m_kernel->setText(kernelText);
         } else {
-            m_kernel->setText(unsupportedOsText());
+            m_kernel->setText(unsupportedOsText(QStringLiteral("kernel")));
         }
     }
 
@@ -6643,8 +6739,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
         m_secTileFindings->setText(
             QString::number(snapshot.security.exposedCount));
     } else if (!m_osSecurity) {
-        m_securitySummary->setText(unsupportedOsText());
-        m_security->setText(unsupportedOsText());
+        m_securitySummary->setText(unsupportedOsText(QStringLiteral("security")));
+        m_security->setText(unsupportedOsText(QStringLiteral("security")));
         m_secTileExposure->setText(QStringLiteral("n/a"));
         m_secTileFindings->setText(QStringLiteral("n/a"));
     } else {
@@ -6682,7 +6778,8 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
     m_software->setText(snapshot.sbom.available
                             ? sbomDetailText(snapshot.sbom)
                             : (m_osDpkgSbom ? QStringLiteral("--")
-                                            : unsupportedOsText()));
+                                            : unsupportedOsText(
+                                                  QStringLiteral("sbom"))));
 
     updateSloPanel(snapshot.slo);
 
@@ -6697,7 +6794,7 @@ void DashboardPanel::setSnapshot(const DisplaySnapshot &snapshot) {
             .arg(formatRate(snapshot.focusIoReadPerSec))
             .arg(formatRate(snapshot.focusIoWritePerSec))
             .arg(!m_osProcessNet
-                     ? unsupportedOsText()
+                     ? unsupportedOsText(QStringLiteral("processNet"))
                      : (snapshot.focusNetRxPerSec < 0.0
                             ? QStringLiteral("--")
                             : QStringLiteral("%1 down / %2 up")
@@ -7351,11 +7448,13 @@ void DashboardPanel::setJournalSnapshot(const JournalSnapshot &snapshot) {
     m_logs->setText(snapshot.available
                         ? journalLogsText(snapshot, 40)
                         : (m_osJournal ? QStringLiteral("--")
-                                       : unsupportedOsText()));
+                                       : unsupportedOsText(
+                                             QStringLiteral("journal"))));
     m_errors->setText(snapshot.available
                           ? journalErrorGroupsText(snapshot.errorGroups)
                           : (m_osJournal ? QStringLiteral("--")
-                                         : unsupportedOsText()));
+                                         : unsupportedOsText(
+                                               QStringLiteral("journal"))));
     // Errors-page tiles (M61p): groups/total/top-group/worst severity.
     if (snapshot.available) {
         int topGroup = 0;
@@ -7745,7 +7844,7 @@ void DashboardPanel::updateSensorsPanel(const DisplaySnapshot &snapshot) {
     };
 
     if (!m_osSensors && !m_osBattery) {
-        const QString gate = QStringLiteral("sensors: %1").arg(unsupportedOsText());
+        const QString gate = unsupportedOsText(QStringLiteral("sensors"));
         m_sensorSummary->setText(gate);
         m_sensorTileHot->setText(QStringLiteral("--"));
         m_sensorTileFans->setText(QStringLiteral("--"));
@@ -7799,7 +7898,7 @@ void DashboardPanel::updateSensorsPanel(const DisplaySnapshot &snapshot) {
         m_batterySummary->setText(
             m_osBattery
                 ? QStringLiteral("battery: no battery reported (desktop or VM)")
-                : QStringLiteral("battery: %1").arg(unsupportedOsText()));
+                : unsupportedOsText(QStringLiteral("battery")));
         m_batteryDetail->setText(QStringLiteral("--"));
     } else {
         const BatteryReading &first = sensors.batteries.constFirst();
@@ -8309,8 +8408,9 @@ void DashboardPanel::setTlsSnapshot(const TlsSnapshot &snapshot) {
 
 void DashboardPanel::setFimSnapshot(const FimSnapshot &snapshot) {
     m_fimSummary->setText(m_osFim ? fimSummaryText(snapshot)
-                                  : unsupportedOsText());
-    m_fim->setText(m_osFim ? fimDetailText(snapshot) : unsupportedOsText());
+                                  : unsupportedOsText(QStringLiteral("fim")));
+    m_fim->setText(m_osFim ? fimDetailText(snapshot)
+                           : unsupportedOsText(QStringLiteral("fim")));
     // Security-page FILE CHANGES tile (M61w): drift count or n/a on
     // gated OSes.
     if (m_osFim && snapshot.available && !snapshot.baseline) {

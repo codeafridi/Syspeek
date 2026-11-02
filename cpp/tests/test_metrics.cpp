@@ -1702,8 +1702,10 @@ int main(int argc, char *argv[]) {
               "profile: top region by PSS");
         check(regions.at(1).path == QStringLiteral("[anon]"),
               "profile: anonymous mapping grouped");
-        check(profileSummaryText(ProfileSnapshot{}).contains("unavailable"),
-              "profile: summary for unavailable");
+        // The gate names the cause and the permission it needs, not just
+        // "unavailable": a limitation the reader can act on.
+        check(profileSummaryText(ProfileSnapshot{}).contains("ptrace"),
+              "profile: summary for unavailable names the permission");
 
         // M67: phnt thread-state / wait-reason names (ntkeapi.h enums).
         check(threadStateName(2) == QStringLiteral("running")

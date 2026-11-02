@@ -299,7 +299,7 @@ ProfileSnapshot ProfileSampler::sample(int pid) {
 
 QString profileSummaryText(const ProfileSnapshot &snapshot) {
     if (!snapshot.available) {
-        return QStringLiteral("profiles: unavailable");
+        return QStringLiteral("profiles: this machine does not expose per-thread CPU - it needs ptrace (Linux) or a task port (macOS), and both are permission-gated");
     }
     if (snapshot.warming) {
         return QStringLiteral("profiles: sampling…");

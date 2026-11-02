@@ -294,7 +294,9 @@ bool readSecurityInput(int pid, SecurityInput &out) {
 
 QString securitySummaryText(const SecurityPosture &posture) {
     if (!posture.available) {
-        return QStringLiteral("security: unavailable");
+        return QStringLiteral(
+            "security: no sandbox state to score on this machine - the "
+            "exposure grade reads Linux namespaces and capabilities");
     }
     return QStringLiteral("exposure %1/10 (%2)  %3 finding(s)")
         .arg(QString::number(posture.exposure, 'f', 1), posture.grade)
@@ -303,7 +305,9 @@ QString securitySummaryText(const SecurityPosture &posture) {
 
 QString securityDetailText(const SecurityPosture &posture) {
     if (!posture.available) {
-        return QStringLiteral("security: unavailable");
+        return QStringLiteral(
+            "no findings to show: this OS does not publish namespace, "
+            "capability or seccomp state");
     }
     QStringList lines;
     for (const SecurityFinding &finding : posture.findings) {

@@ -257,7 +257,10 @@ QString sensorChipText(const SensorChip &chip) {
 QString sensorsSummaryText(const SensorsSnapshot &snapshot) {
     if (!snapshot.available) {
         return snapshot.note.isEmpty()
-                   ? QStringLiteral("sensors: unavailable on this OS")
+                   ? QStringLiteral(
+                         "sensors: this machine publishes no hwmon or "
+                         "power_supply entries - a VM or a desktop board "
+                         "without Super I/O sensors reads like this")
                    : snapshot.note;
     }
     int temps = 0;
@@ -300,7 +303,9 @@ QString sensorsSummaryText(const SensorsSnapshot &snapshot) {
 QString sensorsThermalText(const SensorsSnapshot &snapshot) {
     if (!snapshot.available) {
         return snapshot.note.isEmpty()
-                   ? QStringLiteral("thermal: unavailable on this OS")
+                   ? QStringLiteral(
+                         "no thermal sensors on this machine - a VM or a "
+                         "board without a Super I/O chip reads like this")
                    : snapshot.note;
     }
     QStringList lines;
