@@ -47,7 +47,6 @@
 #include "IacStatus.h"
 #include "Theme.h"
 #include "WallpaperArt.h"
-#include "BundleStatus.h"
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
 #include "TickBudget.h"
@@ -2336,113 +2335,6 @@ int main(int argc, char *argv[]) {
                   && stylesheetColour(QStringLiteral("#101116"), 214)
                          .startsWith(QStringLiteral("rgba(")),
               "wallpaper: the surface colour becomes rgba only when it must");
-    }
-
-    // --- bundle: a shareable investigation, verified on read ---------------
-    {
-        DisplaySnapshot snap;
-        snap.hostAvailable = true;
-        snap.hostCpuPercent = 63.5;
-        snap.hostLoad1 = 2.25;
-        snap.hostMemAvailableKb = 3'200'000;
-        snap.appName = QStringLiteral("cursor");
-        snap.pid = QStringLiteral("4242");
-        snap.cpuPercent = 61.0;
-        snap.rssKb = 2'800'000;
-        snap.hostInfo.platform.hostname = QStringLiteral("box-01");
-        snap.hostInfo.platform.os = QStringLiteral("Ubuntu 24.04");
-        snap.hostInfo.platform.kernelName = QStringLiteral("Linux");
-        snap.hostInfo.platform.kernelRelease = QStringLiteral("6.8.0");
-        ProcessRow hot;
-        hot.pid = 99;
-        hot.name = QStringLiteral("worker");
-        hot.cpuPercent = 91.0;
-        hot.rssKb = 1024;
-        snap.processes = {hot};
-
-        TimelineEvent event;
-        event.atMs = 1'700'000'000'000LL;
-        event.kind = TimelineKind::Alert;
-        event.severity = TimelineSeverity::Error;
-        event.subject = QStringLiteral("monitor:app_cpu");
-        event.title = QStringLiteral("Focused app CPU high");
-        event.detail = QStringLiteral("91.0%");
-        event.tags = {QStringLiteral("severity:critical")};
-
-        ExportRow sample;
-        sample.atMs = 1'700'000'000'000LL;
-        sample.appName = QStringLiteral("cursor");
-        sample.appCpuPercent = 61.0;
-        sample.hostCpuPercent = 63.5;
-
-        Incident incident;
-        incident.id = QStringLiteral("inc-1");
-        incident.groupKey = QStringLiteral("compute");
-        incident.title = QStringLiteral("Focused app CPU high");
-        incident.severity = QStringLiteral("critical");
-        incident.status = QStringLiteral("open");
-        incident.owner = QStringLiteral("platform");
-        incident.openedAt = 1'700'000'000'000LL;
-        incident.count = 3;
-
-        const QJsonObject body = bundleBody(
-            snap, {event}, {sample}, {incident}, defaultAlertRules(),
-            BundleLimits{}, 1'700'000'060'000LL);
-        check(body.value(QStringLiteral("host"))
-                      .toObject()
-                      .value(QStringLiteral("hostname"))
-                      .toString()
-                  == QStringLiteral("box-01"),
-              "bundle: the host block carries identity");
-        check(body.value(QStringLiteral("focus"))
-                      .toObject()
-                      .value(QStringLiteral("app"))
-                      .toString()
-                  == QStringLiteral("cursor"),
-              "bundle: the focus block carries the app");
-        check(body.value(QStringLiteral("events")).toArray().size() == 1
-                  && body.value(QStringLiteral("samples")).toArray().size() == 1
-                  && body.value(QStringLiteral("incidents")).toArray().size() == 1
-                  && body.value(QStringLiteral("monitors")).toArray().size() >= 10,
-              "bundle: events, samples, incidents and monitors are all carried");
-
-        const QByteArray file = bundleEncode(body, QStringLiteral("0.11.2"));
-        QJsonObject parsed;
-        QString error;
-        check(bundleDecode(file, &parsed, &error)
-                  && parsed.value(QStringLiteral("schema")).toInt() == 1
-                  && parsed.value(QStringLiteral("version")).toString()
-                         == QStringLiteral("0.11.2"),
-              "bundle: a written bundle verifies and reports its schema");
-
-        // Tampering: any edit to the body must be refused, not silently shown.
-        QByteArray tampered = file;
-        tampered.replace("91.0%", "09.1%");
-        check(tampered != file && !bundleDecode(tampered, nullptr, &error)
-                  && error.contains(QStringLiteral("digest")),
-              "bundle: an edited body fails the digest");
-        check(!bundleDecode(QByteArrayLiteral("{\"hello\":1}"), nullptr, &error)
-                  && error.contains(QStringLiteral("not a Syspeek bundle")),
-              "bundle: another tool's JSON is refused with a reason");
-        check(!bundleDecode(QByteArrayLiteral("nope"), nullptr, &error),
-              "bundle: a truncated file is refused");
-
-        const QString summary = bundleSummaryText(parsed);
-        check(summary.contains(QStringLiteral("box-01"))
-                  && summary.contains(QStringLiteral("1 event(s)"))
-                  && summary.contains(QStringLiteral("cursor")),
-              "bundle: the summary reads without Syspeek installed");
-        const QString detail = bundleDetailText(parsed);
-        check(detail.contains(QStringLiteral("Focused app CPU high"))
-                  && detail.contains(QStringLiteral("INCIDENT")),
-              "bundle: the detail lists the incident and the event");
-
-        check(bundleFileName(1'700'000'000'000LL)
-                  == QStringLiteral("syspeek-bundle-20231114-221320.json"),
-              "bundle: the file name is a UTC timestamp");
-        check(bundleDigest(body) == bundleDigest(body)
-                  && bundleDigest(body).size() == 64,
-              "bundle: the digest is stable and full length");
     }
 
     // --- M92: billing-day normalisation + the IMDS identity fallback -------

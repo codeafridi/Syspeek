@@ -215,8 +215,6 @@ private:
     QList<ExportRow> m_exportRows;
     int m_exportIntervalMs = 1000;
     void exportHistory(const QString &format);
-    // Writes a shareable investigation bundle from the live rings.
-    void saveBundle();
     void seekHistory(int index);
     void evaluateAlerts();
     QPushButton *m_moreButton = nullptr;

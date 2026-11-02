@@ -1,7 +1,5 @@
 #include "HudWindow.h"
 #include "Config.h"
-#include <QStandardPaths>
-#include "BundleStatus.h"
 #include "DashboardPanel.h"
 #include "HistoryLog.h"
 #include "TimeseriesChart.h"
@@ -1587,40 +1585,6 @@ int main(int argc, char *argv[]) {
         check(costNamespaces->topLevelItemCount() == 0,
               "cost: the gate leaves the tables empty");
         hud.setKubeSnapshot(cost);
-    }
-
-    // --- bundle: the SAVE BUNDLE button writes a file that verifies ---------
-    {
-        auto *saveButton =
-            hud.findChild<QPushButton *>(QStringLiteral("ddSaveBundle"));
-        check(saveButton != nullptr, "bundle: the settings card offers it");
-        if (saveButton != nullptr) {
-            saveButton->click();
-        }
-        const QString dir =
-            QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-        QDir cache(dir);
-        const QStringList found = cache.entryList(
-            {QStringLiteral("syspeek-bundle-*.json")}, QDir::Files, QDir::Time);
-        check(!found.isEmpty(), "bundle: the click wrote a file");
-        if (!found.isEmpty()) {
-            QFile bundleFile(cache.filePath(found.constFirst()));
-            const bool opened = bundleFile.open(QIODevice::ReadOnly);
-            const QByteArray payload =
-                opened ? bundleFile.readAll() : QByteArray();
-            bundleFile.close();
-            QJsonObject parsed;
-            QString bundleError;
-            const bool ok =
-                opened && bundleDecode(payload, &parsed, &bundleError);
-            check(ok, "bundle: the file a click writes verifies");
-            check(ok && !parsed.value(QStringLiteral("body"))
-                              .toObject()
-                              .value(QStringLiteral("monitors"))
-                              .toArray()
-                              .isEmpty(),
-                  "bundle: it carries the armed monitors");
-        }
     }
 
     // --- appearance: accent, curated backdrop, collapsed opacity ------------
