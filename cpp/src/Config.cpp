@@ -146,6 +146,12 @@ void validate(Config &config) {
     }
 
     config.cloud.timeoutMs = clampInt(config.cloud.timeoutMs, 120, 5000);
+
+    config.fleet.pollMs = clampInt(config.fleet.pollMs, 2000, 600000);
+    config.fleet.timeoutMs = clampInt(config.fleet.timeoutMs, 200, 30000);
+    if (config.fleet.peers.size() > 64) {
+        config.fleet.peers = config.fleet.peers.mid(0, 64);
+    }
 }
 
 } // namespace
@@ -611,6 +617,33 @@ Config loadConfig(const QString &path, QString *errorMessage) {
         }
         config.metrics.token =
             settings.value(QStringLiteral("token")).toString().trimmed();
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("fleet"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.fleet.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        if (settings.contains(QStringLiteral("share"))) {
+            config.fleet.share =
+                settings.value(QStringLiteral("share")).toBool();
+        }
+        config.fleet.name =
+            settings.value(QStringLiteral("name")).toString().trimmed();
+        config.fleet.peers = readList(settings, QStringLiteral("peers"));
+        config.fleet.token =
+            settings.value(QStringLiteral("token")).toString().trimmed();
+        const int poll = settings.value(QStringLiteral("poll_ms")).toInt();
+        if (poll > 0) {
+            config.fleet.pollMs = poll;
+        }
+        const int timeout =
+            settings.value(QStringLiteral("timeout_ms")).toInt();
+        if (timeout > 0) {
+            config.fleet.timeoutMs = timeout;
+        }
     }
     settings.endGroup();
 

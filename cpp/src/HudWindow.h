@@ -44,6 +44,7 @@ class QResizeEvent;
 class QTimer;
 class DashboardPanel;
 struct SettingsInfo;
+struct FleetStatus;
 
 class HudWindow : public QWidget {
     Q_OBJECT
@@ -56,6 +57,11 @@ public:
     void setDockerSnapshot(const DockerSnapshot &snapshot);
 
     void setKubeSnapshot(const KubeSnapshot &snapshot);
+
+    // M94: peer summaries from the FleetRunner thread. The self row is added
+    // here, from the last snapshot this window rendered, so the table always
+    // lists this machine first (netdata's mirrored_hosts includes itself).
+    void setFleetSnapshot(const FleetStatus &status);
 
     void setServicesSnapshot(const ServicesSnapshot &snapshot);
 

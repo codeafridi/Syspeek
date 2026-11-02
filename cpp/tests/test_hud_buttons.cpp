@@ -8,6 +8,7 @@
 #include "platform/PlatformFactory.h"
 #include "ProcessActions.h"
 #include "CloudStatus.h"
+#include "FleetStatus.h"
 #include "TickBudget.h"
 
 #include <QApplication>
@@ -2183,12 +2184,13 @@ int main(int argc, char *argv[]) {
 
         auto *rail = hud.findChild<QListWidget *>(QStringLiteral("ddRail"));
         if (rail != nullptr) {
-            constexpr int kRailCount = 32;
+            constexpr int kRailCount = 33;
             bool allPagesReachable = rail->count() == kRailCount;
             const int settingsRow = kRailCount - 1;
             allPagesReachable = allPagesReachable
-                && rail->item(kRailCount - 3)->text() == QStringLiteral("Cost")
-                && rail->item(kRailCount - 2)->text() == QStringLiteral("Cloud")
+                && rail->item(kRailCount - 4)->text() == QStringLiteral("Cost")
+                && rail->item(kRailCount - 3)->text() == QStringLiteral("Cloud")
+                && rail->item(kRailCount - 2)->text() == QStringLiteral("Fleet")
                 && rail->item(settingsRow)->text() == QStringLiteral("Settings");
             rail->setCurrentRow(settingsRow);
             const auto *stack =
@@ -2199,17 +2201,104 @@ int main(int argc, char *argv[]) {
                 hud.findChild<QLabel *>(QStringLiteral("ddSettingsInfo"));
             allPagesReachable = allPagesReachable && software != nullptr
                 && software->text().contains(QStringLiteral("version"));
+            rail->setCurrentRow(kRailCount - 3);
+            allPagesReachable = allPagesReachable && stack != nullptr
+                && stack->currentIndex() == kRailCount - 3
+                && hud.findChild<QLabel *>(
+                       QStringLiteral("ddCloudTileProvider"))
+                       != nullptr;
             rail->setCurrentRow(kRailCount - 2);
             allPagesReachable = allPagesReachable && stack != nullptr
                 && stack->currentIndex() == kRailCount - 2
                 && hud.findChild<QLabel *>(
-                       QStringLiteral("ddCloudTileProvider"))
+                       QStringLiteral("ddFleetTilePeers"))
                        != nullptr;
             rail->setCurrentRow(0);
             check(allPagesReachable,
                   "rail switches pages and Settings view carries info");
         } else {
             check(false, "rail exists");
+        }
+
+        {
+            // M94: the Fleet page reads a peer summary. A peer that stopped
+            // answering must not print a percentage of its last memory guess,
+            // and this machine always sits first with no config to write.
+            const qint64 fleetNow = QDateTime::currentMSecsSinceEpoch();
+            FleetStatus fleet;
+            fleet.enabled = true;
+            fleet.share = true;
+            fleet.tokenConfigured = true;
+            fleet.selfName = QStringLiteral("here");
+            fleet.pollMs = 5000;
+            fleet.timeoutMs = 2000;
+            fleet.lastPollMs = fleetNow;
+            FleetPeer hot;
+            hot.name = QStringLiteral("hot-box");
+            hot.address = QStringLiteral("127.0.0.1:9107");
+            hot.url = QStringLiteral("http://127.0.0.1:9107/api/v1/snapshot");
+            hot.configured = true;
+            hot.online = true;
+            hot.everSeen = true;
+            hot.lastAttemptMs = fleetNow;
+            hot.lastSeenMs = fleetNow;
+            hot.latencyMs = 12;
+            hot.cpuPercent = 88.0;
+            hot.memTotalKb = 4000000;
+            hot.memAvailableKb = 1000000;
+            hot.load1 = 12.5;
+            hot.uptimeSec = 86400;
+            hot.version = QStringLiteral("0.11.2");
+            FleetPeer dead;
+            dead.name = QStringLiteral("dead-box");
+            dead.address = QStringLiteral("127.0.0.1:9108");
+            dead.url = QStringLiteral("http://127.0.0.1:9108/api/v1/snapshot");
+            dead.configured = true;
+            dead.error = QStringLiteral("Connection refused");
+            dead.lastAttemptMs = fleetNow;
+            // Values from the last poll that DID answer: a down peer must not
+            // render them as if they were current.
+            dead.memTotalKb = 4000000;
+            dead.memAvailableKb = 2000000;
+            fleet.peers = {hot, dead};
+            hud.setFleetSnapshot(fleet);
+
+            auto *fleetTable =
+                hud.findChild<QTreeWidget *>(QStringLiteral("ddFleetTable"));
+            auto *fleetPeers =
+                hud.findChild<QLabel *>(QStringLiteral("ddFleetTilePeers"));
+            auto *fleetDown =
+                hud.findChild<QLabel *>(QStringLiteral("ddFleetTileDown"));
+            check(fleetPeers != nullptr
+                      && fleetPeers->text() == QStringLiteral("1 / 2")
+                      && fleetDown != nullptr
+                      && fleetDown->text() == QStringLiteral("1"),
+                  "fleet tiles count the peers, never this machine");
+            check(fleetTable != nullptr && fleetTable->topLevelItemCount() == 3
+                      && fleetTable->topLevelItem(0)->text(0).startsWith(
+                          QStringLiteral("* "))
+                      && fleetTable->topLevelItem(1)->text(0)
+                             == QStringLiteral("hot-box")
+                      && fleetTable->topLevelItem(1)->text(2)
+                             == QStringLiteral("25%")
+                      && fleetTable->topLevelItem(2)->text(0)
+                             == QStringLiteral("dead-box"),
+                  "fleet table leads with this machine and lists each peer");
+            check(fleetTable->topLevelItem(2)->text(1) == QStringLiteral("--")
+                      && fleetTable->topLevelItem(2)->text(2)
+                             == QStringLiteral("--")
+                      && fleetTable->topLevelItem(2)->text(3)
+                             == QStringLiteral("--")
+                      && fleetTable->topLevelItem(2)->text(5).contains(
+                          QStringLiteral("down")),
+                  "a peer that stopped answering shows dashes, not a stale "
+                  "reading");
+            auto *fleetSummary =
+                hud.findChild<QLabel *>(QStringLiteral("ddFleetSummary"));
+            check(fleetSummary != nullptr
+                      && fleetSummary->text().contains(
+                          QStringLiteral("2 peer")),
+                  "fleet summary states what is polled");
         }
 
         SettingsInfo info;

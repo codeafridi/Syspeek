@@ -433,6 +433,87 @@ int main(int argc, char *argv[]) {
     }
 
     {
+        // M94: [fleet] - who this machine polls and who may poll it.
+        QTemporaryDir fleetDir;
+        const QString path = writeConfig(fleetDir, QByteArrayLiteral(
+            "[general]\n"
+            "interval_ms=1000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(error.isEmpty(), "fleet config -> no error");
+        check(c.fleet.enabled && c.fleet.share,
+              "fleet: sharing and polling are both on by default");
+        check(c.fleet.pollMs == 10000 && c.fleet.timeoutMs == 2000,
+              "fleet: the default cadence and budget are the documented ones");
+        check(c.fleet.peers.isEmpty() && c.fleet.token.isEmpty()
+                  && c.fleet.name.isEmpty(),
+              "fleet: no peers, no token and no name until authored");
+    }
+    {
+        QTemporaryDir fleetDir;
+        const QString path = writeConfig(fleetDir, QByteArrayLiteral(
+            "[fleet]\n"
+            "enabled=false\n"
+            "share=false\n"
+            "name=  edge-box  \n"
+            "peers=db=build-02:9107,build-03\n"
+            "token=  fleet-token  \n"
+            "poll_ms=15000\n"
+            "timeout_ms=4000\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(!c.fleet.enabled && !c.fleet.share,
+              "fleet: both switches load");
+        check(c.fleet.name == QStringLiteral("edge-box")
+                  && c.fleet.token == QStringLiteral("fleet-token"),
+              "fleet: the name and token load trimmed");
+        check(c.fleet.peers.size() == 2
+                  && c.fleet.peers.at(0) == QStringLiteral("db=build-02:9107")
+                  && c.fleet.peers.at(1) == QStringLiteral("build-03"),
+              "fleet: peers load as a list, authored names included");
+        check(c.fleet.pollMs == 15000 && c.fleet.timeoutMs == 4000,
+              "fleet: cadence and budget load");
+    }
+    {
+        QTemporaryDir fleetDir;
+        const QString path = writeConfig(fleetDir, QByteArrayLiteral(
+            "[fleet]\n"
+            "poll_ms=10\n"
+            "timeout_ms=1\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.fleet.pollMs == 2000 && c.fleet.timeoutMs == 200,
+              "fleet: too-small cadence and budget clamp to their floors");
+    }
+    {
+        QTemporaryDir fleetDir;
+        const QString path = writeConfig(fleetDir, QByteArrayLiteral(
+            "[fleet]\n"
+            "poll_ms=99999999\n"
+            "timeout_ms=999999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.fleet.pollMs == 600000 && c.fleet.timeoutMs == 30000,
+              "fleet: too-large cadence and budget clamp to their ceilings");
+    }
+    {
+        QTemporaryDir fleetDir;
+        QByteArray contents = "[fleet]\npeers=";
+        for (int i = 0; i < 70; ++i) {
+            if (i > 0) {
+                contents += ',';
+            }
+            contents += QStringLiteral("box%1").arg(i).toUtf8();
+        }
+        contents += '\n';
+        const QString path = writeConfig(fleetDir, contents);
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.fleet.peers.size() == 64,
+              "fleet: the peer list is capped at 64 entries");
+    }
+
+    {
         QTemporaryDir dir4;
         const QString path = writeConfig(dir4, QByteArrayLiteral(
             "[fim]\n"

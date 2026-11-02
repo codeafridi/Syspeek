@@ -1,5 +1,8 @@
 #include "DumpReport.h"
 
+#include "FleetSource.h"
+#include "FleetStatus.h"
+
 #include "CloudProbe.h"
 #include "CloudStatus.h"
 #include "Config.h"
@@ -1178,6 +1181,104 @@ QString dumpReportJson(int maxProcs) {
                        metricsEndpointText(endpoint).contains(
                            QStringLiteral("loopback only")));
         root.insert(QStringLiteral("metrics"), metrics);
+    }
+
+    {
+        // M94: the fleet contract. A runner with no peers still proves the
+        // maths: emit a document, read it back, refuse a newer schema, and
+        // fail a peer that is not answering - all deterministic, no network
+        // beyond one refused connect to a closed loopback port.
+        QJsonObject fleet;
+        const Config dumpConfig = loadConfig(defaultConfigPath(), nullptr);
+        fleet.insert(QStringLiteral("enabled"), dumpConfig.fleet.enabled);
+        fleet.insert(QStringLiteral("share"), dumpConfig.fleet.share);
+        fleet.insert(QStringLiteral("schema"), kFleetSchemaVersion);
+
+        DisplaySnapshot sample;
+        sample.appName = QStringLiteral("probe-app");
+        sample.pid = QStringLiteral("4242");
+        sample.cpuValid = true;
+        sample.cpuPercent = 42.5;
+        sample.rssKb = 1024;
+        sample.hostAvailable = true;
+        sample.hostCpuPercent = 17.25;
+        sample.hostMemTotalKb = 8192000;
+        sample.hostMemAvailableKb = 4096000;
+        sample.hostLoad1 = 1.5;
+        sample.sequence = 7;
+        const QByteArray document =
+            fleetSnapshotJson(sample, QStringLiteral("probe-host"),
+                              QStringLiteral("probe"), QStringLiteral("0.0.0"),
+                              QStringLiteral("linux"));
+        FleetPeer readBack;
+        QString parseError;
+        const bool parseOk = parseFleetSnapshotJson(document, &readBack,
+                                                    &parseError)
+            && readBack.schema == kFleetSchemaVersion
+            && readBack.name == QStringLiteral("probe-host")
+            && qAbs(readBack.cpuPercent - 17.25) < 0.001
+            && readBack.memAvailableKb == 4096000
+            && qAbs(readBack.load1 - 1.5) < 0.001;
+        fleet.insert(QStringLiteral("parseOk"), parseOk);
+        if (!parseOk) {
+            fleet.insert(QStringLiteral("parseError"), parseError);
+        }
+
+        QJsonObject newer = QJsonDocument::fromJson(document).object();
+        newer.insert(QStringLiteral("schema"), kFleetSchemaVersion + 1);
+        FleetPeer refused;
+        QString newerError;
+        fleet.insert(
+            QStringLiteral("refuseNewerOk"),
+            !parseFleetSnapshotJson(QJsonDocument(newer).toJson(), &refused,
+                                    &newerError)
+                && newerError.contains(QStringLiteral("update Syspeek")));
+
+        const QString normalized = fleetNormalizePeerUrl(
+            QStringLiteral("http://build-01:9107/api/v1/snapshot"));
+        const QList<FleetPeer> namedSpec =
+            parseFleetPeers({QStringLiteral("db=build-02")});
+        fleet.insert(QStringLiteral("urlOk"),
+                     normalized
+                         == QStringLiteral(
+                             "http://build-01:9107/api/v1/snapshot")
+                         && namedSpec.size() == 1
+                         && namedSpec.first().name == QStringLiteral("db")
+                         && namedSpec.first().url
+                                == QStringLiteral(
+                                    "http://build-02:9107/api/v1/snapshot"));
+
+        FleetPollOptions offlineOptions;
+        offlineOptions.enabled = true;
+        offlineOptions.token = QStringLiteral("probe-token");
+        offlineOptions.peers = {QStringLiteral("closed=127.0.0.1:1")};
+        offlineOptions.pollMs = kFleetDefaultPollMs;
+        offlineOptions.timeoutMs = 400;
+        const FleetStatus offline =
+            probeFleet(offlineOptions, QDateTime::currentMSecsSinceEpoch());
+        fleet.insert(QStringLiteral("offlineOk"),
+                     offline.peers.size() == 1
+                         && !offline.peers.first().online
+                         && !offline.peers.first().error.isEmpty()
+                         && fleetOnlineCount(offline) == 0
+                         && fleetDownCount(offline) == 1);
+
+        FleetStatus withSelf = offline;
+        FleetPeer self = fleetSelfPeer(sample, QStringLiteral("this-box"),
+                                       QDateTime::currentMSecsSinceEpoch());
+        withSelf = fleetWithSelf(withSelf, self);
+        fleet.insert(QStringLiteral("selfOk"),
+                     withSelf.peers.size() == 2 && withSelf.peers.first().isSelf
+                         && fleetOnlineCount(withSelf) == 0
+                         && fleetDownCount(withSelf) == 1);
+        fleet.insert(QStringLiteral("summaryOk"),
+                     !fleetSummaryText(withSelf,
+                                       QDateTime::currentMSecsSinceEpoch())
+                          .isEmpty()
+                         && !fleetNoteText(withSelf).isEmpty());
+        fleet.insert(QStringLiteral("peersConfigured"),
+                     parseFleetPeers(dumpConfig.fleet.peers).size());
+        root.insert(QStringLiteral("fleet"), fleet);
     }
 
     QJsonObject services;

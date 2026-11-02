@@ -1470,6 +1470,79 @@ int main(int argc, char *argv[]) {
         app.processEvents();
     };
 
+    auto driveFleet = [&app, &panel]() {
+        // M94: one machine of a four-peer fleet. The table carries every
+        // state the page can render - a healthy peer, the hottest one, a
+        // peer that stopped answering and one that answered too long ago to
+        // trust - and this box as the first row, which is not a peer.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        auto makePeer = [now](const QString &name, const QString &address,
+                              bool online, double cpu, qint64 memAvailKb,
+                              double load1, qint64 lastSeenDeltaMs) {
+            FleetPeer peer;
+            peer.name = name;
+            peer.address = address;
+            peer.url = QStringLiteral("http://%1:9107/api/v1/snapshot")
+                           .arg(address);
+            peer.configured = true;
+            peer.online = online;
+            peer.everSeen = online;
+            peer.memTotalKb = 8000000;
+            peer.memAvailableKb = online ? memAvailKb : 0;
+            peer.cpuPercent = online ? cpu : -1.0;
+            peer.load1 = online ? load1 : -1.0;
+            peer.uptimeSec = online ? 1814400 : -1;
+            peer.lastAttemptMs = now - lastSeenDeltaMs;
+            peer.lastSeenMs = online ? now - lastSeenDeltaMs : -1;
+            peer.latencyMs = online ? 3 : -1;
+            peer.schema = kFleetSchemaVersion;
+            if (!online) {
+                peer.error = QStringLiteral("Connection refused");
+            }
+            return peer;
+        };
+
+        FleetStatus fleet;
+        fleet.enabled = true;
+        fleet.share = true;
+        fleet.pollMs = 10000;
+        fleet.timeoutMs = 2000;
+        fleet.shareAddress = QStringLiteral("0.0.0.0");
+        fleet.sharePort = 9107;
+        fleet.tokenConfigured = true;
+        fleet.selfName = QStringLiteral("workstation");
+        fleet.lastPollMs = now - 1200;
+        fleet.peers = {
+            makePeer(QStringLiteral("db"), QStringLiteral("build-03"), true,
+                     34.0, 4960000, 0.82, 2100),
+            makePeer(QStringLiteral("edge"), QStringLiteral("edge-01"), true,
+                     71.0, 1440000, 3.41, 4300),
+            makePeer(QStringLiteral("ci"), QStringLiteral("ci-runner-7"), false,
+                     -1.0, 0, -1.0, 6200),
+            makePeer(QStringLiteral("lab"), QStringLiteral("lab-box"), true,
+                     12.0, 6100000, 0.24, 45000),
+        };
+
+        DisplaySnapshot here = demoSnapshot(240);
+        here.sequence = 240;
+        const FleetStatus withSelf =
+            fleetWithSelf(fleet, fleetSelfPeer(here, QStringLiteral("workstation"),
+                                               now));
+        // A chart needs more than one sample: replay the same peer set with a
+        // drifting worst CPU so the panel's fleet line has a shape.
+        for (int i = 0; i < 40; ++i) {
+            FleetStatus wave = withSelf;
+            const double drift = 22.0 * std::sin(double(i) / 5.0);
+            wave.peers[2].cpuPercent = 71.0 + drift;
+            wave.peers[1].cpuPercent = 34.0 + drift * 0.4;
+            wave.lastPollMs = now - (40 - i) * 10000;
+            panel.setFleetSnapshot(wave);
+            app.processEvents();
+        }
+        panel.setFleetSnapshot(withSelf);
+        app.processEvents();
+    };
+
     panel.resize(1020, 1040);
     panel.show();
     app.processEvents();
@@ -1490,6 +1563,8 @@ int main(int argc, char *argv[]) {
     driveStatsd();
     tracePhase("drive history log");
     driveHistoryLog();
+    tracePhase("drive fleet");
+    driveFleet();
     tracePhase("grab");
     QScrollArea *grabScroll = nullptr;
     if (argc > 4

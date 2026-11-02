@@ -1,7 +1,9 @@
 #include "PrometheusStatus.h"
 
 #include "CloudStatus.h"
+#include "FleetStatus.h"
 
+#include <QDateTime>
 #include <QList>
 #include <QStringList>
 
@@ -33,7 +35,132 @@ QString labeled(const char *name, const QString &label, const QString &value,
         .arg(name, label, escapeLabel(value), num(v));
 }
 
+QString peerLabel(const FleetPeer &peer, int index) {
+    if (!peer.name.isEmpty()) {
+        return peer.name;
+    }
+    if (!peer.address.isEmpty()) {
+        return peer.address;
+    }
+    return QStringLiteral("peer%1").arg(index);
+}
+
 } // namespace
+
+QString prometheusFleetText(const FleetStatus &fleet) {
+    // Emitted only once the runner has actually polled, so a fresh scrape does
+    // not read "0 peers online" before anything was ever tried.
+    if (fleet.lastPollMs < 0 || fleet.peers.isEmpty()) {
+        return QString();
+    }
+    // One HELP/TYPE per family, then every peer's row: a text exposition that
+    // repeats a HELP line for the same name is rejected by the Prometheus
+    // parser ("second HELP line for metric name"), so this must stay grouped
+    // however many peers [fleet] peers= holds.
+    int peerTotal = 0;
+    for (const FleetPeer &peer : fleet.peers) {
+        if (!peer.isSelf) {
+            ++peerTotal;
+        }
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    QStringList labels;
+    QStringList online;
+    QStringList cpu;
+    QStringList mem;
+    QStringList load;
+    QStringList uptime;
+    QStringList age;
+    for (int i = 0; i < fleet.peers.size(); ++i) {
+        const FleetPeer &peer = fleet.peers.at(i);
+        if (peer.isSelf) {
+            continue;
+        }
+        const QString label = escapeLabel(peerLabel(peer, i));
+        labels << label;
+        online << QStringLiteral("1");
+        if (!peer.online) {
+            // A peer that is not answering publishes no last guess as if it
+            // were a reading; only its link state and its age are real.
+            online.last() = QStringLiteral("0");
+            age << (peer.lastSeenMs < 0
+                        ? QString()
+                        : QString::number(qMax<qint64>(0, now - peer.lastSeenMs)
+                                          / 1000));
+            continue;
+        }
+        cpu << (peer.cpuPercent < 0.0
+                    ? QString()
+                    : QString::number(peer.cpuPercent, 'f', 3));
+        mem << (peer.memTotalKb > 0
+                    ? QString::number(static_cast<long long>(
+                                          peer.memAvailableKb)
+                                      * 1024)
+                    : QString());
+        load << (peer.load1 < 0.0 ? QString()
+                                  : QString::number(peer.load1, 'f', 3));
+        uptime << (peer.uptimeSec < 0 ? QString()
+                                      : QString::number(peer.uptimeSec));
+        age << QString::number(qMax<qint64>(0, now - peer.lastSeenMs) / 1000);
+    }
+
+    QStringList lines;
+    lines.append(QStringLiteral(
+        "# HELP syspeek_fleet_peers_total Machines in [fleet] peers=, this "
+        "one excluded."));
+    lines.append(QStringLiteral("# TYPE syspeek_fleet_peers_total gauge"));
+    lines.append(gaugeInt("syspeek_fleet_peers_total", peerTotal));
+    lines.append(QStringLiteral(
+        "# HELP syspeek_fleet_peers_online Peers whose last poll answered "
+        "with a usable snapshot."));
+    lines.append(QStringLiteral("# TYPE syspeek_fleet_peers_online gauge"));
+    lines.append(gaugeInt("syspeek_fleet_peers_online",
+                          fleetOnlineCount(fleet)));
+
+    auto appendFamily = [&lines, &labels](const QString &name,
+                                         const QString &help,
+                                         const QString &type,
+                                         const QStringList &values) {
+        if (labels.isEmpty()) {
+            return;
+        }
+        lines.append(QStringLiteral("# HELP ") + name + QLatin1Char(' ')
+                     + help);
+        lines.append(QStringLiteral("# TYPE ") + name + QLatin1Char(' ')
+                     + type);
+        for (int i = 0; i < labels.size(); ++i) {
+            if (i >= values.size() || values.at(i).isEmpty()) {
+                continue;
+            }
+            lines.append(name + QStringLiteral("{peer=\"") + labels.at(i)
+                         + QStringLiteral("\"} ") + values.at(i));
+        }
+    };
+
+    appendFamily(QStringLiteral("syspeek_fleet_peer_online"),
+                 QStringLiteral("Whether the last poll of this peer returned "
+                                "a usable snapshot (1) or not (0)."),
+                 QStringLiteral("gauge"), online);
+    appendFamily(QStringLiteral("syspeek_fleet_peer_cpu_percent"),
+                 QStringLiteral("Host CPU busy percent as the peer reports "
+                                "it."),
+                 QStringLiteral("gauge"), cpu);
+    appendFamily(QStringLiteral("syspeek_fleet_peer_mem_available_bytes"),
+                 QStringLiteral("Peer available memory."),
+                 QStringLiteral("gauge"), mem);
+    appendFamily(QStringLiteral("syspeek_fleet_peer_load1"),
+                 QStringLiteral("Peer 1m load average."),
+                 QStringLiteral("gauge"), load);
+    appendFamily(QStringLiteral("syspeek_fleet_peer_uptime_seconds"),
+                 QStringLiteral("Peer host uptime since boot."),
+                 QStringLiteral("gauge"), uptime);
+    appendFamily(QStringLiteral("syspeek_fleet_peer_age_seconds"),
+                 QStringLiteral("Seconds since this machine last heard from "
+                                "the peer."),
+                 QStringLiteral("gauge"), age);
+    return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+}
 
 QString prometheusText(const DisplaySnapshot &s) {
     QStringList lines;

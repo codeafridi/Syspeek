@@ -24,6 +24,7 @@
 #include "TlsStatus.h"
 #include "IncidentStatus.h"
 #include "FimStatus.h"
+#include "FleetStatus.h"
 
 #include <QHash>
 #include <QSet>
@@ -142,6 +143,8 @@ public:
     void setDbmSnapshot(const DbmSnapshot &snapshot);
     void setTlsSnapshot(const TlsSnapshot &snapshot);
     void setFimSnapshot(const FimSnapshot &snapshot);
+    // M94: the peer summaries polled from the machines in [fleet] peers=.
+    void setFleetSnapshot(const FleetStatus &status);
 
     void setSettingsInfo(const SettingsInfo &info);
     void setHistoryView(const HistoryViewInfo &view);
@@ -190,6 +193,8 @@ private:
     void updateSloPanel(const SloReport &report);
     void updateSensorsPanel(const DisplaySnapshot &snapshot);
     void updateCloudPanel(const DisplaySnapshot &snapshot);
+    void updateFleetPanel();
+    void updateFleetDetail();
     QWidget *buildOverviewView();
     QWidget *buildAlertsView();
     QWidget *buildIncidentsView();
@@ -214,6 +219,7 @@ private:
     void updateTimelineDetail();
     QWidget *buildCostView();
     QWidget *buildCloudView();
+    QWidget *buildFleetView();
     QWidget *buildDisksView();
     QWidget *buildGpuView();
     QWidget *buildSensorsView();
@@ -332,6 +338,18 @@ private:
     TimeseriesChart *m_chartCloudSpend = nullptr;
     QTreeWidget *m_cloudConsumers = nullptr;
     TimeseriesChart *m_chartCloudApp = nullptr;
+    QLabel *m_fleetTilePeers = nullptr;
+    QLabel *m_fleetTileCpu = nullptr;
+    QLabel *m_fleetTileMem = nullptr;
+    QLabel *m_fleetTileDown = nullptr;
+    QLabel *m_fleetSummary = nullptr;
+    QLabel *m_fleetNote = nullptr;
+    QLabel *m_fleetDetail = nullptr;
+    QLabel *m_fleetShare = nullptr;
+    QTreeWidget *m_fleetTable = nullptr;
+    TimeseriesChart *m_chartFleet = nullptr;
+    FleetStatus m_fleet;
+    int m_fleetSelected = 0;
     QLabel *m_diskSummary = nullptr;
     QLabel *m_diskTopNote = nullptr;
     QLabel *m_diskTop = nullptr;

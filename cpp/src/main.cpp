@@ -17,11 +17,14 @@
 #include "DbmSource.h"
 #include "MetricsServer.h"
 #include "MetricsEndpoint.h"
+#include "FleetSource.h"
+#include "FleetStatus.h"
 #include "DumpReport.h"
 #include "HistoryLog.h"
 #include "AppLog.h"
 #include "ProbeRun.h"
 #include "ExportRun.h"
+#include "ServeRun.h"
 #include "CloudPricing.h"
 #include "DashboardPanel.h"
 #include "TlsSource.h"
@@ -510,6 +513,9 @@ int main(int argc, char *argv[]) {
             || arg.startsWith(QByteArrayLiteral("--cloud-prices="))) {
             return cloudPriceRun(argc, argv);
         }
+        if (arg == QByteArrayLiteral("serve")) {
+            return serveRun(argc, argv);
+        }
         if (arg == QByteArrayLiteral("logs")) {
             const int status = printAppLogTail(40) ? 0 : 2;
             if (status != 0) {
@@ -782,9 +788,13 @@ int main(int argc, char *argv[]) {
     QObject::connect(thread, &QThread::started, worker, &SamplerWorker::start);
     QObject::connect(thread, &QThread::finished, worker, &QObject::deleteLater);
 
+    // One server, two routes: /metrics for a scraper, /api/v1/snapshot for a
+    // peer. It exists when EITHER switch is on, so turning off the scrape
+    // endpoint does not silently break the fleet (and vice versa).
     auto *metricsServer =
-        config.metrics.enabled ? new MetricsServer(config.metrics, &app)
-                               : nullptr;
+        (config.metrics.enabled || config.fleet.share)
+        ? new MetricsServer(config.metrics, &app)
+        : nullptr;
     if (metricsServer != nullptr) {
         metricsServer->start();
         QObject::connect(worker, &SamplerWorker::snapshotReady, metricsServer,
@@ -794,6 +804,51 @@ int main(int argc, char *argv[]) {
         QObject::connect(&hud, &HudWindow::idleContainersChanged, metricsServer,
                          &MetricsServer::setIdleContainers);
     }
+
+    // M94: peers are polled from a thread of their own - one blocking GET per
+    // peer with its own budget, so a machine that blackholes the connection
+    // never touches this one's sampling tick.
+    qRegisterMetaType<FleetStatus>("FleetStatus");
+    const FleetSelfInfo fleetSelf = fleetSelfInfo(config.fleet.name);
+    const FleetPollOptions fleetOptions = [&] {
+        FleetPollOptions options;
+        options.enabled = config.fleet.enabled;
+        options.share = config.fleet.share;
+        options.shareAddress = metricsServer != nullptr
+            ? metricsServer->endpoint().bindAddress
+            : config.metrics.bindAddress;
+        options.sharePort = metricsServer != nullptr && metricsServer->port() > 0
+            ? int(metricsServer->port())
+            : config.metrics.port;
+        options.token = config.fleet.token.isEmpty() ? config.metrics.token
+                                                     : config.fleet.token;
+        options.selfName = fleetSelf.name;
+        options.hostname = fleetSelf.hostname;
+        options.version = fleetSelf.version;
+        options.platform = fleetSelf.platform;
+        options.peers = config.fleet.peers;
+        options.pollMs = config.fleet.pollMs;
+        options.timeoutMs = config.fleet.timeoutMs;
+        return options;
+    }();
+    if (metricsServer != nullptr) {
+        metricsServer->setFleetInfo(fleetSelf, config.fleet.share);
+    }
+    auto *fleetThread = new QThread;
+    auto *fleetRunner = new FleetRunner;
+    fleetRunner->moveToThread(fleetThread);
+    fleetRunner->setOptions(fleetOptions);
+    QObject::connect(fleetThread, &QThread::started, fleetRunner,
+                     &FleetRunner::start);
+    QObject::connect(fleetThread, &QThread::finished, fleetRunner,
+                     &QObject::deleteLater);
+    QObject::connect(fleetRunner, &FleetRunner::fleetUpdated, &hud,
+                     &HudWindow::setFleetSnapshot);
+    if (metricsServer != nullptr) {
+        QObject::connect(fleetRunner, &FleetRunner::fleetUpdated, metricsServer,
+                         &MetricsServer::setFleetStatus);
+    }
+    fleetThread->start();
 
     quint64 lastSequence = 0;
     QObject::connect(worker, &SamplerWorker::snapshotReady, &hud,
@@ -1063,6 +1118,14 @@ int main(int argc, char *argv[]) {
     kubeThread->quit();
     kubeThread->wait();
     delete kubeThread;
+
+    // A peer poll can be inside a blocking read with the full timeout budget,
+    // so the runner is asked to stop on its own thread and the wait is bounded
+    // by that same budget rather than by whatever the socket feels like.
+    QMetaObject::invokeMethod(fleetRunner, "stop", Qt::BlockingQueuedConnection);
+    fleetThread->quit();
+    fleetThread->wait();
+    delete fleetThread;
 
     thread->quit();
     thread->wait();

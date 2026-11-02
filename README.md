@@ -2,7 +2,7 @@
 
 # Syspeek
 
-### A local-first HUD that follows the app you're focused on — and a 32-view Datadog-style console for everything your kernel, containers and apps are doing.
+### A local-first HUD that follows the app you're focused on — and a 33-view Datadog-style console for everything your kernel, containers and apps are doing.
 
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?style=flat-square&logo=linux&logoColor=white)](#compatibility)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)](#install)
@@ -36,12 +36,12 @@ telemetry** — nothing leaves your machine unless you point a scraper at it.
   control, inotify/pid limits, scheduler run-queue state, CPU steal %.
 - **cgroup memory pressure** — peak memory, OOM events/kills, pid limits for
   the focused app's unit.
-- **32-view console**, in rail order — Overview, Metrics (DogStatsD), Alerts,
+- **33-view console**, in rail order — Overview, Metrics (DogStatsD), Alerts,
   Incidents, SLO, Processes, Memory, Disks, GPU, Sensors, Host, Network,
   Network Path, Containers, Kubernetes, Services, Logs, Errors, Dependencies,
   Software, Endpoints, Synthetic checks, Instrumentation, Traces (OTLP),
   Profiles, Databases (PostgreSQL), Security, History, Timeline, Cost, Cloud,
-  Settings.
+  Fleet, Settings.
 - **Alerts & incidents** — local thresholds (CPU, memory, FD-table, steal,
   failed services, journal errors) shown on the Alerts page with an incident
   timeline. No desktop popups, by design — a HUD that steals focus is worse
@@ -510,6 +510,81 @@ outbound action, its cadence, the measured cost of the last metadata sweep, and
 the guarantee that no credential is read and nothing is changed. The full
 breakdown (endpoints, headers, budgets, switches, rate-file format) is in
 [docs/cloud.md](docs/cloud.md).
+
+## Fleet — several machines, one console
+
+The Fleet page answers four questions about the other machines you run:
+how many are answering, which one is hottest, which one is closest to running
+out of memory, and which ones have stopped. Peers are polled over plain HTTP by
+a thread of their own, so a peer that blackholes the connection costs this
+machine nothing in its own sampling tick — its row goes red with the reason.
+
+Every machine runs the same binary. On a box with no desktop session (a server,
+a container, a CI runner) start the endpoints without the HUD:
+
+```sh
+syspeek serve
+```
+
+`serve` prints the two URLs it is serving and one summary line per completed
+poll, until ctrl+c. On a desktop the same surfaces are up inside the HUD.
+
+One config file, two roles:
+
+```ini
+[metrics]
+enabled = true
+bind = 0.0.0.0          ; peers must be able to reach this machine
+port = 9107
+token = one-shared-secret
+
+[fleet]
+enabled = true          ; poll the peers below
+share = true            ; answer peers asking who I am
+name = workstation      ; what the others call this machine
+peers = db=build-03:9107, edge=edge-01, ci=ci-runner-7:9107
+poll_ms = 10000
+timeout_ms = 2000
+```
+
+`peers` accepts `host`, `host:port`, a full `http://host[:port][/path]`, an
+`https://` URL, and any of those prefixed with `name=`. A bare host is
+completed to `http://host:9107/api/v1/snapshot` rather than rejected; an
+`https://` URL keeps the port its scheme implies. `[fleet] token` is optional —
+empty means "use `[metrics] token`", because one shared secret per fleet is one
+thing to rotate.
+
+Two routes, two switches, one token:
+
+- `GET /metrics` — Prometheus exposition, gated on `[metrics] enabled`.
+- `GET /api/v1/snapshot` — a bounded JSON summary of this machine, gated on
+  `[fleet] share`.
+- Both answer `401` with `WWW-Authenticate: Bearer` when the token is wrong or
+  missing. A non-loopback `bind` without a token is refused at startup (the
+  endpoint drops back to `127.0.0.1` and says so).
+
+The published summary carries the host's CPU, memory, load, disk-free, network
+rates, socket counts, GPU utilisation, hottest sensor, battery, uptime, alert
+counts and the focused app's name/CPU/RSS — **not** your process list, command
+lines, environment, open files or log lines. It also carries a `schema`
+integer: a reader refuses a peer whose schema is newer than its own and tells
+you to update Syspeek there, instead of half-understanding it.
+
+The table lists this machine first (`* workstation`), because the one box you
+cannot see from elsewhere is the one you are looking at. It is not counted as a
+peer — the tiles, the hottest/lowest rankings and the down count read the peers
+only — and it is never polled. A peer that has not answered for three poll
+intervals is marked `stale` rather than silently reporting a number that has
+stopped moving.
+
+`/metrics` gains the fleet gauges too: `syspeek_fleet_peers_total`,
+`syspeek_fleet_peers_online`, and per peer `syspeek_fleet_peer_online`,
+`_cpu_percent`, `_mem_available_bytes`, `_load1`, `_uptime_seconds`,
+`_age_seconds`. They are emitted only after the first poll, so a scrape against
+a freshly started HUD never reads `0 peers`.
+
+Nothing is sent anywhere: a peer only answers a machine you listed in `peers`,
+and the whole feature is two switches away from off.
 
 ## Advanced (optional)
 

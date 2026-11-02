@@ -93,6 +93,16 @@ struct MetricsConfig {
     QString token;
 };
 
+struct FleetConfig {
+    bool enabled = true;
+    bool share = true;
+    QString name;
+    QStringList peers;
+    QString token;
+    int pollMs = 10000;
+    int timeoutMs = 2000;
+};
+
 struct WebhookConfig {
     bool enabled = false;
     QString url;
@@ -248,6 +258,7 @@ struct Config {
     PathConfig path;
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
+    FleetConfig fleet;
     HistoryConfig history;
     TimelineConfig timeline;
     SilencesConfig silences;

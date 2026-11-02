@@ -183,6 +183,7 @@ add_library(syspeek_core STATIC
     src/MetricsExport.cpp
     src/MetricsExport.h
     src/ExportRun.cpp
+    src/ServeRun.cpp
     src/ExportRun.h
     src/ProcessDiskStatus.cpp
     src/ProcessDiskStatus.h
@@ -218,6 +219,10 @@ add_library(syspeek_core STATIC
     src/CloudSpendStatus.h
     src/CloudSpendSource.cpp
     src/CloudSpendSource.h
+    src/FleetStatus.cpp
+    src/FleetStatus.h
+    src/FleetSource.cpp
+    src/FleetSource.h
     src/OverlayStatus.cpp
     src/OverlayStatus.h
     src/KubeStatus.cpp

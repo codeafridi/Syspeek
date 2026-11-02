@@ -8,15 +8,27 @@ namespace {
 
 const char kContentType[] =
     "text/plain; version=0.0.4; charset=utf-8";
+const char kJsonType[] = "application/json";
 
-void deny(QTcpSocket *socket, const char *status) {
-    const QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + status +
-        QByteArrayLiteral(
-            "\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-            "scrape /metrics\n");
+void respond(QTcpSocket *socket, const char *status, const char *contentType,
+             const QByteArray &body, bool head) {
+    QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + status + "\r\n";
+    response += QByteArrayLiteral("Content-Type: ") + contentType + "\r\n";
+    response += QByteArrayLiteral("Content-Length: ")
+        + QByteArray::number(body.size())
+        + QByteArrayLiteral("\r\nConnection: close\r\n\r\n");
+    if (!head) {
+        response += body;
+    }
     socket->write(response);
     socket->flush();
     socket->disconnectFromHost();
+}
+
+void deny(QTcpSocket *socket, const char *status) {
+    respond(socket, status, "text/plain",
+            QByteArrayLiteral("scrape /metrics or GET /api/v1/snapshot\n"),
+            false);
 }
 
 void denyUnauthorized(QTcpSocket *socket) {
@@ -38,7 +50,20 @@ MetricsServer::MetricsServer(const MetricsConfig &config, QObject *parent)
     : QObject(parent),
       m_config(config),
       m_endpoint(resolveMetricsEndpoint(config)),
-      m_token(config.token.trimmed().toUtf8()) {}
+      m_token(config.token.trimmed().toUtf8()),
+      m_metricsEnabled(config.enabled) {}
+
+void MetricsServer::setFleetInfo(const FleetSelfInfo &info, bool share) {
+    m_fleetInfo = info;
+    m_fleetShare = share;
+    rebuildFleetBody();
+}
+
+void MetricsServer::rebuildFleetBody() {
+    m_fleetBody = fleetSnapshotJson(m_snapshot, m_fleetInfo.name,
+                                    m_fleetInfo.hostname, m_fleetInfo.version,
+                                    m_fleetInfo.platform);
+}
 
 void MetricsServer::start() {
     if (m_endpoint.port < 0 || m_endpoint.port > 65535) {
@@ -92,6 +117,12 @@ void MetricsServer::stop() {
     }
 }
 
+void MetricsServer::setFleetStatus(const FleetStatus &fleet) {
+    m_fleetStatus = fleet;
+    m_fleetReported = true;
+    m_body = prometheusText(m_snapshot).toUtf8() + prometheusFleetText(fleet).toUtf8();
+}
+
 void MetricsServer::setSnapshot(const DisplaySnapshot &snapshot) {
     // The sampler knows nothing about alerts; keep the console-pushed state
     // across a snapshot replace so a scrape never flaps to zero.
@@ -101,17 +132,29 @@ void MetricsServer::setSnapshot(const DisplaySnapshot &snapshot) {
     m_snapshot.alerts = alerts;
     m_snapshot.idleContainers = idle;
     m_body = prometheusText(m_snapshot).toUtf8();
+    if (m_fleetReported) {
+        m_body += prometheusFleetText(m_fleetStatus).toUtf8();
+    }
+    rebuildFleetBody();
 }
 
 void MetricsServer::setIdleContainers(int count) {
     m_snapshot.idleContainers = count;
     m_body = prometheusText(m_snapshot).toUtf8();
+    if (m_fleetReported) {
+        m_body += prometheusFleetText(m_fleetStatus).toUtf8();
+    }
+    rebuildFleetBody();
 }
 
 void MetricsServer::setAlertState(const AlertExposure &alerts) {
     m_snapshot.alerts = alerts;
     m_snapshot.alerts.pushed = true;
     m_body = prometheusText(m_snapshot).toUtf8();
+    if (m_fleetReported) {
+        m_body += prometheusFleetText(m_fleetStatus).toUtf8();
+    }
+    rebuildFleetBody();
 }
 
 void MetricsServer::onNewConnection() {
@@ -150,21 +193,34 @@ void MetricsServer::onReadyRead() {
         return;
     }
 
+    if (path.startsWith("/api/v1/snapshot")) {
+        if (!m_fleetShare) {
+            respond(socket, "404 Not Found", "text/plain",
+                    QByteArrayLiteral(
+                        "snapshot sharing is off ([fleet] share=false)\n"),
+                    head);
+        } else {
+            respond(socket, "200 OK", kJsonType, m_fleetBody, head);
+        }
+        m_buffers.remove(socket);
+        return;
+    }
+
     if (!path.startsWith("/metrics")) {
         deny(socket, "404 Not Found");
         m_buffers.remove(socket);
         return;
     }
 
-    QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
-    response += QByteArrayLiteral("Content-Type: ") + kContentType +
-        "\r\nContent-Length: " + QByteArray::number(m_body.size()) +
-        QByteArrayLiteral("\r\nConnection: close\r\n\r\n");
-    if (!head) {
-        response += m_body;
+    if (!m_metricsEnabled) {
+        respond(socket, "404 Not Found", "text/plain",
+                QByteArrayLiteral(
+                    "the scrape endpoint is off ([metrics] enabled=false)\n"),
+                head);
+        m_buffers.remove(socket);
+        return;
     }
-    socket->write(response);
-    socket->flush();
-    socket->disconnectFromHost();
+
+    respond(socket, "200 OK", kContentType, m_body, head);
     m_buffers.remove(socket);
 }

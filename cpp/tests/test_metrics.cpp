@@ -49,6 +49,8 @@
 #include "WallpaperArt.h"
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
+#include "FleetStatus.h"
+#include "FleetSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
 #include "ServicesSource.h"
@@ -4024,6 +4026,149 @@ int main(int argc, char *argv[]) {
         guardedServer.stop();
     }
 
+    {
+        // M94: one server, two routes. A scrape is gated on [metrics] enabled
+        // and a peer read on [fleet] share, both behind the same token - so a
+        // machine can refuse peers while still serving Prometheus, or the
+        // other way round, without opening anything unauthenticated.
+        auto ask = [](quint16 port, const QByteArray &request) {
+            QTcpSocket socket;
+            QByteArray response;
+            QElapsedTimer timer;
+            timer.start();
+            socket.connectToHost(QHostAddress::LocalHost, port);
+            while (socket.state() != QAbstractSocket::ConnectedState
+                   && timer.elapsed() < 3000) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            }
+            if (socket.state() != QAbstractSocket::ConnectedState) {
+                return response;
+            }
+            socket.write(request);
+            socket.flush();
+            while (timer.elapsed() < 3000) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                response += socket.readAll();
+                if (socket.state() == QAbstractSocket::UnconnectedState) {
+                    break;
+                }
+            }
+            response += socket.readAll();
+            return response;
+        };
+        auto bodyOf = [](const QByteArray &response) {
+            const int split = response.indexOf("\r\n\r\n");
+            return split < 0 ? QByteArray() : response.mid(split + 4);
+        };
+        const QByteArray authorizedRequest =
+            QByteArrayLiteral("GET /api/v1/snapshot HTTP/1.1\r\nHost: x\r\n"
+                              "Authorization: Bearer fleet-token\r\n\r\n");
+
+        MetricsConfig cfg;
+        cfg.port = 0;
+        cfg.token = QStringLiteral("fleet-token");
+        MetricsServer server(cfg);
+        server.start();
+        const quint16 port = server.port();
+        check(port > 0, "fleet server: the sharing endpoint binds");
+
+        DisplaySnapshot live;
+        live.appName = QStringLiteral("web");
+        live.pid = QStringLiteral("21");
+        live.hostAvailable = true;
+        live.hostCpuPercent = 44.5;
+        live.hostMemTotalKb = 4000000;
+        live.hostMemAvailableKb = 1000000;
+        server.setSnapshot(live);
+        server.setFleetInfo(fleetSelfInfo(QStringLiteral("probe-box")), true);
+
+        const QByteArray unauthenticated = ask(
+            port,
+            QByteArrayLiteral("GET /api/v1/snapshot HTTP/1.1\r\nHost: x\r\n\r\n"));
+        check(unauthenticated.startsWith(
+                  QByteArrayLiteral("HTTP/1.1 401 Unauthorized")),
+              "fleet server: a peer read without the token gets 401");
+
+        const QByteArray snapshot = ask(port, authorizedRequest);
+        check(snapshot.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK")),
+              "fleet server: the token serves the peer snapshot");
+        FleetPeer seen;
+        QString seenError;
+        check(parseFleetSnapshotJson(bodyOf(snapshot), &seen, &seenError)
+                  && seen.schema == kFleetSchemaVersion
+                  && seen.name == QStringLiteral("probe-box")
+                  && qAbs(seen.cpuPercent - 44.5) < 0.001
+                  && seen.memAvailableKb == 1000000,
+              "fleet server: what a peer reads back is this machine's summary");
+        check(!bodyOf(snapshot).contains("cmdline")
+                  && !bodyOf(snapshot).contains("environ"),
+              "fleet server: the served body carries no process detail");
+
+        FleetStatus polled;
+        polled.pollMs = 10000;
+        polled.lastPollMs = 1;
+        FleetPeer peer;
+        peer.name = QStringLiteral("db");
+        peer.online = true;
+        peer.everSeen = true;
+        peer.lastSeenMs = 1;
+        peer.cpuPercent = 12.0;
+        polled.peers = {peer};
+        server.setFleetStatus(polled);
+        const QByteArray scrape = ask(
+            port,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n"
+                              "Authorization: Bearer fleet-token\r\n\r\n"));
+        check(scrape.contains(QByteArrayLiteral("syspeek_fleet_peers_total 1"))
+                  && scrape.contains(
+                      QByteArrayLiteral("syspeek_fleet_peer_online{peer=\"db\"} 1")),
+              "fleet server: a scrape carries the peer gauges too");
+        server.stop();
+
+        cfg.port = 0;
+        MetricsServer closedServer(cfg);
+        closedServer.start();
+        const quint16 closedPort = closedServer.port();
+        closedServer.setSnapshot(live);
+        closedServer.setFleetInfo(fleetSelfInfo(QString()), false);
+        const QByteArray refusedPeer = ask(closedPort, authorizedRequest);
+        check(refusedPeer.startsWith(
+                  QByteArrayLiteral("HTTP/1.1 404 Not Found"))
+                  && refusedPeer.contains(QByteArrayLiteral(
+                         "[fleet] share=false")),
+              "fleet server: share=false refuses a peer and names the switch");
+        const QByteArray stillScrapes = ask(
+            closedPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n"
+                              "Authorization: Bearer fleet-token\r\n\r\n"));
+        check(stillScrapes.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
+                  && stillScrapes.contains(
+                      QByteArrayLiteral("syspeek_host_cpu_percent 44.500")),
+              "fleet server: refusing peers leaves the scrape working");
+        closedServer.stop();
+
+        cfg.port = 0;
+        cfg.enabled = false;
+        MetricsServer scrapeOff(cfg);
+        scrapeOff.start();
+        const quint16 offPort = scrapeOff.port();
+        scrapeOff.setSnapshot(live);
+        scrapeOff.setFleetInfo(fleetSelfInfo(QString()), true);
+        const QByteArray offScrape = ask(
+            offPort,
+            QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n"
+                              "Authorization: Bearer fleet-token\r\n\r\n"));
+        check(offScrape.startsWith(QByteArrayLiteral("HTTP/1.1 404 Not Found"))
+                  && offScrape.contains(
+                      QByteArrayLiteral("[metrics] enabled=false")),
+              "fleet server: metrics.enabled=false refuses a scrape and names "
+              "the switch");
+        check(ask(offPort, authorizedRequest)
+                  .startsWith(QByteArrayLiteral("HTTP/1.1 200 OK")),
+              "fleet server: a closed scrape leaves the peer route working");
+        scrapeOff.stop();
+    }
+
     // ---- M78 process verbs (pure model) ----
     {
         check(processSignalNumber(ProcessSignal::Term) == 15
@@ -6534,6 +6679,247 @@ int main(int argc, char *argv[]) {
         check(timelineNoEventText(false)
                   .contains(QStringLiteral("disabled in [timeline]")),
               "timeline: the empty-state text honours the switch");
+    }
+
+    {
+        // M94: the fleet contract. The peer list, the payload it publishes and
+        // the payload a peer reads back are all pure, so they are proven here
+        // with no socket in sight; the live loopback server suite below covers
+        // the transport.
+        QString urlError;
+        check(fleetNormalizePeerUrl(QStringLiteral("build-01"), &urlError)
+                  == QStringLiteral("http://build-01:9107/api/v1/snapshot")
+                  && urlError.isEmpty(),
+              "fleet: a bare host is completed, not rejected");
+        check(fleetNormalizePeerUrl(QStringLiteral("db.internal:9200"))
+                  == QStringLiteral("http://db.internal:9200/api/v1/snapshot"),
+              "fleet: host:port keeps its port");
+        check(fleetNormalizePeerUrl(
+                  QStringLiteral("https://edge.example/mon/api/v1/snapshot"))
+                  == QStringLiteral(
+                      "https://edge.example/mon/api/v1/snapshot"),
+              "fleet: a full URL is used as authored");
+        check(fleetNormalizePeerUrl(QStringLiteral("http://[::1]:9107"))
+                  == QStringLiteral("http://[::1]:9107/api/v1/snapshot"),
+              "fleet: an IPv6 literal keeps its brackets");
+        check(fleetNormalizePeerUrl(QStringLiteral("")).isEmpty()
+                  && fleetNormalizePeerUrl(QStringLiteral("https://")).isEmpty(),
+              "fleet: an empty or scheme-only entry is refused, not guessed");
+
+        const QList<FleetPeer> named = parseFleetPeers(
+            {QStringLiteral("db=build-02"), QStringLiteral("build-03:9109")});
+        check(named.size() == 2
+                  && named.at(0).name == QStringLiteral("db")
+                  && named.at(0).nameAuthored
+                  && named.at(0).url
+                         == QStringLiteral("http://build-02:9107/api/v1/snapshot")
+                  && named.at(1).name == QStringLiteral("build-03")
+                  && !named.at(1).nameAuthored
+                  && named.at(1).url
+                         == QStringLiteral(
+                             "http://build-03:9109/api/v1/snapshot"),
+              "fleet: name=<host> names a peer, a bare entry keeps its own");
+
+        DisplaySnapshot sample;
+        sample.appName = QStringLiteral("web");
+        sample.pid = QStringLiteral("77");
+        sample.cpuValid = true;
+        sample.cpuPercent = 12.5;
+        sample.rssKb = 2048;
+        sample.hostAvailable = true;
+        sample.hostCpuPercent = 31.5;
+        sample.hostMemTotalKb = 8000000;
+        sample.hostMemAvailableKb = 2000000;
+        sample.hostLoad1 = 2.25;
+        sample.sequence = 11;
+        const QByteArray document = fleetSnapshotJson(
+            sample, QStringLiteral("box"), QStringLiteral("box.local"),
+            QStringLiteral("9.9.9"), QStringLiteral("linux"));
+        FleetPeer readBack;
+        QString parseError;
+        check(parseFleetSnapshotJson(document, &readBack, &parseError)
+                  && readBack.schema == kFleetSchemaVersion
+                  && readBack.name == QStringLiteral("box")
+                  && readBack.hostname == QStringLiteral("box.local")
+                  && readBack.version == QStringLiteral("9.9.9")
+                  && readBack.platform == QStringLiteral("linux")
+                  && readBack.sequence == 11
+                  && qAbs(readBack.cpuPercent - 31.5) < 0.001
+                  && qAbs(readBack.load1 - 2.25) < 0.001
+                  && readBack.memAvailableKb == 2000000
+                  && readBack.appName == QStringLiteral("web")
+                  && qAbs(readBack.appCpu - 12.5) < 0.001,
+              "fleet: a snapshot survives the round trip field for field");
+
+        {
+            // The payload is a summary on purpose: no process list, no command
+            // lines, no environment. Anything beyond the accounted fields is a
+            // leak, so the document is inspectable as text.
+            const QString text = QString::fromUtf8(document);
+            // `processes` is a count, not a list: the payload says how many,
+            // never which, so no command line or environment can leave the
+            // machine through a peer poll.
+            check(!text.contains(QStringLiteral("cmdline"))
+                      && !text.contains(QStringLiteral("environ"))
+                      && !text.contains(QStringLiteral("\"processes\":["))
+                      && QJsonDocument::fromJson(document)
+                             .object()
+                             .value(QStringLiteral("processes"))
+                             .isDouble(),
+                  "fleet: the published payload carries no process detail");
+        }
+
+        QJsonObject newer = QJsonDocument::fromJson(document).object();
+        newer.insert(QStringLiteral("schema"), kFleetSchemaVersion + 1);
+        FleetPeer refused;
+        QString newerError;
+        check(!parseFleetSnapshotJson(QJsonDocument(newer).toJson(), &refused,
+                                      &newerError)
+                  && newerError.contains(QStringLiteral("update Syspeek")),
+              "fleet: a newer schema is refused with the fix, not half-parsed");
+        FleetPeer garbage;
+        QString garbageError;
+        check(!parseFleetSnapshotJson(QByteArrayLiteral("<html>nope</html>"),
+                                      &garbage, &garbageError)
+                  && !garbageError.isEmpty(),
+              "fleet: a non-JSON answer is refused with a reason");
+
+        DisplaySnapshot empty;
+        const QByteArray emptyDoc = fleetSnapshotJson(
+            empty, QStringLiteral("idle"), QString(), QString(), QString());
+        FleetPeer emptyPeer;
+        check(parseFleetSnapshotJson(emptyDoc, &emptyPeer)
+                  && emptyPeer.cpuPercent < 0.0
+                  && emptyPeer.memTotalKb == 0
+                  && emptyPeer.load1 < 0.0,
+              "fleet: a warming peer reports -- rather than a fabricated zero");
+
+        FleetStatus status;
+        status.enabled = true;
+        status.pollMs = 10000;
+        status.lastPollMs = 100000;
+        FleetPeer down;
+        down.name = QStringLiteral("down-box");
+        down.address = QStringLiteral("http://down-box:9107/...");
+        down.online = false;
+        down.lastAttemptMs = 100000;
+        FleetPeer hot;
+        hot.name = QStringLiteral("hot-box");
+        hot.online = true;
+        hot.everSeen = true;
+        hot.lastSeenMs = 95000;
+        hot.cpuPercent = 88.0;
+        hot.memTotalKb = 4000000;
+        hot.memAvailableKb = 400000;
+        FleetPeer tight;
+        tight.name = QStringLiteral("tight-box");
+        tight.online = true;
+        tight.everSeen = true;
+        tight.lastSeenMs = 60000;
+        tight.cpuPercent = 20.0;
+        tight.memTotalKb = 4000000;
+        tight.memAvailableKb = 200000;
+        status.peers = {down, hot, tight};
+        check(fleetOnlineCount(status) == 2 && fleetDownCount(status) == 1,
+              "fleet: online and down counts read the link state");
+        check(qAbs(fleetWorstCpu(status) - 88.0) < 0.001
+                  && qAbs(fleetLowestMemPct(status) - 5.0) < 0.001,
+              "fleet: worst CPU and lowest memory come from the peers alone");
+        check(fleetAttentionIndex(status) == 0,
+              "fleet: a down peer outranks a busy one");
+        status.peers.removeFirst();
+        check(fleetAttentionIndex(status) == 0
+                  && qAbs(fleetWorstCpu(status) - 88.0) < 0.001,
+              "fleet: with everyone up, the hottest peer gets attention");
+        check(fleetPeerStale(status.peers.at(1), 100000, 10000)
+                  && !fleetPeerStale(status.peers.at(0), 100000, 10000)
+                  && fleetPeerAgeMs(status.peers.at(0), 100000) == 5000,
+              "fleet: staleness is measured against the poll cadence");
+        check(fleetPeerAgeText(status.peers.at(0), 100000)
+                  == QStringLiteral("5s"),
+              "fleet: the age column is human, not milliseconds");
+
+        // This machine is listed first and never counted or ranked: it is not
+        // a peer, and the tiles must not report a fleet of one as "1 online".
+        FleetPeer self = fleetSelfPeer(sample, QStringLiteral("here"), 100000);
+        FleetStatus withSelf = fleetWithSelf(status, self);
+        check(withSelf.peers.size() == 3 && withSelf.peers.first().isSelf
+                  && !withSelf.peers.first().configured
+                  && withSelf.peers.first().online
+                  && fleetOnlineCount(withSelf) == 2
+                  && fleetDownCount(withSelf) == 0
+                  && qAbs(fleetWorstCpu(withSelf) - 88.0) < 0.001,
+              "fleet: this machine is listed first and excluded from counts");
+
+        const QString summary = fleetSummaryText(withSelf, 100000);
+        check(summary.contains(QStringLiteral("2 peer(s)"))
+                  && summary.contains(QStringLiteral("2 online"))
+                  && summary.contains(QStringLiteral("0 down"))
+                  && summary.contains(QStringLiteral("worst cpu 88% on hot-box")),
+              "fleet: the summary counts peers and names the hottest");
+        check(!summary.contains(QStringLiteral("%%")),
+              "fleet: the summary has no doubled percent sign");
+        check(fleetPeerStateText(self, 100000, 10000)
+                  == QStringLiteral("this machine")
+                  && fleetPeerDetailText(self, 100000, 10000)
+                         .contains(QStringLiteral("serves /api/v1/snapshot")),
+              "fleet: the self row says what it is instead of a link state");
+        check(fleetNoPeersText().contains(QStringLiteral("[fleet] peers"))
+                  && fleetTokenMissingText().contains(
+                      QStringLiteral("[metrics] token")),
+              "fleet: the empty and token-less states name the switch");
+        FleetStatus shared = withSelf;
+        shared.tokenConfigured = true;
+        check(fleetNoteText(shared).startsWith(QStringLiteral("2 peer(s)"))
+                  && fleetNoteText(shared).contains(
+                      QStringLiteral("never your process list"))
+                  && fleetNoteText(withSelf) == fleetTokenMissingText(),
+              "fleet: the note counts the peers, not this machine");
+        check(fleetNoteText(FleetStatus{}).contains(
+                  QStringLiteral("[fleet] enabled=false")),
+              "fleet: polling off names the switch and what still works");
+        FleetStatus noPeersYet;
+        noPeersYet.enabled = true;
+        noPeersYet.tokenConfigured = true;
+        check(fleetNoteText(noPeersYet).contains(
+                  QStringLiteral("[fleet] peers=")),
+              "fleet: an empty peer list says where to add one");
+
+        // Prometheus: nothing is emitted before the first poll, so a scrape
+        // against a fresh sampler does not read "0 peers".
+        FleetStatus unpolled;
+        unpolled.peers = status.peers;
+        check(prometheusFleetText(unpolled).isEmpty(),
+              "fleet: no gauges before the first poll");
+        const QString text = prometheusFleetText(withSelf);
+        check(text.contains(QStringLiteral("syspeek_fleet_peers_total 2"))
+                  && text.contains(
+                      QStringLiteral("syspeek_fleet_peers_online 2"))
+                  && text.contains(
+                      QStringLiteral("syspeek_fleet_peer_cpu_percent{peer=\"hot-box\"} 88.000"))
+                  && text.contains(
+                      QStringLiteral("syspeek_fleet_peer_mem_available_bytes{peer=\"tight-box\"} 204800000"))
+                  && text.contains(
+                      QStringLiteral("syspeek_fleet_peer_online{peer=\"tight-box\"} 1"))
+                  && !text.contains(QStringLiteral("peer=\"here\"")),
+              "fleet: the scrape carries per-peer gauges and skips this box");
+        // Two peers of the same family must not repeat the HELP/TYPE block:
+        // the Prometheus text parser rejects a second HELP for one name, which
+        // would break the whole scrape for anyone with more than one peer.
+        check(text.count(QStringLiteral("# HELP syspeek_fleet_peer_cpu_percent"))
+                      == 1
+                  && text.count(
+                         QStringLiteral("# TYPE syspeek_fleet_peer_cpu_percent"))
+                      == 1
+                  && text.count(QStringLiteral("# HELP syspeek_fleet_peer_online"))
+                      == 1
+                  && text.count(
+                         QStringLiteral("syspeek_fleet_peer_online{peer=\"hot-box\"} 1"))
+                      == 1
+                  && text.count(
+                         QStringLiteral("syspeek_fleet_peer_cpu_percent{peer=\"hot-box\"}"))
+                      == 1,
+              "fleet: one HELP/TYPE block per family, however many peers");
     }
 
     std::printf("%d failure(s)\n", failures);

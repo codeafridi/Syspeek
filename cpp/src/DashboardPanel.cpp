@@ -478,6 +478,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
                       QStringLiteral("History"), QStringLiteral("Timeline"),
                       QStringLiteral("Cost"),
                       QStringLiteral("Cloud"),
+                      QStringLiteral("Fleet"),
                       QStringLiteral("Settings")});
     m_rail->setCurrentRow(0);
     for (int i = 0; i < m_rail->count(); ++i) {
@@ -519,6 +520,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     m_views->addWidget(buildTimelineView());
     m_views->addWidget(buildCostView());
     m_views->addWidget(buildCloudView());
+    m_views->addWidget(buildFleetView());
     m_views->addWidget(buildSettingsView());
 
     connect(m_rail, &QListWidget::currentRowChanged, m_views,
@@ -687,12 +689,15 @@ QString DashboardPanel::consoleStyleSheet() const {
         " #ddCostTileMemEff, #ddSettingsTileVersion, #ddSettingsTileRefresh,"
         " #ddSettingsTileMonitors, #ddSettingsTileSilenced { color: %TEXT%; }"
         "#ddCloudTileProvider, #ddCloudTileAge, #ddCloudTileAccrued,"
-        " #ddCloudTileMonthly { color: %TEXT%; }"
+        " #ddCloudTileMonthly, #ddFleetTilePeers, #ddFleetTileCpu,"
+        " #ddFleetTileMem, #ddFleetTileDown { color: %TEXT%; }"
         "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
         " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint,"
         " #ddCloudSpendSummary, #ddCloudSpendDetail, #ddCloudSpendNote"
         " { color: %MUTED%; }"
         "#ddCloudShare { color: %DIM%; }"
+        "#ddFleetSummary, #ddFleetNote, #ddFleetDetail { color: %MUTED%; }"
+        "#ddFleetShare { color: %DIM%; }"
         "#ddDeprecations { color: %MUTED%; }"
         "#ddHostInfoSummary { color: %DIM%; }"
         "#ddHostPlatform, #ddHostCpuInfo, #ddHostFilesystems, #ddHostNetInfo { color: %MUTED%; }"
@@ -5025,6 +5030,138 @@ QWidget *DashboardPanel::buildCloudView() {
     return view;
 }
 
+QWidget *DashboardPanel::buildFleetView() {
+    auto *view = new QWidget(this);
+    auto *content = new QWidget(view);
+    content->setObjectName(QStringLiteral("ddScrollContent"));
+    auto *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(12, 12, 12, 8);
+    layout->setSpacing(8);
+
+    // --- Four answers, visible before any table is read: how many peers
+    // answered, which one is hottest, which one is closest to running out of
+    // memory, and how many are simply gone.
+    m_fleetTilePeers = new QLabel(QStringLiteral("--"), view);
+    m_fleetTilePeers->setObjectName(QStringLiteral("ddFleetTilePeers"));
+    m_fleetTileCpu = new QLabel(QStringLiteral("--"), view);
+    m_fleetTileCpu->setObjectName(QStringLiteral("ddFleetTileCpu"));
+    m_fleetTileMem = new QLabel(QStringLiteral("--"), view);
+    m_fleetTileMem->setObjectName(QStringLiteral("ddFleetTileMem"));
+    m_fleetTileDown = new QLabel(QStringLiteral("--"), view);
+    m_fleetTileDown->setObjectName(QStringLiteral("ddFleetTileDown"));
+
+    auto *tiles = new QHBoxLayout();
+    tiles->setSpacing(10);
+    tiles->addWidget(makeTile(QStringLiteral("PEERS"), m_fleetTilePeers,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("WORST CPU"), m_fleetTileCpu,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("LOWEST MEM"), m_fleetTileMem,
+                              nullptr, view), 1);
+    tiles->addWidget(makeTile(QStringLiteral("DOWN"), m_fleetTileDown, nullptr,
+                              view), 1);
+    layout->addLayout(tiles);
+
+    // --- The one-line verdict, then what the polling actually costs and what
+    // it deliberately does not carry.
+    m_fleetSummary = new QLabel(fleetSummaryText(m_fleet,
+                                                 QDateTime::currentMSecsSinceEpoch()),
+                                view);
+    m_fleetSummary->setObjectName(QStringLiteral("ddFleetSummary"));
+    m_fleetSummary->setFont(monoFont(11));
+    m_fleetSummary->setWordWrap(true);
+    m_fleetSummary->setMinimumWidth(1);
+
+    m_fleetNote = new QLabel(fleetNoteText(m_fleet), view);
+    m_fleetNote->setObjectName(QStringLiteral("ddFleetNote"));
+    m_fleetNote->setFont(monoFont(10));
+    m_fleetNote->setWordWrap(true);
+    m_fleetNote->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("FLEET"), ui_theme::accent(),
+                                 view));
+    auto *summaryRow = new QHBoxLayout;
+    summaryRow->setSpacing(10);
+    summaryRow->addWidget(
+        makeCard(QStringLiteral("summary"), m_fleetSummary, view), 1);
+    summaryRow->addWidget(
+        makeCard(QStringLiteral("what is polled"), m_fleetNote, view), 1);
+    layout->addLayout(summaryRow);
+
+    // --- The rows: this machine first (netdata's mirrored_hosts includes
+    // itself), then every peer exactly as [fleet] peers= spelled it.
+    m_chartFleet = new TimeseriesChart(view);
+    m_chartFleet->setObjectName(QStringLiteral("ddFleetChart"));
+    m_chartFleet->setUnit(QStringLiteral("Percent"));
+    m_chartFleet->setSeriesName(QStringLiteral("syspeek.fleet.worst_cpu"));
+
+    m_fleetTable = new QTreeWidget(view);
+    m_fleetTable->setObjectName(QStringLiteral("ddFleetTable"));
+    m_fleetTable->setColumnCount(6);
+    m_fleetTable->setHeaderLabels({QStringLiteral("NAME"),
+                                   QStringLiteral("CPU %"),
+                                   QStringLiteral("MEM AVL"),
+                                   QStringLiteral("LOAD"),
+                                   QStringLiteral("AGE"),
+                                   QStringLiteral("STATE")});
+    m_fleetTable->setRootIsDecorated(false);
+    m_fleetTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_fleetTable->setFocusPolicy(Qt::NoFocus);
+    m_fleetTable->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int column = 1; column < 6; ++column) {
+        m_fleetTable->header()->setSectionResizeMode(
+            column, QHeaderView::ResizeToContents);
+    }
+    connect(m_fleetTable, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem *current, QTreeWidgetItem *) {
+                if (current == nullptr) {
+                    return;
+                }
+                m_fleetSelected = current->data(0, Qt::UserRole).toInt();
+                updateFleetDetail();
+            });
+
+    m_fleetDetail = new QLabel(QStringLiteral("--"), view);
+    m_fleetDetail->setObjectName(QStringLiteral("ddFleetDetail"));
+    m_fleetDetail->setFont(monoFont(10));
+    m_fleetDetail->setWordWrap(true);
+    m_fleetDetail->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("PEERS"),
+                                 ui_theme::banner(), view));
+    layout->addWidget(makeChartCard(QStringLiteral("worst peer CPU (%)"),
+                                    m_chartFleet, view));
+    layout->addWidget(makeCard(QStringLiteral("machines"), m_fleetTable, view));
+    layout->addWidget(makeCard(QStringLiteral("selected"), m_fleetDetail, view));
+
+    // --- What this machine publishes, and the switch that changes it. A
+    // token-less LAN bind is refused by the same resolver the /metrics
+    // endpoint uses, so the sentence is the truth, not a promise.
+    m_fleetShare = new QLabel(fleetShareText(m_fleet), view);
+    m_fleetShare->setObjectName(QStringLiteral("ddFleetShare"));
+    m_fleetShare->setFont(monoFont(9));
+    m_fleetShare->setWordWrap(true);
+    m_fleetShare->setMinimumWidth(1);
+    layout->addWidget(makeBanner(QStringLiteral("SHARING"),
+                                 ui_theme::warn(), view));
+    layout->addWidget(makeCard(QStringLiteral("what peers can read"),
+                               m_fleetShare, view));
+
+    auto *scroll = new QScrollArea(view);
+    scroll->setObjectName(QStringLiteral("ddScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    auto *outer = new QVBoxLayout(view);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    outer->addWidget(scroll);
+    return view;
+}
+
 QWidget *DashboardPanel::buildCostView() {
     auto *view = new QWidget(this);
     auto *content = new QWidget(view);
@@ -7677,6 +7814,134 @@ void DashboardPanel::setAlerts(const QList<Alert> &alerts) {
                     .arg(marker, alert.title, alert.detail, quiet);
     }
     m_alerts->setText(text);
+}
+
+void DashboardPanel::setFleetSnapshot(const FleetStatus &status) {
+    m_fleet = status;
+    updateFleetPanel();
+}
+
+void DashboardPanel::updateFleetPanel() {
+    if (m_fleetTable == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    int peerTotal = 0;
+    for (const FleetPeer &peer : m_fleet.peers) {
+        if (!peer.isSelf) {
+            ++peerTotal;
+        }
+    }
+    const int online = fleetOnlineCount(m_fleet);
+    const int down = fleetDownCount(m_fleet);
+    const double worst = fleetWorstCpu(m_fleet);
+    const double lowest = fleetLowestMemPct(m_fleet);
+
+    m_fleetTilePeers->setText(m_fleet.peers.size() <= 1
+                                  ? QStringLiteral("--")
+                                  : QStringLiteral("%1 / %2").arg(online).arg(peerTotal));
+    m_fleetTileCpu->setText(worst < 0.0
+                                ? QStringLiteral("--")
+                                : QStringLiteral("%1%").arg(worst, 0, 'f', 0));
+    m_fleetTileMem->setText(lowest < 0.0
+                                ? QStringLiteral("--")
+                                : QStringLiteral("%1% avail").arg(lowest, 0, 'f', 0));
+    m_fleetTileDown->setText(peerTotal == 0 ? QStringLiteral("--")
+                                            : QString::number(down));
+    m_fleetTileDown->setStyleSheet(
+        down > 0 ? QStringLiteral("color: %1;").arg(ui_theme::crit())
+                 : QString());
+
+    m_fleetSummary->setText(fleetSummaryText(m_fleet, now));
+    m_fleetNote->setText(fleetNoteText(m_fleet));
+    m_fleetShare->setText(fleetShareText(m_fleet));
+
+    const int selected = qBound(0, m_fleetSelected,
+                                qMax(0, m_fleet.peers.size() - 1));
+    m_fleetTable->blockSignals(true);
+    m_fleetTable->clear();
+    for (int i = 0; i < m_fleet.peers.size(); ++i) {
+        const FleetPeer &peer = m_fleet.peers.at(i);
+        auto *item = new QTreeWidgetItem(m_fleetTable);
+        item->setData(0, Qt::UserRole, i);
+        QString name = peer.name.isEmpty() ? peer.address : peer.name;
+        if (peer.isSelf) {
+            name = QStringLiteral("* %1").arg(name);
+        }
+        item->setText(0, name);
+        item->setText(1, peer.online && peer.cpuPercent >= 0.0
+                             ? QString::number(peer.cpuPercent, 'f', 0)
+                             : QStringLiteral("--"));
+        // A peer that is not answering has no memory reading this tick, so the
+        // cell reads "--" instead of a percentage of a stale last guess.
+        double memPct = -1.0;
+        if (peer.online && peer.memTotalKb > 0) {
+            memPct = 100.0 * double(peer.memAvailableKb)
+                / double(peer.memTotalKb);
+        }
+        item->setText(2, memPct < 0.0
+                             ? QStringLiteral("--")
+                             : QStringLiteral("%1%").arg(memPct, 0, 'f', 0));
+        item->setText(3, peer.online && peer.load1 >= 0.0
+                             ? QString::number(peer.load1, 'f', 2)
+                             : QStringLiteral("--"));
+        item->setText(4, peer.everSeen ? fleetPeerAgeText(peer, now)
+                                       : QStringLiteral("--"));
+        item->setText(5, fleetPeerStateText(peer, now, m_fleet.pollMs));
+        for (int column = 1; column < 5; ++column) {
+            item->setTextAlignment(column, Qt::AlignRight | Qt::AlignVCenter);
+        }
+
+        QColor nameColor(ui_theme::text());
+        if (peer.isSelf) {
+            nameColor = QColor(ui_theme::accent());
+        } else if (!peer.configured) {
+            nameColor = QColor(ui_theme::warn());
+        }
+        item->setForeground(0, nameColor);
+        QColor stateColor(ui_theme::ok());
+        if (peer.isSelf) {
+            stateColor = QColor(ui_theme::muted());
+        } else if (!peer.configured || peer.refused) {
+            stateColor = QColor(ui_theme::warn());
+        } else if (!peer.online) {
+            stateColor = QColor(ui_theme::crit());
+        } else if (fleetPeerStale(peer, now, m_fleet.pollMs)) {
+            stateColor = QColor(ui_theme::warn());
+        }
+        item->setForeground(5, stateColor);
+        if (i == selected) {
+            m_fleetTable->setCurrentItem(item);
+        }
+    }
+    if (m_fleet.peers.isEmpty()) {
+        auto *item = new QTreeWidgetItem(m_fleetTable);
+        item->setText(0, fleetSummaryText(m_fleet, now));
+        item->setForeground(0, QColor(ui_theme::dim()));
+        m_fleetTable->setFirstColumnSpanned(0, QModelIndex(), true);
+    }
+    m_fleetTable->blockSignals(false);
+
+    if (m_chartFleet != nullptr && worst >= 0.0) {
+        m_chartFleet->push(worst);
+    }
+    updateFleetDetail();
+}
+
+void DashboardPanel::updateFleetDetail() {
+    if (m_fleetDetail == nullptr) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const int index = qBound(0, m_fleetSelected,
+                             qMax(0, m_fleet.peers.size() - 1));
+    if (m_fleet.peers.isEmpty()) {
+        m_fleetDetail->setText(fleetSummaryText(m_fleet, now));
+        return;
+    }
+    m_fleetDetail->setText(
+        fleetPeerDetailText(m_fleet.peers.at(index), now, m_fleet.pollMs));
 }
 
 void DashboardPanel::updateCloudPanel(const DisplaySnapshot &snapshot) {

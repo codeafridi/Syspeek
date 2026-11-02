@@ -320,6 +320,17 @@ jobs:
           print("budget ok: avg %d ms worst %d ms slowest %s"
                 % (int(budget["avgMs"]), int(budget["worstMs"]),
                    budget["slowest"]))
+          fleet = d["fleet"]
+          assert fleet["schema"] == 1, fleet
+          assert fleet["parseOk"] is True, fleet
+          assert fleet["refuseNewerOk"] is True, fleet
+          assert fleet["urlOk"] is True, fleet
+          assert fleet["offlineOk"] is True, fleet
+          assert fleet["selfOk"] is True, fleet
+          assert fleet["summaryOk"] is True, fleet
+          print("fleet ok: %d configured peer(s), sharing %s"
+                % (fleet["peersConfigured"],
+                   "on" if fleet["share"] else "off"))
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -535,6 +546,17 @@ jobs:
           print("budget ok: avg %d ms worst %d ms slowest %s"
                 % (int(budget["avgMs"]), int(budget["worstMs"]),
                    budget["slowest"]))
+          fleet = d["fleet"]
+          assert fleet["schema"] == 1, fleet
+          assert fleet["parseOk"] is True, fleet
+          assert fleet["refuseNewerOk"] is True, fleet
+          assert fleet["urlOk"] is True, fleet
+          assert fleet["offlineOk"] is True, fleet
+          assert fleet["selfOk"] is True, fleet
+          assert fleet["summaryOk"] is True, fleet
+          print("fleet ok: %d configured peer(s), sharing %s"
+                % (fleet["peersConfigured"],
+                   "on" if fleet["share"] else "off"))
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),
@@ -728,14 +750,14 @@ jobs:
             }
           }
 
-          for i in $(seq 0 31); do
+          for i in $(seq 0 32); do
             render "$i"
           done
           ls -l "${RUNNER_TEMP}/screens"
           python3 - "${RUNNER_TEMP}/screens" <<'PY'
           import glob, os, sys
           files = sorted(glob.glob(os.path.join(sys.argv[1], "panel-*.png")))
-          assert len(files) == 32, files
+          assert len(files) == 33, files
           tiny = [f for f in files if os.path.getsize(f) < 12000]
           assert not tiny, tiny
           print("screens ok:", len(files), "min",

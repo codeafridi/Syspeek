@@ -356,6 +356,12 @@ QLayout *HudWindow::makeMetricBlock(const QString &caption, QLabel *value) {
     return box;
 }
 
+void HudWindow::setFleetSnapshot(const FleetStatus &status) {
+    const FleetPeer self = fleetSelfPeer(
+        m_lastSnapshot, status.selfName, QDateTime::currentMSecsSinceEpoch());
+    m_panel->setFleetSnapshot(fleetWithSelf(status, self));
+}
+
 void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
     m_lastSnapshot = snapshot;
     m_exportRows.append(
