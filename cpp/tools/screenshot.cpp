@@ -3,6 +3,7 @@
 #include "HistoryLog.h"
 #include "SensorStatus.h"
 #include "CloudStatus.h"
+#include "RemoteStatus.h"
 #include "TickBudget.h"
 #include "Theme.h"
 
@@ -1395,6 +1396,30 @@ int main(int argc, char *argv[]) {
     settingsInfo.rssWarnGb = 1.0;
     panel.setSettingsInfo(settingsInfo);
     panel.setMonitors(defaultAlertRules());
+
+    {
+        // M99: the disclosure card, filled the way the runner fills it - a
+        // delivered report with a small backlog still on disk.
+        RemoteOptions demoRemote;
+        demoRemote.enabled = true;
+        demoRemote.url = QStringLiteral("https://relay.syspeek.dev");
+        demoRemote.token = QStringLiteral("0123456789abcdef0123456789abcdef");
+        demoRemote.intervalMs = 15000;
+        demoRemote.spoolMb = 8;
+        RemoteReportState demoState;
+        demoState.lastClass = RemoteClass::Ok;
+        demoState.lastStatus = 200;
+        demoState.lastLatencyMs = 34;
+        demoState.sent = 41;
+        demoState.lastOkMs =
+            QDateTime(QDate(2026, 10, 28), QTime(12, 0)).toMSecsSinceEpoch();
+        demoState.spoolOn = true;
+        demoState.spooled = 2;
+        demoState.spoolCapacity = 509;
+        demoState.spoolDropped = 0;
+        panel.setRemoteInfo(
+            remoteInfoFor(demoRemote, demoState, demoState.lastOkMs));
+    }
 
     {
         // M75 silences: two live quiet windows and one expired, so the

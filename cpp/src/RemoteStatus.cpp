@@ -1,6 +1,7 @@
 #include "RemoteStatus.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -59,14 +60,39 @@ QString severityFromName(const QString &name) {
     return QStringLiteral("info");
 }
 
+// One table serves two readers: the scan refuses these keys, and the
+// disclosure card prints these phrases. A new forbidden key without a phrase
+// would make the card lie, so the test asserts every key has one.
+struct ForbiddenKey {
+    const char *key;
+    const char *phrase;
+};
+
+const QList<ForbiddenKey> &forbiddenTable() {
+    static const QList<ForbiddenKey> table{
+        {"processes", "process list"},
+        {"processlist", "process list"},
+        {"cmdline", "command lines"},
+        {"argv", "arguments"},
+        {"args", "arguments"},
+        {"environ", "environment"},
+        {"env", "environment"},
+        {"cwd", "working directory"},
+        {"exe", "executable paths"},
+        {"path", "file paths"},
+        {"log", "logs"},
+        {"lines", "log lines"}};
+    return table;
+}
+
 const QStringList &forbiddenKeys() {
-    static const QStringList keys{
-        QStringLiteral("cmdline"),  QStringLiteral("environ"),
-        QStringLiteral("env"),      QStringLiteral("exe"),
-        QStringLiteral("path"),     QStringLiteral("argv"),
-        QStringLiteral("cwd"),      QStringLiteral("args"),
-        QStringLiteral("log"),      QStringLiteral("lines"),
-        QStringLiteral("processes"), QStringLiteral("processlist")};
+    static const QStringList keys = [] {
+        QStringList out;
+        for (const ForbiddenKey &entry : forbiddenTable()) {
+            out << QString::fromLatin1(entry.key);
+        }
+        return out;
+    }();
     return keys;
 }
 
@@ -874,6 +900,137 @@ QString remoteSpoolNoteSuffix(const RemoteReportState &state) {
 QString remoteRowText(const RemoteReportState &state) {
     const QString note = remoteReportNote(state);
     return note.startsWith(QStringLiteral("remote: ")) ? note.mid(8) : note;
+}
+
+QStringList remoteForbiddenKeys() {
+    return forbiddenKeys();
+}
+
+QString remoteNeverSentLine() {
+    QStringList phrases;
+    for (const ForbiddenKey &entry : forbiddenTable()) {
+        const QString phrase = QString::fromLatin1(entry.phrase);
+        if (!phrases.contains(phrase)) {
+            phrases << phrase;
+        }
+    }
+    return QStringLiteral("never sent: ") + phrases.join(QStringLiteral(", "));
+}
+
+QList<RemoteFieldGroup> remoteFieldGroups() {
+    return {
+        {QStringLiteral("host cpu, steal, load, memory, disk free, network rate"),
+         true},
+        {QStringLiteral("socket counts (connections, listening, established)"),
+         true},
+        {QStringLiteral("alert and incident counts"), true},
+        {QStringLiteral("container and kubernetes counts"), true},
+        {QStringLiteral("focused app name and pid"), true},
+        {QStringLiteral("version, platform and machine name"), true},
+        {QStringLiteral("uptime"), true},
+        {QStringLiteral("events (kind, severity, subject, title, up to 50)"),
+         true},
+        {QStringLiteral("process list, command lines, environment, file paths, "
+                        "logs"),
+         false},
+    };
+}
+
+RemoteInfo remoteInfoFor(const RemoteOptions &options,
+                         const RemoteReportState &state, qint64 nowMs) {
+    Q_UNUSED(nowMs)
+    RemoteInfo info;
+    info.enabled = options.enabled;
+    info.neverSentLine = remoteNeverSentLine();
+    // The Settings row and the card never disagree: with the switch off the row
+    // keeps naming the switch, with it on the row is the live verdict.
+    info.rowText = options.enabled ? remoteRowText(state)
+                                   : remoteSettingsLine(options);
+    for (const RemoteFieldGroup &group : remoteFieldGroups()) {
+        info.scopeLines << (group.sent ? QStringLiteral("+ ") : QStringLiteral("- "))
+                               + group.name;
+    }
+
+    // Nothing about the address or the token is shown while the switch is off:
+    // a card that lists a relay for a feature that is not running is a claim
+    // the machine is not keeping.
+    if (!options.enabled) {
+        info.tokenLine = QStringLiteral("not set - nothing to send");
+        info.spoolLine =
+            QStringLiteral("none - the spool only opens while reporting is on");
+        info.lastLine = QStringLiteral("never");
+        return info;
+    }
+
+    info.ingestUrl = remoteIngestUrl(options.url);
+    if (options.token.isEmpty()) {
+        info.tokenLine = QStringLiteral("not set - the relay will refuse every "
+                                        "report ([remote] token=)");
+    } else {
+        info.tokenLine = QStringLiteral("set (%1 chars, never printed)")
+                             .arg(options.token.size());
+    }
+
+    if (options.spoolMb <= 0) {
+        info.spoolLine = QStringLiteral("off ([remote] spool_mb=0) - an "
+                                        "undelivered report is dropped and "
+                                        "counted");
+    } else if (!state.spoolOn) {
+        info.spoolLine = QStringLiteral("%1 - not open yet").arg(remoteSpoolPath());
+    } else {
+        info.spoolLine = QStringLiteral("%1 - %2 queued of %3, %4 dropped")
+                             .arg(remoteSpoolPath())
+                             .arg(state.spooled)
+                             .arg(state.spoolCapacity)
+                             .arg(state.spoolDropped);
+    }
+
+    if (state.stopped) {
+        info.lastLine = QStringLiteral("refused: %1")
+                            .arg(remoteClassText(state.lastClass,
+                                                 state.lastStatus));
+    } else if (state.lastClass == RemoteClass::None) {
+        info.lastLine =
+            state.spooled > 0
+                ? QStringLiteral("waiting - %1 report(s) held").arg(state.spooled)
+                : QStringLiteral("never");
+    } else if (state.lastClass == RemoteClass::Ok) {
+        info.lastLine = QStringLiteral("delivered %1 ms at %2")
+                            .arg(state.lastLatencyMs)
+                            .arg(QDateTime::fromMSecsSinceEpoch(state.lastOkMs)
+                                     .toString(QStringLiteral("HH:mm:ss")));
+    } else {
+        info.lastLine = QStringLiteral("not delivered: %1")
+                            .arg(remoteClassText(state.lastClass,
+                                                 state.lastStatus));
+    }
+    return info;
+}
+
+QString remoteReportCardText(const RemoteInfo &info) {
+    if (!info.enabled) {
+        return QStringLiteral("state       off - nothing leaves this machine "
+                              "([remote] enabled=false)\n"
+                              "token       %1\n"
+                              "spool       %2\n"
+                              "last        %3\n"
+                              "%4")
+            .arg(info.tokenLine, info.spoolLine, info.lastLine,
+                 info.neverSentLine);
+    }
+    QStringList lines;
+    lines << QStringLiteral("state       on -> %1").arg(info.ingestUrl);
+    lines << QStringLiteral("token       %1").arg(info.tokenLine);
+    lines << QStringLiteral("spool       %1").arg(info.spoolLine);
+    lines << QStringLiteral("last        %1").arg(info.lastLine);
+    for (int i = 0; i < info.scopeLines.size(); ++i) {
+        lines << QStringLiteral("%1%2")
+                     .arg(i == 0 ? QStringLiteral("fields      ")
+                                 : QStringLiteral("            "),
+                          info.scopeLines.at(i));
+    }
+    lines << info.neverSentLine;
+    return lines.join(QLatin1Char('\n'));
 }
 
 

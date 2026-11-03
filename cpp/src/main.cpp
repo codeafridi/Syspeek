@@ -740,6 +740,10 @@ int main(int argc, char *argv[]) {
         settingsInfo.rssWarnGb =
             double(config.health.rssWarnKb) / (1024.0 * 1024.0);
         hud.setSettingsInfo(settingsInfo);
+        // M99: the disclosure card starts from the config alone (nothing has
+        // been sent yet); the runner replaces it line by line as answers land.
+        hud.setRemoteInfo(remoteInfoFor(config.remote, RemoteReportState{},
+                                        QDateTime::currentMSecsSinceEpoch()));
         hud.setMonitors(config.alertRules.isEmpty()
                             ? defaultAlertRules()
                             : config.alertRules);
@@ -887,8 +891,11 @@ int main(int argc, char *argv[]) {
         QObject::connect(&hud, &HudWindow::remoteEnvelopeReady, remoteRunner,
                          &RemoteRunner::setEnvelope);
         QObject::connect(remoteRunner, &RemoteRunner::stateChanged, &hud,
-                         [&hud](const RemoteReportState &state) {
-                             hud.setRemoteLine(remoteRowText(state));
+                         [&hud, remoteOptions = config.remote](
+                             const RemoteReportState &state) {
+                             hud.setRemoteInfo(remoteInfoFor(
+                                 remoteOptions, state,
+                                 QDateTime::currentMSecsSinceEpoch()));
                          });
         QObject::connect(remoteRunner, &RemoteRunner::reportSent, &hud,
                          [](bool ok, RemoteClass, int latencyMs,

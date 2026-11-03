@@ -1069,9 +1069,9 @@ void HudWindow::setSettingsInfo(const SettingsInfo &info) {
     }
 }
 
-void HudWindow::setRemoteLine(const QString &line) {
+void HudWindow::setRemoteInfo(const RemoteInfo &info) {
     if (m_panel != nullptr) {
-        m_panel->setRemoteLine(line);
+        m_panel->setRemoteInfo(info);
     }
 }
 

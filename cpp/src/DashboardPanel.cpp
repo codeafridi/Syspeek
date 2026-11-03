@@ -693,7 +693,8 @@ QString DashboardPanel::consoleStyleSheet() const {
         " #ddFleetTileMem, #ddFleetTileDown { color: %TEXT%; }"
         "#ddCloudSummary, #ddCloudDetail, #ddCloudCost, #ddCloudApp,"
         " #ddCloudFleetSummary, #ddCloudFleetNote, #ddCloudFootprint,"
-        " #ddCloudSpendSummary, #ddCloudSpendDetail, #ddCloudSpendNote"
+        " #ddCloudSpendSummary, #ddCloudSpendDetail, #ddCloudSpendNote,"
+        " #ddRemoteReport"
         " { color: %MUTED%; }"
         "#ddCloudShare { color: %DIM%; }"
         "#ddFleetSummary, #ddFleetNote, #ddFleetDetail { color: %MUTED%; }"
@@ -3388,6 +3389,20 @@ QWidget *DashboardPanel::buildSettingsView() {
         ui_theme::warn(), view));
     layout->addWidget(makeCard(QStringLiteral("alert rules"), monitorsCard, view));
 
+    // --- M99: what the paid tier leaves this machine, field group by field
+    // group. The shape is the M84 CLOUD FOOTPRINT card, because a disclosure is
+    // only a disclosure if the reader can check it without leaving the app.
+    m_remoteReport = new QLabel(remoteReportCardText(RemoteInfo{}), view);
+    m_remoteReport->setObjectName(QStringLiteral("ddRemoteReport"));
+    m_remoteReport->setFont(monoFont(9));
+    m_remoteReport->setWordWrap(true);
+    m_remoteReport->setMinimumWidth(1);
+
+    layout->addWidget(makeBanner(QStringLiteral("REMOTE REPORTING"),
+        ui_theme::accent(), view));
+    layout->addWidget(makeCard(QStringLiteral("what would leave this host"),
+                               m_remoteReport, view));
+
     // Diagnostics: command rows with copy buttons. Mirrors the shipped
     // Datadog agent's local surface (status/configcheck/flare per its
     // cmd/agent/subcommands and the embedded CLI strings in its binary;
@@ -4154,8 +4169,11 @@ void DashboardPanel::setWebhookLine(const QString &line) {
     applySettingsInfo();
 }
 
-void DashboardPanel::setRemoteLine(const QString &line) {
-    m_settings.remoteLine = line;
+void DashboardPanel::setRemoteInfo(const RemoteInfo &info) {
+    m_settings.remoteLine = info.rowText;
+    if (m_remoteReport != nullptr) {
+        m_remoteReport->setText(remoteReportCardText(info));
+    }
     applySettingsInfo();
 }
 

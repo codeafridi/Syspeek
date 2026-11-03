@@ -2518,9 +2518,26 @@ int main(int argc, char *argv[]) {
         {
             // M98: the paid-tier reporter's row carries the spool, not only the
             // verdict - a buffered report is a fact the user must be able to
-            // read, and a dropped one more so.
-            hud.setRemoteLine(QStringLiteral("3 sent, 0 failed - last ok in "
-                                             "12ms, 2 spooled, 1 dropped"));
+            // read, and a dropped one more so. Driven through the same builder
+            // the runner uses, so the row cannot drift from the card.
+            RemoteOptions remoteOptions;
+            remoteOptions.enabled = true;
+            remoteOptions.url = QStringLiteral("relay.example.test");
+            remoteOptions.token = QStringLiteral("0123456789abcdef0123456789abcd");
+            remoteOptions.intervalMs = 15000;
+            remoteOptions.spoolMb = 8;
+            RemoteReportState remoteState;
+            remoteState.lastClass = RemoteClass::Ok;
+            remoteState.lastStatus = 200;
+            remoteState.lastLatencyMs = 12;
+            remoteState.sent = 3;
+            remoteState.lastOkMs = 1762000000000LL;
+            remoteState.spoolOn = true;
+            remoteState.spooled = 2;
+            remoteState.spoolCapacity = 509;
+            remoteState.spoolDropped = 1;
+            hud.setRemoteInfo(remoteInfoFor(remoteOptions, remoteState,
+                                            remoteState.lastOkMs));
             QString remoteText;
             for (QLabel *label : hud.findChildren<QLabel *>(
                      QStringLiteral("ddSettingsInfo"))) {
@@ -2533,6 +2550,83 @@ int main(int argc, char *argv[]) {
                       && remoteText.contains(QStringLiteral("1 dropped")),
                   "settings GENERAL card states what the remote spool holds and "
                   "what it lost");
+        }
+
+        {
+            // M99: the disclosure card, one assertion per line - a card that
+            // renders is not a card that tells the truth (the M85 lesson).
+            auto cardText = [&hud]() {
+                auto *label =
+                    hud.findChild<QLabel *>(QStringLiteral("ddRemoteReport"));
+                return label == nullptr ? QString() : label->text();
+            };
+            check(!cardText().isEmpty(),
+                  "remote card: the disclosure card exists");
+
+            RemoteOptions cardOff;
+            hud.setRemoteInfo(remoteInfoFor(cardOff, RemoteReportState{}, 0));
+            const QString offText = cardText();
+            check(offText.contains(
+                      QStringLiteral("off - nothing leaves this machine")),
+                  "remote card: a disabled config reads off");
+            check(!offText.contains(QStringLiteral("https://")),
+                  "remote card: a disabled config names no relay address");
+            check(!offText.contains(QStringLiteral("token       set")),
+                  "remote card: a disabled config shows no token value");
+
+            RemoteOptions cardOn;
+            cardOn.enabled = true;
+            cardOn.url = QStringLiteral("relay.example.test");
+            cardOn.token = QStringLiteral("0123456789abcdef0123456789abcd");
+            cardOn.intervalMs = 15000;
+            cardOn.spoolMb = 8;
+            RemoteReportState cardState;
+            cardState.lastClass = RemoteClass::Ok;
+            cardState.lastStatus = 200;
+            cardState.lastLatencyMs = 210;
+            cardState.sent = 5;
+            cardState.lastOkMs = 1762000000000LL;
+            cardState.spoolOn = true;
+            cardState.spooled = 2;
+            cardState.spoolCapacity = 509;
+            cardState.spoolDropped = 1;
+            hud.setRemoteInfo(
+                remoteInfoFor(cardOn, cardState, cardState.lastOkMs));
+            const QString onText = cardText();
+            check(onText.contains(QStringLiteral(
+                      "on -> https://relay.example.test/api/v1/ingest")),
+                  "remote card: an enabled config names the exact ingest URL");
+            check(onText.contains(QStringLiteral("set (30 chars")),
+                  "remote card: the token row states the length, not the value");
+            check(onText.contains(QStringLiteral("2 queued of 509, 1 dropped")),
+                  "remote card: the spool row states the queue and the losses");
+            check(onText.contains(QStringLiteral("delivered 210 ms")),
+                  "remote card: the last row states a delivery");
+            check(onText.contains(QStringLiteral("+ host cpu")),
+                  "remote card: the scope matrix lists what is sent");
+            check(onText.contains(QStringLiteral("- process list")),
+                  "remote card: the scope matrix states what is not sent");
+            check(onText.contains(QStringLiteral("never sent: process list")),
+                  "remote card: the closing promise is the literal never-sent "
+                  "line");
+
+            RemoteReportState freshCard;
+            hud.setRemoteInfo(remoteInfoFor(cardOn, freshCard, 0));
+            check(cardText().contains(QStringLiteral("last        never")),
+                  "remote card: a reporter that has not delivered says never");
+
+            RemoteReportState refusedCard;
+            refusedCard.stopped = true;
+            refusedCard.lastClass = RemoteClass::Auth;
+            refusedCard.lastStatus = 401;
+            hud.setRemoteInfo(remoteInfoFor(cardOn, refusedCard, 0));
+            check(cardText().contains(QStringLiteral("refused: 401")),
+                  "remote card: a revoked token reads as a refusal");
+
+            // Leave the delivered state in place: the COPY REPORT check below
+            // asserts the reporter line the diagnostic bundle carries.
+            hud.setRemoteInfo(
+                remoteInfoFor(cardOn, cardState, cardState.lastOkMs));
         }
 
         auto *copyReport = static_cast<QPushButton *>(nullptr);

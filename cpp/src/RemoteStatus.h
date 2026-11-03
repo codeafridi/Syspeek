@@ -219,6 +219,42 @@ QString remoteSpoolNoteSuffix(const RemoteReportState &state);
 // label already says that), including whatever the spool still holds.
 QString remoteRowText(const RemoteReportState &state);
 
+// ---------------------------------------------------------------------------
+// M99: the disclosure card. Everything the console says about the paid tier
+// comes from these pure builders, so a line the card claims is a line a test
+// can assert - the M85 lesson (a disclosure card needs an assertion per line).
+// ---------------------------------------------------------------------------
+
+// The keys a report may never carry. The card's "never sent" line is rendered
+// from this list, so the promise the user reads and the scan the tests run are
+// the same list.
+QStringList remoteForbiddenKeys();
+QString remoteNeverSentLine();
+
+// One group per row of the scope matrix: what is in a report, and what is not.
+struct RemoteFieldGroup {
+    QString name;
+    bool sent = false;
+};
+
+QList<RemoteFieldGroup> remoteFieldGroups();
+
+struct RemoteInfo {
+    bool enabled = false;
+    QString ingestUrl;
+    QString tokenLine;
+    QString spoolLine;
+    QString lastLine;
+    QStringList scopeLines;
+    QString neverSentLine;
+    QString rowText; // the Settings GENERAL value (M98)
+};
+
+RemoteInfo remoteInfoFor(const RemoteOptions &options,
+                         const RemoteReportState &state, qint64 nowMs);
+
+QString remoteReportCardText(const RemoteInfo &info);
+
 // Queued across the reporter thread, so both the enum and the envelope need a
 // metatype. Declared here rather than in each caller so main.cpp and the tests
 // cannot disagree about it.

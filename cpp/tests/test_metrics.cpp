@@ -7396,6 +7396,96 @@ int main(int argc, char *argv[]) {
         check(remoteSpoolNoteSuffix(RemoteReportState{})
                   == QString(),
               "remote spool: a reporter with the spool off adds nothing");
+
+        // M99: the disclosure card's lines, built by the same pure code the
+        // console renders, so "the card says X" is one assertion per line.
+        const QString neverSent = remoteNeverSentLine();
+        check(neverSent.startsWith(QStringLiteral("never sent: process list")),
+              "remote card: the never-sent line leads with the process list");
+        check(neverSent.contains(QStringLiteral("command lines"))
+                  && neverSent.contains(QStringLiteral("environment"))
+                  && neverSent.contains(QStringLiteral("file paths"))
+                  && neverSent.contains(QStringLiteral("logs")),
+              "remote card: the never-sent line names every promise");
+        const QStringList forbidden = remoteForbiddenKeys();
+        check(forbidden.contains(QStringLiteral("cmdline"))
+                  && forbidden.contains(QStringLiteral("environ"))
+                  && forbidden.contains(QStringLiteral("path"))
+                  && forbidden.contains(QStringLiteral("processes"))
+                  && forbidden.size() == 12,
+              "remote card: the scan list and the card share one table");
+
+        RemoteOptions cardOff;
+        const RemoteInfo offInfo =
+            remoteInfoFor(cardOff, RemoteReportState{}, 1762000000000LL);
+        const QString offCard = remoteReportCardText(offInfo);
+        check(offCard.contains(QStringLiteral("nothing leaves this machine"))
+                  && offInfo.ingestUrl.isEmpty(),
+              "remote card: off says nothing leaves, and names no relay");
+        check(!offCard.contains(QStringLiteral("token       set")),
+              "remote card: an off switch shows no token state");
+
+        RemoteOptions cardOn;
+        cardOn.enabled = true;
+        cardOn.url = QStringLiteral("relay.example.test");
+        cardOn.token = QStringLiteral("0123456789abcdef0123456789abcd");
+        cardOn.intervalMs = 15000;
+        cardOn.spoolMb = 8;
+        RemoteReportState cardState;
+        cardState.lastClass = RemoteClass::Ok;
+        cardState.lastStatus = 200;
+        cardState.lastLatencyMs = 42;
+        cardState.sent = 7;
+        cardState.lastOkMs = 1762000000000LL;
+        cardState.spoolOn = true;
+        cardState.spooled = 2;
+        cardState.spoolCapacity = 509;
+        cardState.spoolDropped = 1;
+        const RemoteInfo onInfo =
+            remoteInfoFor(cardOn, cardState, 1762000010000LL);
+        const QString onCard = remoteReportCardText(onInfo);
+        check(onInfo.ingestUrl
+                  == QStringLiteral("https://relay.example.test/api/v1/ingest"),
+              "remote card: the state line names the exact ingest URL");
+        check(onInfo.tokenLine
+                  == QStringLiteral("set (30 chars, never printed)"),
+              "remote card: the token row states its length, never its value");
+        check(onInfo.spoolLine.contains(QStringLiteral("remote-spool.bin"))
+                  && onInfo.spoolLine.contains(
+                      QStringLiteral("2 queued of 509, 1 dropped")),
+              "remote card: the spool row names the file, the queue and the "
+              "losses");
+        check(onInfo.lastLine.startsWith(QStringLiteral("delivered 42 ms at ")),
+              "remote card: the last row states a real delivery time");
+        check(onCard.contains(QStringLiteral("+ host cpu"))
+                  && onCard.contains(QStringLiteral("+ socket counts"))
+                  && onCard.contains(QStringLiteral("+ events")),
+              "remote card: the scope matrix lists the field groups that are "
+              "sent");
+        check(onCard.contains(QStringLiteral("- process list")),
+              "remote card: the scope matrix states what is not sent");
+        check(onCard.contains(neverSent),
+              "remote card: the closing line is the shared never-sent list");
+
+        RemoteReportState stoppedCard;
+        stoppedCard.stopped = true;
+        stoppedCard.lastClass = RemoteClass::Auth;
+        stoppedCard.lastStatus = 401;
+        check(remoteInfoFor(cardOn, stoppedCard, 0).lastLine.startsWith(
+                  QStringLiteral("refused: 401")),
+              "remote card: a refused token reads as a refusal, not a failure");
+
+        RemoteReportState freshCard;
+        freshCard.spoolOn = true;
+        check(remoteInfoFor(cardOn, freshCard, 0).lastLine
+                  == QStringLiteral("never"),
+              "remote card: nothing sent yet reads as never, not as delivered");
+
+        RemoteOptions noSpool = cardOn;
+        noSpool.spoolMb = 0;
+        check(remoteInfoFor(noSpool, RemoteReportState{}, 0)
+                  .spoolLine.contains(QStringLiteral("spool_mb=0")),
+              "remote card: spool_mb=0 reads as off, with the switch named");
     }
 
     // --- remote spool (M98): the buffer a closed laptop leaves behind

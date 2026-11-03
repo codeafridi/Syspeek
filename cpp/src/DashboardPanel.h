@@ -25,6 +25,7 @@
 #include "IncidentStatus.h"
 #include "FimStatus.h"
 #include "FleetStatus.h"
+#include "RemoteStatus.h"
 
 #include <QHash>
 #include <QSet>
@@ -156,8 +157,9 @@ public:
 
     void setWebhookLine(const QString &line);
 
-    // M98: the paid-tier reporter's live line (verdict + what the spool holds).
-    void setRemoteLine(const QString &line);
+    // M99: the disclosure card. Filled from the live runner, never recomputed
+    // from config - a card that says "delivered" must not say it before one.
+    void setRemoteInfo(const RemoteInfo &info);
 
     void setExportLine(const QString &line);
 
@@ -749,6 +751,7 @@ private:
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
     QLabel *m_settingsDiagnostics = nullptr;
+    QLabel *m_remoteReport = nullptr;
     QLabel *m_settingsScope = nullptr;
     QLabel *m_settingsTileVersion = nullptr;
     QLabel *m_settingsTileRefresh = nullptr;
