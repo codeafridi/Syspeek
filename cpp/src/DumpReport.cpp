@@ -1507,6 +1507,89 @@ QString dumpReportJson(int maxProcs) {
                           && remoteSpoolCapacityFor(qint64(256) * 1024 * 1024)
                                  == kRemoteSpoolMaxRecords);
 
+        // M100: the machine identity. `--dump` reports what is on disk and
+        // writes nothing at the real path; the maths is proven on a temp id so
+        // a runner that never enabled the tier still exercises it.
+        const RemoteIdentity liveIdentity =
+            remoteIdentityAt(remoteMachineIdPath(), dumpConfig.remote, false);
+        remote.insert(QStringLiteral("machineId"), liveIdentity.id);
+        remote.insert(QStringLiteral("machineIdName"), liveIdentity.name);
+        remote.insert(QStringLiteral("machineIdPath"), remoteMachineIdPath());
+        remote.insert(QStringLiteral("machineIdDerived"),
+                      liveIdentity.derived);
+        remote.insert(QStringLiteral("machineIdNote"), liveIdentity.note);
+
+        const QString idDirPath =
+            QDir::tempPath()
+            + QStringLiteral("/syspeek-id-probe-%1").arg(dumpPid());
+        QDir idDir(idDirPath);
+        idDir.removeRecursively();
+        idDir.mkpath(QStringLiteral("."));
+        const QString idPath = idDirPath + QStringLiteral("/machine-id");
+        RemoteOptions idOptions;
+        idOptions.name = QStringLiteral("probe-box");
+        const RemoteIdentity firstId =
+            remoteIdentityAt(idPath, idOptions, true);
+        const RemoteIdentity secondId =
+            remoteIdentityAt(idPath, idOptions, true);
+        const bool idStable =
+            firstId.id.size() == 36 && !firstId.derived && firstId.created
+            && secondId.id == firstId.id && !secondId.created;
+        QFile idFile(idPath);
+        bool idModeOk = idFile.open(QIODevice::ReadOnly);
+        if (idModeOk) {
+            const QFileDevice::Permissions perms = idFile.permissions();
+            idFile.close();
+            idModeOk = !(perms & (QFileDevice::ReadGroup
+                                  | QFileDevice::WriteGroup
+                                  | QFileDevice::ReadOther
+                                  | QFileDevice::WriteOther));
+        }
+        QFile::remove(idPath);
+        const RemoteIdentity renewedId =
+            remoteIdentityAt(idPath, idOptions, true);
+        const bool idRenews =
+            !renewedId.id.isEmpty() && renewedId.id != firstId.id;
+        QFile::remove(idPath);
+        // A path under a regular file cannot be created on any OS, and unlike a
+        // chmod 0500 directory it also holds for a root runner.
+        const QString blocker = idDirPath + QStringLiteral("/blocker");
+        {
+            QFile file(blocker);
+            if (file.open(QIODevice::WriteOnly)) {
+                file.write("x", 1);
+            }
+        }
+        const RemoteIdentity derivedId = remoteIdentityAt(
+            blocker + QStringLiteral("/machine-id"), idOptions, true);
+        // The derived id is hostname + sha256(mac), never the [remote] name:
+        // a display name the user can change must not renumber the machine.
+        bool derivedHex = derivedId.id.size() > 13;
+        for (const QChar ch : derivedId.id.right(12)) {
+            if (!(ch.isDigit() || (ch >= QLatin1Char('a') && ch <= QLatin1Char('f')))) {
+                derivedHex = false;
+            }
+        }
+        const bool idDerivedOk =
+            derivedId.derived && !derivedId.id.isEmpty() && derivedHex
+            && derivedId.id.startsWith(
+                remoteShortHostname().toLower().left(4))
+            && !derivedId.id.startsWith(QStringLiteral("probe-box"))
+            && derivedId.note.contains(QStringLiteral("not writable"));
+        const RemoteIdentity noWrite =
+            remoteIdentityAt(idPath, idOptions, false);
+        const bool idNoWriteOk = noWrite.id.isEmpty() && !noWrite.created
+                                 && !QFile::exists(idPath);
+        idDir.removeRecursively();
+        remote.insert(QStringLiteral("identityOk"),
+                      idStable && idRenews && idDerivedOk && idNoWriteOk
+                          && remoteMachineIdLooksValid(firstId.id));
+        remote.insert(QStringLiteral("identityStable"), idStable);
+        remote.insert(QStringLiteral("identityRenews"), idRenews);
+        remote.insert(QStringLiteral("identityDerivedOk"), idDerivedOk);
+        remote.insert(QStringLiteral("identityModeOk"), idModeOk);
+        remote.insert(QStringLiteral("identityNoWriteOk"), idNoWriteOk);
+
         const QByteArray rendered =
             QJsonDocument(remote).toJson(QJsonDocument::Compact);
         const bool tokenLeaked = !dumpConfig.remote.token.isEmpty()

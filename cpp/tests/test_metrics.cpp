@@ -7486,6 +7486,116 @@ int main(int argc, char *argv[]) {
         check(remoteInfoFor(noSpool, RemoteReportState{}, 0)
                   .spoolLine.contains(QStringLiteral("spool_mb=0")),
               "remote card: spool_mb=0 reads as off, with the switch named");
+
+        // M100: the durable machine identity.
+        {
+            QTemporaryDir idDir;
+            check(idDir.isValid(), "remote identity: a temp directory");
+            const QString idPath = idDir.filePath(QStringLiteral("machine-id"));
+            RemoteOptions idOptions;
+            idOptions.enabled = true;
+            idOptions.name = QStringLiteral("display-name");
+
+            const RemoteIdentity absent =
+                remoteIdentityAt(idPath, idOptions, false);
+            check(absent.id.isEmpty() && !absent.created
+                      && !QFile::exists(idPath)
+                      && absent.note.contains(QStringLiteral("not created yet")),
+                  "remote identity: reading without creating leaves no file");
+
+            const RemoteIdentity first =
+                remoteIdentityAt(idPath, idOptions, true);
+            check(first.created && first.id.size() == 36
+                      && remoteMachineIdLooksValid(first.id),
+                  "remote identity: the first run writes a 36-char id");
+            check(QFile::exists(idPath)
+                      && (QFileInfo(idPath).permissions()
+                          & (QFileDevice::ReadGroup | QFileDevice::WriteGroup
+                             | QFileDevice::ReadOther
+                             | QFileDevice::WriteOther))
+                             == QFileDevice::Permissions(),
+                  "remote identity: the id file is readable by its owner only");
+
+            const RemoteIdentity second =
+                remoteIdentityAt(idPath, idOptions, true);
+            check(second.id == first.id && !second.created,
+                  "remote identity: a second run keeps the same id");
+
+            RemoteOptions renamed = idOptions;
+            renamed.name = QStringLiteral("renamed-box");
+            const RemoteIdentity afterRename =
+                remoteIdentityAt(idPath, renamed, true);
+            check(afterRename.name == QStringLiteral("renamed-box")
+                      && afterRename.id == first.id,
+                  "remote identity: a rename changes the display name, not the "
+                  "id");
+
+            QFile::remove(idPath);
+            const RemoteIdentity renewed =
+                remoteIdentityAt(idPath, idOptions, true);
+            check(!renewed.id.isEmpty() && renewed.id != first.id,
+                  "remote identity: deleting the file mints a new id");
+
+            // A path under a regular file cannot be created on any OS, and
+            // unlike a chmod 0500 directory it also fails for a root runner.
+            const QString blocker = idDir.filePath(QStringLiteral("blocker"));
+            {
+                QFile file(blocker);
+                if (file.open(QIODevice::WriteOnly)) {
+                    file.write("x", 1);
+                }
+            }
+            const RemoteIdentity derived = remoteIdentityAt(
+                blocker + QStringLiteral("/machine-id"), idOptions, true);
+            check(derived.derived && derived.id.startsWith(
+                      remoteShortHostname().toLower().left(4))
+                      && derived.id.right(12).size() == 12
+                      && !derived.id.startsWith(QStringLiteral("display-name"))
+                      && derived.note.contains(QStringLiteral("not writable")),
+                  "remote identity: an unwritable id file falls back to a "
+                  "derived id and says so");
+            check(remoteMachineIdLooksValid(derived.id)
+                      && remoteMachineIdLooksValid(
+                          remoteDerivedMachineId(QStringLiteral("box"),
+                                                 QStringLiteral(
+                                                     "aa:bb:cc:dd:ee:ff"))),
+                  "remote identity: a derived id is still a valid id");
+            check(remoteDerivedMachineId(QStringLiteral("box"),
+                                         QStringLiteral("aa:bb:cc:dd:ee:ff"))
+                      != remoteDerivedMachineId(
+                          QStringLiteral("box"),
+                          QStringLiteral("11:22:33:44:55:66")),
+                  "remote identity: the derived id depends on the hardware "
+                  "address");
+            check(!remoteMachineIdLooksValid(QStringLiteral("has spaces here"))
+                      && !remoteMachineIdLooksValid(QString()),
+                  "remote identity: a foreign file is not mistaken for an id");
+
+            const RemoteIdentity cardLine =
+                remoteIdentityAt(idPath, idOptions, true);
+            RemoteOptions cardOptions = idOptions;
+            cardOptions.machineId = cardLine.id;
+            check(remoteInfoFor(cardOptions, RemoteReportState{}, 0, cardLine)
+                      .identityLine.contains(cardLine.id),
+                  "remote card: the identity row names the id and the name");
+        }
+
+        // The docs statement the identity rule depends on, read from the file
+        // the user reads - a promise in the app and a promise in the docs that
+        // cannot drift apart.
+        {
+            QFile doc(QStringLiteral(SYSPEEK_SOURCE_DIR "/../docs/remote.md"));
+            const bool opened = doc.open(QIODevice::ReadOnly);
+            const QString text = opened ? QString::fromUtf8(doc.readAll())
+                                        : QString();
+            doc.close();
+            check(opened
+                      && text.contains(QStringLiteral("flags the duplicate")),
+                  "remote identity: the docs state who detects a duplicate");
+            check(text.contains(QStringLiteral("Never sent: the process list"))
+                      && text.contains(QStringLiteral("off by default")),
+                  "remote docs: the privacy promise is stated in the docs too");
+        }
     }
 
     // --- remote spool (M98): the buffer a closed laptop leaves behind

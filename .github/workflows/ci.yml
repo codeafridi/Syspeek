@@ -355,12 +355,23 @@ jobs:
           assert remote["spoolCount"] == 7 and remote["spoolDropped"] == 3, remote
           assert remote["spoolCapacity"] == 8, remote
           assert remote["spoolBytes"] == 64 + 8 * 16468, remote
+          assert remote["identityOk"] is True, remote
+          assert remote["identityStable"] is True, remote
+          assert remote["identityRenews"] is True, remote
+          assert remote["identityDerivedOk"] is True, remote
+          assert remote["identityModeOk"] is True, remote
+          assert remote["identityNoWriteOk"] is True, remote
+          assert remote["machineIdName"], remote
+          assert remote["machineIdPath"], remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
                                         else "off", remote["note"]))
           print("remote transport ok: %s" % remote["transportNote"])
           print("remote spool ok: %d/%d held, %d dropped, %d bytes"
                 % (remote["spoolCount"], remote["spoolCapacity"],
                    remote["spoolDropped"], remote["spoolBytes"]))
+          print("remote identity ok: %s (%s)"
+                % (remote["machineId"] or "not created",
+                   "derived" if remote["machineIdDerived"] else "stored"))
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -611,12 +622,23 @@ jobs:
           assert remote["spoolCount"] == 7 and remote["spoolDropped"] == 3, remote
           assert remote["spoolCapacity"] == 8, remote
           assert remote["spoolBytes"] == 64 + 8 * 16468, remote
+          assert remote["identityOk"] is True, remote
+          assert remote["identityStable"] is True, remote
+          assert remote["identityRenews"] is True, remote
+          assert remote["identityDerivedOk"] is True, remote
+          assert remote["identityModeOk"] is True, remote
+          assert remote["identityNoWriteOk"] is True, remote
+          assert remote["machineIdName"], remote
+          assert remote["machineIdPath"], remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
                                         else "off", remote["note"]))
           print("remote transport ok: %s" % remote["transportNote"])
           print("remote spool ok: %d/%d held, %d dropped, %d bytes"
                 % (remote["spoolCount"], remote["spoolCapacity"],
                    remote["spoolDropped"], remote["spoolBytes"]))
+          print("remote identity ok: %s (%s)"
+                % (remote["machineId"] or "not created",
+                   "derived" if remote["machineIdDerived"] else "stored"))
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),

@@ -36,7 +36,7 @@ int serveRun(int argc, char **argv) {
     installAppMessageLogger();
 
     QString configError;
-    const Config config = loadConfig(defaultConfigPath(), &configError);
+    Config config = loadConfig(defaultConfigPath(), &configError);
     if (!configError.isEmpty()) {
         std::printf("serve: config %s: %s\n",
                     configError.toUtf8().constData(),
@@ -135,6 +135,12 @@ int serveRun(int argc, char **argv) {
     }
     std::printf("serve: %d peer(s) from [fleet] peers, polling every %d ms\n",
                 int(config.fleet.peers.size()), config.fleet.pollMs);
+    // M100: the same durable id the console uses, so a headless member and a
+    // console on the same box are one machine to the relay, not two.
+    const RemoteIdentity remoteIdentity = remoteLoadIdentity(config.remote);
+    if (!remoteIdentity.id.isEmpty()) {
+        config.remote.machineId = remoteIdentity.id;
+    }
     // M97: a headless member reports the same envelope the console does, only
     // without the event ring - there is no console here to collect one.
     QThread *remoteThread = nullptr;

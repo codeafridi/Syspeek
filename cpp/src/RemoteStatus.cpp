@@ -1,12 +1,18 @@
 #include "RemoteStatus.h"
 
+#include "HostInfoStatus.h"
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QSaveFile>
 #include <QStandardPaths>
+#include <QSysInfo>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -937,7 +943,8 @@ QList<RemoteFieldGroup> remoteFieldGroups() {
 }
 
 RemoteInfo remoteInfoFor(const RemoteOptions &options,
-                         const RemoteReportState &state, qint64 nowMs) {
+                         const RemoteReportState &state, qint64 nowMs,
+                         const RemoteIdentity &identity) {
     Q_UNUSED(nowMs)
     RemoteInfo info;
     info.enabled = options.enabled;
@@ -985,6 +992,22 @@ RemoteInfo remoteInfoFor(const RemoteOptions &options,
                              .arg(state.spoolDropped);
     }
 
+    if (!identity.note.isEmpty()) {
+        info.identityLine = identity.note;
+    } else {
+        const QString machineId = options.machineId.trimmed();
+        if (machineId.isEmpty()) {
+            info.identityLine = remoteIdentityAt(remoteMachineIdPath(), options,
+                                                 false)
+                                    .note;
+        } else {
+            const QString name = options.name.trimmed().isEmpty()
+                ? remoteShortHostname()
+                : options.name.trimmed();
+            info.identityLine = QStringLiteral("%1 as %2").arg(machineId, name);
+        }
+    }
+
     if (state.stopped) {
         info.lastLine = QStringLiteral("refused: %1")
                             .arg(remoteClassText(state.lastClass,
@@ -1021,6 +1044,7 @@ QString remoteReportCardText(const RemoteInfo &info) {
     QStringList lines;
     lines << QStringLiteral("state       on -> %1").arg(info.ingestUrl);
     lines << QStringLiteral("token       %1").arg(info.tokenLine);
+    lines << QStringLiteral("identity    %1").arg(info.identityLine);
     lines << QStringLiteral("spool       %1").arg(info.spoolLine);
     lines << QStringLiteral("last        %1").arg(info.lastLine);
     for (int i = 0; i < info.scopeLines.size(); ++i) {
@@ -1031,6 +1055,140 @@ QString remoteReportCardText(const RemoteInfo &info) {
     }
     lines << info.neverSentLine;
     return lines.join(QLatin1Char('\n'));
+}
+
+QString remoteMachineIdPath() {
+    QString base =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (base.isEmpty()) {
+        base = QDir::tempPath() + QStringLiteral("/syspeek");
+    }
+    return base + QStringLiteral("/machine-id");
+}
+
+QString remoteShortHostname() {
+    QString host = QSysInfo::machineHostName().trimmed();
+    if (host.isEmpty()) {
+        host = QStringLiteral("machine");
+    }
+    const int dot = host.indexOf(QLatin1Char('.'));
+    if (dot > 0) {
+        host = host.left(dot);
+    }
+    return host;
+}
+
+QString remotePrimaryMac() {
+    // The first interface by name that actually has a hardware address: the
+    // loopback and the virtual interfaces come with an empty or all-zero MAC,
+    // and the sort makes the choice stable across a reboot.
+    HostInfo info = collectHostInfo();
+    QList<HostNetworkInfo> interfaces = info.interfaces;
+    std::sort(interfaces.begin(), interfaces.end(),
+              [](const HostNetworkInfo &a, const HostNetworkInfo &b) {
+                  return a.name < b.name;
+              });
+    for (const HostNetworkInfo &entry : interfaces) {
+        const QString mac = entry.macAddress.trimmed().toLower();
+        if (mac.isEmpty() || mac == QStringLiteral("00:00:00:00:00:00")
+            || entry.name == QStringLiteral("lo")) {
+            continue;
+        }
+        return mac;
+    }
+    return QString();
+}
+
+QString remoteDerivedMachineId(const QString &hostname, const QString &mac) {
+    QString host = hostname.trimmed().toLower();
+    if (host.isEmpty()) {
+        host = QStringLiteral("machine");
+    }
+    QString safe;
+    for (const QChar ch : host) {
+        safe += (ch.isLetterOrNumber() || ch == QLatin1Char('-')
+                 || ch == QLatin1Char('_') || ch == QLatin1Char('.'))
+                    ? ch
+                    : QLatin1Char('-');
+    }
+    const QByteArray digest = QCryptographicHash::hash(
+        (host + QLatin1Char('|') + mac.toLower()).toUtf8(),
+        QCryptographicHash::Sha256);
+    return safe + QLatin1Char('-')
+           + QString::fromLatin1(digest.toHex().left(12));
+}
+
+bool remoteMachineIdLooksValid(const QString &id) {
+    if (id.size() < 8 || id.size() > 64) {
+        return false;
+    }
+    for (const QChar ch : id) {
+        if (!(ch.isLetterOrNumber() || ch == QLatin1Char('-')
+              || ch == QLatin1Char('_') || ch == QLatin1Char('.'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+RemoteIdentity remoteIdentityAt(const QString &path,
+                                const RemoteOptions &options, bool create) {
+    RemoteIdentity identity;
+    identity.path = path;
+    identity.name = options.name.trimmed().isEmpty() ? remoteShortHostname()
+                                                     : options.name.trimmed();
+
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        const QString stored = QString::fromUtf8(file.readAll()).trimmed();
+        file.close();
+        if (remoteMachineIdLooksValid(stored)) {
+            identity.id = stored;
+            identity.note =
+                QStringLiteral("%1 (name %2)").arg(stored, identity.name);
+            return identity;
+        }
+    }
+    if (!create) {
+        identity.note = QStringLiteral(
+            "not created yet - written on the first run with [remote] "
+            "enabled=true");
+        return identity;
+    }
+
+    // QSaveFile writes a temp file and renames it, so a crash mid-write cannot
+    // leave half an id behind - the same reason every config write in this tree
+    // uses it.
+    const QDir dir = QFileInfo(path).dir();
+    if (dir.exists() || dir.mkpath(QStringLiteral("."))) {
+        const QString fresh = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QSaveFile out(path);
+        bool ok = out.open(QIODevice::WriteOnly);
+        if (ok) {
+            ok = out.write(fresh.toUtf8() + '\n') > 0 && out.commit();
+        }
+        if (ok) {
+            QFile::setPermissions(path, QFileDevice::ReadOwner
+                                            | QFileDevice::WriteOwner);
+            identity.id = fresh;
+            identity.created = true;
+            identity.note = QStringLiteral("%1 (name %2, new file at %3)")
+                                .arg(fresh, identity.name, path);
+            return identity;
+        }
+    }
+
+    identity.derived = true;
+    identity.id =
+        remoteDerivedMachineId(remoteShortHostname(), remotePrimaryMac());
+    identity.note = QStringLiteral("derived - %1 (the id file is not writable "
+                                   "at %2)")
+                        .arg(identity.id, path);
+    return identity;
+}
+
+RemoteIdentity remoteLoadIdentity(const RemoteOptions &options) {
+    return remoteIdentityAt(remoteMachineIdPath(), options, options.enabled);
 }
 
 

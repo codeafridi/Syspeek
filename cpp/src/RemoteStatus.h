@@ -220,6 +220,37 @@ QString remoteSpoolNoteSuffix(const RemoteReportState &state);
 QString remoteRowText(const RemoteReportState &state);
 
 // ---------------------------------------------------------------------------
+// M100: the machine identity. One durable id per install - a renamed laptop or
+// a replaced network card is the same machine, a reinstall is a new one.
+// ---------------------------------------------------------------------------
+
+// <cache>/syspeek/machine-id
+QString remoteMachineIdPath();
+QString remoteShortHostname();
+QString remotePrimaryMac(); // "" when no interface reports one
+QString remoteDerivedMachineId(const QString &hostname, const QString &mac);
+
+// 8..64 chars of [A-Za-z0-9._-]. A file full of something else is not an id we
+// wrote, so it is replaced rather than trusted.
+bool remoteMachineIdLooksValid(const QString &id);
+
+struct RemoteIdentity {
+    QString id;
+    QString name;  // display name: [remote] name= or the short hostname
+    QString path;
+    bool derived = false; // the id file could not be written
+    bool created = false; // this call wrote the file
+    QString note;         // one line for the card and the dump
+};
+
+// `create` = false reports what is on disk and writes nothing (a diagnostic must
+// not leave state behind); the app passes create = [remote] enabled.
+RemoteIdentity remoteIdentityAt(const QString &path, const RemoteOptions &options,
+                                bool create);
+
+RemoteIdentity remoteLoadIdentity(const RemoteOptions &options);
+
+// ---------------------------------------------------------------------------
 // M99: the disclosure card. Everything the console says about the paid tier
 // comes from these pure builders, so a line the card claims is a line a test
 // can assert - the M85 lesson (a disclosure card needs an assertion per line).
@@ -245,15 +276,19 @@ struct RemoteInfo {
     QString tokenLine;
     QString spoolLine;
     QString lastLine;
+    QString identityLine;
     QStringList scopeLines;
     QString neverSentLine;
     QString rowText; // the Settings GENERAL value (M98)
 };
 
 RemoteInfo remoteInfoFor(const RemoteOptions &options,
-                         const RemoteReportState &state, qint64 nowMs);
+                         const RemoteReportState &state, qint64 nowMs,
+                         const RemoteIdentity &identity = RemoteIdentity{});
 
 QString remoteReportCardText(const RemoteInfo &info);
+
+
 
 // Queued across the reporter thread, so both the enum and the envelope need a
 // metatype. Declared here rather than in each caller so main.cpp and the tests

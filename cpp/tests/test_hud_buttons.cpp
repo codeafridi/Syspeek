@@ -2590,8 +2590,13 @@ int main(int argc, char *argv[]) {
             cardState.spooled = 2;
             cardState.spoolCapacity = 509;
             cardState.spoolDropped = 1;
-            hud.setRemoteInfo(
-                remoteInfoFor(cardOn, cardState, cardState.lastOkMs));
+            RemoteIdentity cardIdentity;
+            cardIdentity.id = QStringLiteral("9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34");
+            cardIdentity.name = QStringLiteral("build-box");
+            cardIdentity.note = QStringLiteral(
+                "9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34 (name build-box)");
+            hud.setRemoteInfo(remoteInfoFor(cardOn, cardState,
+                                            cardState.lastOkMs, cardIdentity));
             const QString onText = cardText();
             check(onText.contains(QStringLiteral(
                       "on -> https://relay.example.test/api/v1/ingest")),
@@ -2609,6 +2614,10 @@ int main(int argc, char *argv[]) {
             check(onText.contains(QStringLiteral("never sent: process list")),
                   "remote card: the closing promise is the literal never-sent "
                   "line");
+            check(onText.contains(QStringLiteral(
+                      "identity    9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34")),
+                  "remote card: the identity row names the id the relay will "
+                  "see");
 
             RemoteReportState freshCard;
             hud.setRemoteInfo(remoteInfoFor(cardOn, freshCard, 0));
@@ -2625,8 +2634,8 @@ int main(int argc, char *argv[]) {
 
             // Leave the delivered state in place: the COPY REPORT check below
             // asserts the reporter line the diagnostic bundle carries.
-            hud.setRemoteInfo(
-                remoteInfoFor(cardOn, cardState, cardState.lastOkMs));
+            hud.setRemoteInfo(remoteInfoFor(cardOn, cardState,
+                                            cardState.lastOkMs, cardIdentity));
         }
 
         auto *copyReport = static_cast<QPushButton *>(nullptr);

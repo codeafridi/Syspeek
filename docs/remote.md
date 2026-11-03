@@ -1,0 +1,71 @@
+# Remote reporting (paid tier client)
+
+The desktop app is free and fully local. `[remote]` is the one part that can send
+anything off the machine, it is **off by default**, and turning it on is the whole
+upgrade — there is no licence check.
+
+## What is sent
+
+One small summary per interval, plus the events the console already shows. The
+Settings page renders this as a list you can read (`REMOTE REPORTING` card); the
+short version:
+
+- host CPU, steal, load, memory totals/available, disk free, network rate
+- socket counts (connections, listening, established)
+- alert and incident counts (open, flapping, unowned)
+- container and Kubernetes counts
+- the focused app's name and pid
+- version, platform, uptime, machine name
+- up to 50 events: kind, severity, subject, title, timestamp
+
+Never sent: the process list, command lines, environment, paths, logs. The
+schema and the client both refuse those keys, and a test scans every payload
+built from a real snapshot for them.
+
+## Configuration
+
+```ini
+[remote]
+enabled = true
+url     = https://relay.example.com     ; bare host means https
+token   = <per-machine ingest token>    ; shown once by the relay
+name    = work-laptop                   ; optional display name
+spool_mb = 8                            ; offline buffer budget, 0 = off
+```
+
+`syspeek --dump` reports the effective values without sending anything.
+
+## The offline spool
+
+A report is written to `<cache>/syspeek/remote-spool.bin` **before** the attempt
+and released only when the relay has answered. Closing the laptop or losing the
+relay therefore costs nothing, and the buffer has a stated ceiling:
+
+- capacity is derived from `spool_mb`, capped at 512 reports
+- the oldest report is dropped when the ring is full, and the drop is counted
+- `413`/`422` drop the refused report with the relay's reason in the log
+- `401`/`403`/`404` stop the drain and keep the buffer for when it is fixed
+
+The card shows `N queued of M, K dropped`, and the reporter's log line carries
+the same numbers.
+
+## Machine identity
+
+The first run with `[remote] enabled=true` writes `<cache>/syspeek/machine-id`:
+a UUID, written through a temp file and an atomic rename, readable and writable
+by your user only. That id is the machine, and it survives restarts, renames and
+app updates. A replaced network card or a changed hostname does not change it.
+
+If that file cannot be written (read-only home, full disk), the id falls back to
+`hostname-<12 hex of sha256(primary MAC)>` and the card says
+`derived - ... (the id file is not writable at ...)` instead of pretending it is
+a stored id. A derived id is stable for as long as the hostname and the primary
+interface are.
+
+A reinstall that deletes the cache directory produces a new id: the relay sees a
+new machine, which is the honest reading of "the old install is gone".
+
+Two machines reporting the same id are never merged by the client. The relay
+flags the duplicate and shows both rows as they reported; Syspeek does not
+renumber a machine on its own, because silently merging two hosts hides that one
+of them is not what it claims to be.

@@ -624,7 +624,13 @@ int main(int argc, char *argv[]) {
     }
 
     QString configError;
-    const Config config = loadConfig(defaultConfigPath(), &configError);
+    Config config = loadConfig(defaultConfigPath(), &configError);
+    // M100: one durable id per install, loaded once and shared by the console,
+    // the reporter and --dump. The file is written only when the tier is on.
+    const RemoteIdentity remoteIdentity = remoteLoadIdentity(config.remote);
+    if (!remoteIdentity.id.isEmpty()) {
+        config.remote.machineId = remoteIdentity.id;
+    }
     // The accent is the one colour a user may change; it has to be installed
     // before the HUD builds its stylesheet, and the palette has to follow it
     // because widgets the QSS cannot reach read Highlight from there.
@@ -743,7 +749,8 @@ int main(int argc, char *argv[]) {
         // M99: the disclosure card starts from the config alone (nothing has
         // been sent yet); the runner replaces it line by line as answers land.
         hud.setRemoteInfo(remoteInfoFor(config.remote, RemoteReportState{},
-                                        QDateTime::currentMSecsSinceEpoch()));
+                                        QDateTime::currentMSecsSinceEpoch(),
+                                        remoteIdentity));
         hud.setMonitors(config.alertRules.isEmpty()
                             ? defaultAlertRules()
                             : config.alertRules);
@@ -891,11 +898,12 @@ int main(int argc, char *argv[]) {
         QObject::connect(&hud, &HudWindow::remoteEnvelopeReady, remoteRunner,
                          &RemoteRunner::setEnvelope);
         QObject::connect(remoteRunner, &RemoteRunner::stateChanged, &hud,
-                         [&hud, remoteOptions = config.remote](
-                             const RemoteReportState &state) {
+                         [&hud, remoteOptions = config.remote,
+                          remoteIdentity](const RemoteReportState &state) {
                              hud.setRemoteInfo(remoteInfoFor(
                                  remoteOptions, state,
-                                 QDateTime::currentMSecsSinceEpoch()));
+                                 QDateTime::currentMSecsSinceEpoch(),
+                                 remoteIdentity));
                          });
         QObject::connect(remoteRunner, &RemoteRunner::reportSent, &hud,
                          [](bool ok, RemoteClass, int latencyMs,

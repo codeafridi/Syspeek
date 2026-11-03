@@ -1417,8 +1417,14 @@ int main(int argc, char *argv[]) {
         demoState.spooled = 2;
         demoState.spoolCapacity = 509;
         demoState.spoolDropped = 0;
-        panel.setRemoteInfo(
-            remoteInfoFor(demoRemote, demoState, demoState.lastOkMs));
+        RemoteIdentity demoIdentity;
+        demoIdentity.id =
+            QStringLiteral("9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34");
+        demoIdentity.name = QStringLiteral("workstation");
+        demoIdentity.note = QStringLiteral(
+            "9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34 (name workstation)");
+        panel.setRemoteInfo(remoteInfoFor(demoRemote, demoState,
+                                          demoState.lastOkMs, demoIdentity));
     }
 
     {
