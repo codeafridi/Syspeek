@@ -289,7 +289,8 @@ endif()
 
 target_include_directories(syspeek_core PUBLIC src)
 target_compile_definitions(syspeek_core PUBLIC
-    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\"")
+    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\""
+    "SYSPEEK_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
 target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::Network)
 if(APPLE)
     target_link_libraries(syspeek_core PUBLIC

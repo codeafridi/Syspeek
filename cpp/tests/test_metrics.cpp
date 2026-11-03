@@ -6975,6 +6975,289 @@ int main(int argc, char *argv[]) {
               "remote: the spool lives in one named file under the cache dir");
     }
 
+    {
+        // M96: the envelope. A fixed snapshot, a fixed clock, byte-identical
+        // output - the wire contract cannot drift silently.
+        DisplaySnapshot snap;
+        snap.appName = QStringLiteral("cursor");
+        snap.pid = QStringLiteral("4242");
+        snap.cpuValid = true;
+        snap.cpuPercent = 12.5;
+        snap.hostAvailable = true;
+        snap.hostCpuPercent = 23.5;
+        snap.hostStealPercent = 1.5;
+        snap.hostLoad1 = 0.75;
+        snap.hostMemTotalKb = 15000000;
+        snap.hostMemAvailableKb = 9000000;
+        snap.hostDiskTotalBytes = 500000000000ULL;
+        snap.hostDiskFreeBytes = 200000000000ULL;
+        snap.hostNetRxPerSec = 12345.5;
+        snap.hostNetTxPerSec = 6789.25;
+        snap.listeningPorts = {QStringLiteral("443"), QStringLiteral("8080")};
+        ConnectionRow established;
+        established.state = QStringLiteral("ESTABLISHED");
+        ConnectionRow established2 = established;
+        ConnectionRow closing;
+        closing.state = QStringLiteral("CLOSE_WAIT");
+        snap.connections = {established, established2, closing};
+        snap.alerts.pushed = true;
+        snap.alerts.openIncidents = 2;
+        snap.alerts.flappingIncidents = 1;
+        snap.alerts.unownedOpen = 1;
+
+        RemoteCounts counts;
+        counts.containersRunning = 3;
+        counts.containersIssues = 1;
+        counts.kubeNodes = 2;
+        counts.kubePods = 7;
+
+        RemoteOptions options;
+        options.machineId = QStringLiteral("mid-golden");
+        options.name = QStringLiteral("build-box");
+        const RemoteMachine machine =
+            remoteMachine(options, QStringLiteral("0.11.2"),
+                          QStringLiteral("linux"), 1762000000000LL);
+
+        QList<TimelineEvent> ring;
+        TimelineEvent alert;
+        alert.atMs = 1761999990000LL;
+        alert.kind = TimelineKind::Alert;
+        alert.severity = TimelineSeverity::Error;
+        alert.subject = QStringLiteral("monitor:app_cpu");
+        alert.title = QStringLiteral("Focused app CPU high");
+        alert.detail = QStringLiteral("breached for 3 ticks");
+        ring.append(alert);
+        TimelineEvent file;
+        file.atMs = 1761999992000LL;
+        file.kind = TimelineKind::FileChange;
+        file.severity = TimelineSeverity::Warning;
+        file.subject = QStringLiteral("file:/etc/passwd");
+        file.title = QStringLiteral("modified /etc/passwd");
+        ring.append(file);
+        TimelineEvent probe;
+        probe.atMs = 1761999995000LL;
+        probe.kind = TimelineKind::Synthetic;
+        probe.severity = TimelineSeverity::Ok;
+        probe.subject = QStringLiteral("check:https://example.test/health");
+        probe.title = QStringLiteral("up");
+        probe.tags = {QStringLiteral("200")};
+        ring.append(probe);
+
+        const RemoteEnvelope golden =
+            remoteBuildEnvelope(machine, snap, ring, 0, counts, 86400);
+        const QByteArray goldenJson = remoteEnvelopeJson(golden);
+
+        const QString fixturePath =
+            QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote/envelope.json");
+        if (qEnvironmentVariableIsSet("SYSPEEK_WRITE_FIXTURE")) {
+            QDir().mkpath(QFileInfo(fixturePath).absolutePath());
+            QFile writer(fixturePath);
+            if (writer.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                writer.write(goldenJson);
+                writer.close();
+            }
+        }
+        QFile fixture(fixturePath);
+        const bool fixtureOpened = fixture.open(QIODevice::ReadOnly);
+        const QByteArray fixtureBytes =
+            fixtureOpened ? fixture.readAll() : QByteArray();
+        check(fixtureOpened && goldenJson == fixtureBytes,
+              "remote envelope: byte-identical to the committed golden fixture");
+
+        const QJsonObject goldenObject = remoteEnvelopeObject(golden);
+        check(remotePrivacyOffenders(goldenObject).isEmpty(),
+              "remote envelope: the golden fixture carries no forbidden field");
+        check(golden.sample.id == QStringLiteral("mid-golden-1762000000000"),
+              "remote envelope: the sample id is machine id + sent-at, fixed at "
+              "build time");
+        check(golden.events.size() == 2, "remote envelope: two events, and the "
+                                         "file change never leaves the machine");
+        const QByteArray fileNeedle =
+            QByteArrayLiteral("/etc/passwd");
+        check(!goldenJson.contains(fileNeedle),
+              "remote envelope: a file path never reaches the wire");
+        const QByteArray detailNeedle = QByteArrayLiteral("breached for 3 ticks");
+        check(!goldenJson.contains(detailNeedle),
+              "remote envelope: event detail is never sent");
+
+        RemoteEnvelope parsed;
+        QString parseReason;
+        check(parseRemoteEnvelopeJson(goldenJson, &parsed, &parseReason),
+              "remote envelope: our own output parses back");
+        check(parsed.machine.id == golden.machine.id
+                  && parsed.machine.name == golden.machine.name
+                  && parsed.machine.version == golden.machine.version
+                  && parsed.machine.platform == golden.machine.platform
+                  && parsed.machine.sentAtMs == golden.machine.sentAtMs,
+              "remote envelope: the machine block round-trips");
+        check(parsed.sample.id == golden.sample.id
+                  && parsed.sample.appName == golden.sample.appName
+                  && parsed.sample.appPid == golden.sample.appPid
+                  && parsed.sample.appCpu == golden.sample.appCpu
+                  && parsed.sample.hostCpu == golden.sample.hostCpu
+                  && parsed.sample.hostSteal == golden.sample.hostSteal
+                  && parsed.sample.hostLoad1 == golden.sample.hostLoad1
+                  && parsed.sample.memTotalKb == golden.sample.memTotalKb
+                  && parsed.sample.memAvailableKb == golden.sample.memAvailableKb
+                  && parsed.sample.diskTotalBytes == golden.sample.diskTotalBytes
+                  && parsed.sample.diskFreeBytes == golden.sample.diskFreeBytes
+                  && parsed.sample.netRxPerSec == golden.sample.netRxPerSec
+                  && parsed.sample.netTxPerSec == golden.sample.netTxPerSec
+                  && parsed.sample.connections == golden.sample.connections
+                  && parsed.sample.listening == golden.sample.listening
+                  && parsed.sample.established == golden.sample.established
+                  && parsed.sample.incidentsOpen == golden.sample.incidentsOpen
+                  && parsed.sample.incidentsFlapping
+                         == golden.sample.incidentsFlapping
+                  && parsed.sample.incidentsUnowned
+                         == golden.sample.incidentsUnowned
+                  && parsed.sample.containersRunning
+                         == golden.sample.containersRunning
+                  && parsed.sample.containersIssues
+                         == golden.sample.containersIssues
+                  && parsed.sample.kubeNodes == golden.sample.kubeNodes
+                  && parsed.sample.kubePods == golden.sample.kubePods
+                  && parsed.sample.uptimeSec == golden.sample.uptimeSec,
+              "remote envelope: every sample field round-trips");
+        check(parsed.events.size() == golden.events.size()
+                  && parsed.events.at(0).id == golden.events.at(0).id
+                  && parsed.events.at(0).kind == golden.events.at(0).kind
+                  && parsed.events.at(0).severity == golden.events.at(0).severity
+                  && parsed.events.at(0).subject == golden.events.at(0).subject
+                  && parsed.events.at(0).title == golden.events.at(0).title
+                  && parsed.events.at(1).tags == golden.events.at(1).tags,
+              "remote envelope: every event field round-trips");
+        check(remoteEnvelopeJson(parsed) == goldenJson,
+              "remote envelope: parse then emit is byte-identical");
+
+        RemoteEnvelope refused;
+        QString reason;
+        const QByteArray newer = QByteArrayLiteral(
+            "{\"schema\":2,\"machine\":{\"id\":\"m\"},\"sample\":{}}");
+        check(!parseRemoteEnvelopeJson(newer, &refused, &reason)
+                  && reason == QStringLiteral("envelope runs schema 2, this "
+                                              "build reads up to 1 - update "
+                                              "Syspeek to read it"),
+              "remote envelope: a newer schema is refused, not half-parsed");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(
+                  QByteArrayLiteral("{\"schema\":0,\"machine\":{\"id\":\"m\"},"
+                                    "\"sample\":{}}"),
+                  &refused, &reason)
+                  && !reason.isEmpty(),
+              "remote envelope: schema 0 is refused");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(QByteArrayLiteral("{}"), &refused, &reason)
+                  && reason.contains(QStringLiteral("no schema")),
+              "remote envelope: an empty object has no schema");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(QByteArrayLiteral("[]"), &refused, &reason)
+                  && reason.contains(QStringLiteral("not a JSON object")),
+              "remote envelope: a JSON array is not an envelope");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(QByteArrayLiteral("{\"schema\":1}"),
+                                       &refused, &reason)
+                  && reason.contains(QStringLiteral("no machine")),
+              "remote envelope: a missing machine block is refused");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(
+                  QByteArrayLiteral("{\"schema\":1,\"machine\":{\"id\":\"\"},"
+                                    "\"sample\":{}}"),
+                  &refused, &reason)
+                  && reason.contains(QStringLiteral("machine.id")),
+              "remote envelope: an empty machine id is refused");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(
+                  QByteArrayLiteral("{\"schema\":1,\"machine\":{\"id\":\"m\"}}"),
+                  &refused, &reason)
+                  && reason.contains(QStringLiteral("no sample")),
+              "remote envelope: a missing sample is refused");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(
+                  QByteArrayLiteral("{\"schema\":1,\"machine\":{\"id\":\"m\"},"
+                                    "\"sample\":[]}"),
+                  &refused, &reason)
+                  && reason.contains(QStringLiteral("no sample")),
+              "remote envelope: a sample that is not an object is refused");
+        reason.clear();
+        check(!parseRemoteEnvelopeJson(
+                  QByteArrayLiteral("{\"schema\":1,\"machine\":{\"id\":\"m\"},"
+                                    "\"sample\":{},\"events\":{}}"),
+                  &refused, &reason)
+                  && reason.contains(QStringLiteral("not an array")),
+              "remote envelope: events that are not an array are refused");
+
+        QList<TimelineEvent> many;
+        for (int i = 0; i < 200; ++i) {
+            TimelineEvent event;
+            event.atMs = 1000 + i;
+            event.kind = TimelineKind::Other;
+            event.severity = TimelineSeverity::Info;
+            event.subject = QStringLiteral("s%1").arg(i);
+            event.title = QStringLiteral("t%1").arg(i);
+            many.append(event);
+        }
+        const QList<RemoteEvent> capped = remoteBuildEvents(many, 0, 100000, QStringLiteral("m"));
+        check(capped.size() == kRemoteMaxEvents && capped.first().atMs == 1150
+                  && capped.last().atMs == 1199,
+              "remote envelope: 200 events in, the newest 50 out, order kept");
+        const QList<RemoteEvent> window = remoteBuildEvents(many, 1100, 100000, QStringLiteral("m"));
+        check(window.size() == kRemoteMaxEvents && window.first().atMs == 1150
+                  && window.last().atMs == 1199,
+              "remote envelope: since filters the ring before the cap");
+        check(remoteBuildEvents(many, 0, 500, QStringLiteral("m")).isEmpty(),
+              "remote envelope: an event after now is not sent");
+
+        DisplaySnapshot heavy;
+        heavy.appName = QStringLiteral("chrome");
+        heavy.pid = QStringLiteral("77");
+        for (int i = 0; i < 400; ++i) {
+            ProcessRow row;
+            row.pid = 2000 + i;
+            row.name = QStringLiteral("proc-%1").arg(i);
+            row.memory = QStringLiteral("10 MB");
+            heavy.processes.append(row);
+        }
+        const RemoteEnvelope heavyEnvelope =
+            remoteBuildEnvelope(machine, heavy, {}, 0, RemoteCounts{}, -1);
+        const QJsonObject heavyObject = remoteEnvelopeObject(heavyEnvelope);
+        check(remotePrivacyOffenders(heavyObject).isEmpty(),
+              "remote envelope: a 400-process snapshot still carries no "
+              "process data");
+        check(!remoteEnvelopeJson(heavyEnvelope).contains("proc-199"),
+              "remote envelope: a process name cannot appear on the wire");
+        check(heavyObject.value(QStringLiteral("sample"))
+                  .toObject()
+                  .value(QStringLiteral("host"))
+                  .toObject()
+                  .value(QStringLiteral("cpu"))
+                  .isNull(),
+              "remote envelope: a warming host is null, never a fake zero");
+
+        const QStringList offenderKeys{
+            QStringLiteral("cmdline"),  QStringLiteral("environ"),
+            QStringLiteral("env"),      QStringLiteral("exe"),
+            QStringLiteral("path"),     QStringLiteral("argv"),
+            QStringLiteral("cwd"),      QStringLiteral("args"),
+            QStringLiteral("log"),      QStringLiteral("lines"),
+            QStringLiteral("processes"), QStringLiteral("processlist")};
+        bool everyOffenderCaught = true;
+        for (const QString &key : offenderKeys) {
+            QJsonObject payload;
+            QJsonObject nested;
+            nested.insert(key, QStringLiteral("x"));
+            QJsonArray array;
+            array.append(nested);
+            payload.insert(QStringLiteral("sample"), array);
+            if (remotePrivacyOffenders(payload) != key) {
+                everyOffenderCaught = false;
+                std::printf("      missed offender key %s\n", qPrintable(key));
+            }
+        }
+        check(everyOffenderCaught,
+              "remote privacy: every forbidden key is caught at any depth");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }
