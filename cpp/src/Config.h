@@ -121,6 +121,10 @@ struct RemoteOptions {
     QString machineId;
     int intervalMs = 15000;
     int timeoutMs = 3000;
+    // [remote] ca_file: a private CA for a self-hosted relay. Verification is
+    // never turned off; naming the CA is the way to trust a certificate the
+    // system store does not know.
+    QString caFile;
     // [remote] spool_mb: bounded offline buffer. 0 disables the spool (a
     // dropped report stays dropped, and the count is stated).
     int spoolMb = 8;

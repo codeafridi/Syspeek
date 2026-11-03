@@ -1580,9 +1580,31 @@ QString dumpReportJson(int maxProcs) {
             remoteIdentityAt(idPath, idOptions, false);
         const bool idNoWriteOk = noWrite.id.isEmpty() && !noWrite.created
                                  && !QFile::exists(idPath);
+        // A provisioned id ([remote] machine_id=) is written as-is on the first
+        // run and is the file's value from then on.
+        const RemoteIdentity seededId = remoteIdentityAt(
+            idPath, idOptions, true, QStringLiteral("seeded-id-1234"));
+        const RemoteIdentity reseeded = remoteIdentityAt(
+            idPath, idOptions, true, QStringLiteral("other-id-5678"));
+        const bool idSeedOk = seededId.id == QStringLiteral("seeded-id-1234")
+                              && seededId.note.contains(QStringLiteral(
+                                     "machine_id="))
+                              && reseeded.id == seededId.id;
+        QFile::remove(idPath);
+        // A hostname longer than the id budget is cut before the hash, so a
+        // derived id always fits the 64-byte field it is stored in (a macOS
+        // runner found this: the id was 70 chars and nothing accepted it).
+        const QString longHost(80, QLatin1Char('h'));
+        const QString longId = remoteDerivedMachineId(longHost,
+                                                      QStringLiteral("aa:bb"));
+        const bool idLongHostOk = longId.size() <= kRemoteMachineIdMaxChars
+                                  && remoteMachineIdLooksValid(longId);
         idDir.removeRecursively();
+        remote.insert(QStringLiteral("identitySeedOk"), idSeedOk);
+        remote.insert(QStringLiteral("identityLongHostOk"), idLongHostOk);
         remote.insert(QStringLiteral("identityOk"),
                       idStable && idRenews && idDerivedOk && idNoWriteOk
+                          && idSeedOk && idLongHostOk
                           && remoteMachineIdLooksValid(firstId.id));
         remote.insert(QStringLiteral("identityStable"), idStable);
         remote.insert(QStringLiteral("identityRenews"), idRenews);

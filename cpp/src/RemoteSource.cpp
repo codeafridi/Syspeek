@@ -29,8 +29,35 @@ QString remoteAnswerReason(const QByteArray &body) {
 
 } // namespace
 
+QSslConfiguration remoteSslConfiguration(const QString &caFile,
+                                         QString *error) {
+    if (error != nullptr) {
+        error->clear();
+    }
+    QSslConfiguration config = QSslConfiguration::defaultConfiguration();
+    // Never AutoVerifyPeer: this client is a client, and saying so explicitly
+    // means a future platform default cannot quietly stop verifying.
+    config.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    if (caFile.isEmpty()) {
+        return config;
+    }
+    const QList<QSslCertificate> extra = QSslCertificate::fromPath(
+        caFile, QSsl::Pem, QSslCertificate::PatternSyntax::FixedString);
+    if (extra.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("the CA file %1 holds no certificate "
+                                    "(expected PEM)")
+                         .arg(caFile);
+        }
+        return QSslConfiguration();
+    }
+    config.addCaCertificates(extra);
+    return config;
+}
+
 RemotePostResult remoteHttpPost(const QString &url, const QString &token,
-                                const QByteArray &body, int timeoutMs) {
+                                const QByteArray &body, int timeoutMs,
+                                const QString &caFile) {
     RemotePostResult result;
     const QUrl target(url);
     if (!target.isValid() || target.host().isEmpty()) {
@@ -77,6 +104,19 @@ RemotePostResult remoteHttpPost(const QString &url, const QString &token,
     clock.start();
 
     if (tls) {
+        QString caError;
+        const QSslConfiguration sslConfig =
+            remoteSslConfiguration(caFile, &caError);
+        if (!caError.isEmpty()) {
+            result.latencyMs = int(clock.elapsed());
+            result.error = caError;
+            result.classification = RemoteClass::Transport;
+            return result;
+        }
+        secure->setSslConfiguration(sslConfig);
+        // Name the certificate the relay must present: a certificate for
+        // another host is not a valid answer to this address.
+        secure->setPeerVerifyName(target.host());
         secure->connectToHostEncrypted(target.host(), quint16(port));
         if (!secure->waitForConnected(budget)) {
             result.latencyMs = int(clock.elapsed());
@@ -84,7 +124,11 @@ RemotePostResult remoteHttpPost(const QString &url, const QString &token,
             result.classification = RemoteClass::Transport;
             return result;
         }
-        if (!secure->waitForEncrypted(budget)) {
+        // One budget for the whole exchange, not one per step: a host that
+        // blackholes the handshake must not cost twice the configured timeout.
+        const int handshakeBudget = budget - int(clock.elapsed());
+        if (handshakeBudget <= 0
+            || !secure->waitForEncrypted(qMax(1, handshakeBudget))) {
             result.latencyMs = int(clock.elapsed());
             result.error = QStringLiteral("TLS handshake failed: %1")
                                .arg(secure->errorString());
@@ -426,7 +470,7 @@ void RemoteRunner::poll() {
     }
 
     const RemotePostResult result = remoteHttpPost(
-        options.url, options.token, body, options.timeoutMs);
+        options.url, options.token, body, options.timeoutMs, options.caFile);
 
     // A body the relay refused outright (413/422/other 4xx) will be refused
     // forever: drop it with the answer on the record and move on, rather than
@@ -440,6 +484,7 @@ void RemoteRunner::poll() {
 
     int backlog = 0;
     int retryMs = -1;
+    bool stoppedNow = false;
     {
         QMutexLocker lock(&m_mutex);
         m_state.lastClass = result.classification;
@@ -451,6 +496,7 @@ void RemoteRunner::poll() {
             m_state.lastOkMs = m_state.lastAttemptMs;
             m_state.consecutiveFailures = 0;
             m_state.nextRetryMs = -1;
+            m_consecutiveRefused = 0;
             if (!fromSpool) {
                 m_lastSentAtMs = sentAtMs;
             }
@@ -459,6 +505,13 @@ void RemoteRunner::poll() {
             m_state.refused += 1;
             m_state.consecutiveFailures = 0;
             m_state.nextRetryMs = -1;
+            ++m_consecutiveRefused;
+            if (m_consecutiveRefused >= kRemoteMaxConsecutiveRefused) {
+                // Three refusals in a row is a configuration, not a bad report:
+                // stop and keep whatever is left rather than emptying the
+                // buffer into a relay that will refuse all of it.
+                m_state.stopped = true;
+            }
         } else {
             m_state.failed += 1;
             m_state.consecutiveFailures += 1;
@@ -477,6 +530,7 @@ void RemoteRunner::poll() {
         }
         backlog = m_spool.isOpen() ? m_spool.count() : 0;
         retryMs = m_state.nextRetryMs;
+        stoppedNow = m_state.stopped;
     }
 
     // A backlog is drained quickly but not instantly: 250 ms between records
@@ -497,7 +551,14 @@ void RemoteRunner::poll() {
                     .arg(result.httpStatus)
                     .arg(remoteAnswerReason(result.body)));
         publish(QString());
-        schedule(nextDelay);
+        if (!stoppedNow) {
+            schedule(nextDelay);
+        } else {
+            logOnce(QStringLiteral("remote: stopped after %1 refused payloads - "
+                                   "%2 report(s) stay in the spool")
+                        .arg(m_consecutiveRefused)
+                        .arg(backlog));
+        }
         return;
     }
     if (remoteClassIsTerminal(result.classification)) {

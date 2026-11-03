@@ -664,6 +664,8 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             settings.value(QStringLiteral("name")).toString().trimmed();
         config.remote.machineId =
             settings.value(QStringLiteral("machine_id")).toString().trimmed();
+        config.remote.caFile =
+            settings.value(QStringLiteral("ca_file")).toString().trimmed();
         const int interval =
             settings.value(QStringLiteral("interval_ms")).toInt();
         if (interval > 0) {

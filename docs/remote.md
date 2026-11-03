@@ -31,7 +31,17 @@ url     = https://relay.example.com     ; bare host means https
 token   = <per-machine ingest token>    ; shown once by the relay
 name    = work-laptop                   ; optional display name
 spool_mb = 8                            ; offline buffer budget, 0 = off
+ca_file = /etc/ssl/corp-ca.pem          ; private CA for a self-hosted relay
 ```
+
+## Transport trust
+
+The connection is verified, always: the certificate must chain to a trust anchor
+and must be issued for the host in `[remote] url=`. There is no switch that turns
+verification off. A self-hosted relay signed by a private CA is trusted by naming
+that CA in `ca_file`, which is **added to** the system store rather than
+replacing it — and a `ca_file` that holds no certificate fails with the file's
+name, not with a quiet fallback to the system store.
 
 `syspeek --dump` reports the effective values without sending anything.
 
@@ -43,7 +53,10 @@ relay therefore costs nothing, and the buffer has a stated ceiling:
 
 - capacity is derived from `spool_mb`, capped at 512 reports
 - the oldest report is dropped when the ring is full, and the drop is counted
-- `413`/`422` drop the refused report with the relay's reason in the log
+- `413`/`422` drop the refused report with the relay's reason in the log, and
+  **three in a row** stop the drain with the rest of the buffer intact — one
+  refused body is a bad report, three is a bad configuration, and a
+  misconfiguration must not empty an hour of reports one at a time
 - `401`/`403`/`404` stop the drain and keep the buffer for when it is fixed
 
 The card shows `N queued of M, K dropped`, and the reporter's log line carries
@@ -61,6 +74,12 @@ If that file cannot be written (read-only home, full disk), the id falls back to
 `derived - ... (the id file is not writable at ...)` instead of pretending it is
 a stored id. A derived id is stable for as long as the hostname and the primary
 interface are.
+
+`[remote] machine_id=` provisions a machine: on the first run the authored id is
+written to the file, and from then on the **file** is the source of truth, so
+editing the config later cannot renumber a machine that already reported. An
+authored value that is not a usable id (8–64 characters of letters, digits, `.`,
+`-`, `_`) is refused with that reason and a real id is written instead.
 
 A reinstall that deletes the cache directory produces a new id: the relay sees a
 new machine, which is the honest reading of "the old install is gone".

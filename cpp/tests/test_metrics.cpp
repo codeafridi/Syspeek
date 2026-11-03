@@ -7095,6 +7095,17 @@ int main(int argc, char *argv[]) {
         const QJsonObject goldenObject = remoteEnvelopeObject(golden);
         check(remotePrivacyOffenders(goldenObject).isEmpty(),
               "remote envelope: the golden fixture carries no forbidden field");
+        {
+            RemoteOptions unnamed;
+            unnamed.machineId = QStringLiteral("mid-1");
+            const RemoteMachine named =
+                remoteMachine(unnamed, QStringLiteral("0.11.2"),
+                              QStringLiteral("linux"), 1LL);
+            check(named.name == remoteShortHostname()
+                      && !named.name.isEmpty(),
+                  "remote envelope: an unnamed machine reports its hostname, "
+                  "never an empty label");
+        }
         check(golden.sample.id == QStringLiteral("mid-golden-1762000000000"),
               "remote envelope: the sample id is machine id + sent-at, fixed at "
               "build time");
@@ -7466,6 +7477,36 @@ int main(int argc, char *argv[]) {
               "remote card: the scope matrix states what is not sent");
         check(onCard.contains(neverSent),
               "remote card: the closing line is the shared never-sent list");
+        check(onCard.contains(QStringLiteral("tier        paid - the reporter "
+                                             "ships in the free app")),
+              "remote card: the tier line states what is free and what is paid");
+        check(onInfo.caLine
+                  == QStringLiteral("system certificate store")
+                  && onCard.contains(QStringLiteral(
+                      "ca          system certificate store")),
+              "remote card: the ca row names the trust the connection uses");
+        {
+            RemoteOptions broken = cardOn;
+            broken.url = QStringLiteral("ftp://relay.example.test");
+            const RemoteInfo brokenInfo =
+                remoteInfoFor(broken, RemoteReportState{}, 0);
+            check(brokenInfo.stateLine.contains(
+                      QStringLiteral("no relay address - ftp:// is not http or "
+                                     "https"))
+                      && remoteReportCardText(brokenInfo)
+                             .contains(QStringLiteral("no relay address")),
+                  "remote card: an address that does not parse is stated with "
+                  "its reason, not shown as an empty target");
+            RemoteOptions privateCa = cardOn;
+            privateCa.caFile = QStringLiteral("/etc/ssl/corp-ca.pem");
+            const RemoteInfo caInfo =
+                remoteInfoFor(privateCa, RemoteReportState{}, 0);
+            check(caInfo.caLine.contains(QStringLiteral("/etc/ssl/corp-ca.pem"))
+                      && caInfo.caLine.contains(
+                          QStringLiteral("verification stays on")),
+                  "remote card: a private CA is named, and verification is "
+                  "stated to stay on");
+        }
 
         RemoteReportState stoppedCard;
         stoppedCard.stopped = true;
@@ -7560,6 +7601,45 @@ int main(int argc, char *argv[]) {
                                                  QStringLiteral(
                                                      "aa:bb:cc:dd:ee:ff"))),
                   "remote identity: a derived id is still a valid id");
+            {
+                // A macOS runner found this: a long hostname produced a 70-char
+                // derived id, which no 64-byte field accepts.
+                const QString longHost(80, QLatin1Char('h'));
+                const QString longId = remoteDerivedMachineId(
+                    longHost, QStringLiteral("aa:bb:cc:dd:ee:ff"));
+                check(longId.size() <= kRemoteMachineIdMaxChars
+                          && remoteMachineIdLooksValid(longId),
+                      "remote identity: a hostname longer than the id budget is "
+                      "cut, never turned into an unusable id");
+            }
+            {
+                // [remote] machine_id= provisions a machine: the authored id is
+                // written on the first run and the file wins from then on.
+                const QString seedPath =
+                    idDir.filePath(QStringLiteral("seeded-id"));
+                const RemoteIdentity seeded = remoteIdentityAt(
+                    seedPath, idOptions, true, QStringLiteral("seeded-id-1234"));
+                check(seeded.id == QStringLiteral("seeded-id-1234")
+                          && seeded.created
+                          && seeded.note.contains(QStringLiteral("machine_id=")),
+                      "remote identity: an authored machine_id is written as the "
+                      "id");
+                const RemoteIdentity other = remoteIdentityAt(
+                    seedPath, idOptions, true, QStringLiteral("other-id-5678"));
+                check(other.id == QStringLiteral("seeded-id-1234"),
+                      "remote identity: the stored file wins over a changed "
+                      "machine_id=");
+                QFile::remove(seedPath);
+                const RemoteIdentity badSeed = remoteIdentityAt(
+                    seedPath, idOptions, true,
+                    QStringLiteral("not a valid id"));
+                check(badSeed.id != QStringLiteral("not a valid id")
+                          && remoteMachineIdLooksValid(badSeed.id)
+                          && badSeed.note.contains(
+                              QStringLiteral("not a usable id")),
+                      "remote identity: an unusable machine_id= is refused with "
+                      "the reason, and a real id is written instead");
+            }
             check(remoteDerivedMachineId(QStringLiteral("box"),
                                          QStringLiteral("aa:bb:cc:dd:ee:ff"))
                       != remoteDerivedMachineId(
@@ -7578,6 +7658,46 @@ int main(int argc, char *argv[]) {
             check(remoteInfoFor(cardOptions, RemoteReportState{}, 0, cardLine)
                       .identityLine.contains(cardLine.id),
                   "remote card: the identity row names the id and the name");
+        }
+
+        // M100b: TLS. Verification is always on; a private CA is added to the
+        // system store, never substituted for it.
+        {
+            const QString caPath =
+                QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote/test-ca.pem");
+            QString caError;
+            const QSslConfiguration withCa =
+                remoteSslConfiguration(caPath, &caError);
+            check(caError.isEmpty()
+                      && withCa.caCertificates().size()
+                             == QSslConfiguration::defaultConfiguration()
+                                        .caCertificates()
+                                        .size()
+                                    + 1,
+                  "remote tls: a named CA file is added to the system store, "
+                  "never substituted for it");
+            check(withCa.peerVerifyMode() == QSslSocket::VerifyPeer,
+                  "remote tls: verification is on, never deferred to a default");
+            QString badError;
+            const QSslConfiguration bad =
+                remoteSslConfiguration(QStringLiteral("/nonexistent/ca.pem"),
+                                       &badError);
+            check(bad.caCertificates().isEmpty() && !badError.isEmpty()
+                      && badError.contains(QStringLiteral("holds no "
+                                                         "certificate")),
+                  "remote tls: an unreadable CA file fails with its name, not "
+                  "with a quiet fallback");
+            QString systemError;
+            const QSslConfiguration system =
+                remoteSslConfiguration(QString(), &systemError);
+            check(systemError.isEmpty()
+                      && system.peerVerifyMode() == QSslSocket::VerifyPeer
+                      && system.caCertificates().size()
+                             == QSslConfiguration::defaultConfiguration()
+                                    .caCertificates()
+                                    .size(),
+                  "remote tls: with no CA file the system store is used "
+                  "unchanged");
         }
 
         // The docs statement the identity rule depends on, read from the file
@@ -8148,6 +8268,102 @@ int main(int argc, char *argv[]) {
             check(last.spooled >= 1,
                   "remote spool: an auth refusal leaves the buffered reports "
                   "intact for when the token is fixed");
+
+            thread->quit();
+            QElapsedTimer shutdown;
+            shutdown.start();
+            while (!thread->isFinished() && shutdown.elapsed() < 8000) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+            thread->wait();
+            delete thread;
+        }
+
+        // --- M98: a configuration that refuses every body must not empty the
+        // buffer one report at a time.
+        {
+            QTemporaryDir spoolDir;
+            const QString spoolPath =
+                spoolDir.filePath(QStringLiteral("remote.spool"));
+            QThread *thread = new QThread;
+            RemoteRunner *runner = new RemoteRunner;
+            runner->moveToThread(thread);
+            auto seen = std::make_shared<QVector<RemoteReportState>>();
+            QObject::connect(runner, &RemoteRunner::stateChanged, runner,
+                             [seen](const RemoteReportState &state) {
+                                 seen->append(state);
+                             });
+            auto waitState = [&app, seen](auto test, int maxMs) {
+                QElapsedTimer clock;
+                clock.start();
+                while (clock.elapsed() < maxMs) {
+                    for (const RemoteReportState &state : *seen) {
+                        if (test(state)) {
+                            return true;
+                        }
+                    }
+                    QThread::msleep(10);
+                    app.processEvents();
+                }
+                return false;
+            };
+            RemoteReportOptions options;
+            options.enabled = true;
+            options.url = QStringLiteral("http://127.0.0.1:1/api/v1/ingest");
+            options.token = QStringLiteral("token-abc");
+            options.intervalMs = 1000;
+            options.timeoutMs = 500;
+            options.spoolPath = spoolPath;
+            options.spoolBytes =
+                kRemoteSpoolHeaderBytes + 16 * kRemoteSpoolRecordBytes;
+            runner->setOptions(options);
+            QObject::connect(thread, &QThread::started, runner,
+                             &RemoteRunner::start);
+            QObject::connect(thread, &QThread::finished, runner,
+                             &QObject::deleteLater);
+            thread->start();
+            for (int i = 0; i < 5; ++i) {
+                RemoteEnvelope envelope;
+                envelope.machine.id = QStringLiteral("machine-1");
+                envelope.machine.sentAtMs = 1762001000000LL + i * 1000;
+                envelope.sample.id = remoteSampleId(envelope.machine.id,
+                                                    envelope.machine.sentAtMs);
+                QMetaObject::invokeMethod(
+                    runner,
+                    [runner, envelope]() { runner->setEnvelope(envelope); },
+                    Qt::QueuedConnection);
+            }
+            check(waitState([](const RemoteReportState &state) {
+                      return state.spooled == 5;
+                  }, 5000),
+                  "remote spool: five reports wait while the relay is down");
+
+            RelayStub refusing;
+            refusing.statusLine =
+                QByteArrayLiteral("HTTP/1.1 422 Unprocessable Entity");
+            refusing.body = QByteArrayLiteral("{\"error\":\"schema mismatch\"}");
+            refusing.begin();
+            options.url = refusing.url();
+            QMetaObject::invokeMethod(
+                runner, [runner, options]() { runner->setOptions(options); },
+                Qt::QueuedConnection);
+            check(waitState([](const RemoteReportState &state) {
+                      return state.stopped;
+                  }, 10000),
+                  "remote spool: three refused payloads in a row stop the "
+                  "drain");
+            pumpFor(1200);
+            RemoteReportState last;
+            if (!seen->isEmpty()) {
+                last = seen->last();
+            }
+            check(refusing.connections.load()
+                          == kRemoteMaxConsecutiveRefused
+                      && last.refused == kRemoteMaxConsecutiveRefused
+                      && last.spooled == 2,
+                  "remote spool: a systemic refusal keeps the rest of the "
+                  "buffer instead of dropping it report by report");
 
             thread->quit();
             QElapsedTimer shutdown;

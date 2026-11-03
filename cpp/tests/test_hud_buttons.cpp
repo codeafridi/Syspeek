@@ -2618,6 +2618,11 @@ int main(int argc, char *argv[]) {
                       "identity    9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34")),
                   "remote card: the identity row names the id the relay will "
                   "see");
+            check(onText.contains(QStringLiteral("tier        paid")),
+                  "remote card: the paid tier boundary is stated on the card");
+            check(onText.contains(
+                      QStringLiteral("ca          system certificate store")),
+                  "remote card: the card states which trust anchor is used");
 
             RemoteReportState freshCard;
             hud.setRemoteInfo(remoteInfoFor(cardOn, freshCard, 0));

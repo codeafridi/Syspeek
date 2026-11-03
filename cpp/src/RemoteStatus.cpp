@@ -301,8 +301,9 @@ QString remoteSettingsLine(const RemoteOptions &options) {
     const QString base = remoteNormalizeUrl(options.url, &error);
     if (base.isEmpty()) {
         return error.isEmpty()
-                   ? QStringLiteral("off - no relay address ([remote] url=)")
-                   : QStringLiteral("off - %1 ([remote] url=)").arg(error);
+                   ? QStringLiteral("no relay address ([remote] url=)")
+                   : QStringLiteral("no relay address - %1 ([remote] url=)")
+                         .arg(error);
     }
     if (options.token.isEmpty()) {
         return QStringLiteral("%1 - no token, the relay will refuse it "
@@ -332,7 +333,10 @@ RemoteMachine remoteMachine(const RemoteOptions &options, const QString &version
                             const QString &platform, qint64 sentAtMs) {
     RemoteMachine machine;
     machine.id = options.machineId;
-    machine.name = options.name;
+    // An unnamed machine is not an anonymous row on the relay: the hostname is
+    // the label a person recognises, and [remote] name= overrides it.
+    machine.name = options.name.trimmed().isEmpty() ? remoteShortHostname()
+                                                    : options.name.trimmed();
     machine.version = version;
     machine.platform = platform;
     machine.sentAtMs = sentAtMs;
@@ -440,8 +444,13 @@ QList<RemoteEvent> remoteBuildEvents(const QList<TimelineEvent> &ring,
              + QLatin1Char('|') + wire.kind + QLatin1Char('|') + wire.severity
              + QLatin1Char('|') + wire.subject + QLatin1Char('|') + wire.title)
                 .toUtf8();
+        // SHA-256 truncated to 64 bits: the id only has to be unique within a
+        // machine's event stream, and a paid wire format should not carry a
+        // hash the whole industry has retired.
         wire.id = QString::fromLatin1(
-            QCryptographicHash::hash(seed, QCryptographicHash::Md5).toHex().left(16));
+            QCryptographicHash::hash(seed, QCryptographicHash::Sha256)
+                .toHex()
+                .left(16));
         events.append(wire);
     }
     return events;
@@ -798,6 +807,15 @@ QString remoteClassText(RemoteClass value, int httpStatus) {
                               "[remote] url=)")
             .arg(httpStatus);
     case RemoteClass::Rejected:
+        // A 3xx is not a refusal of the body: the address itself is wrong, and
+        // saying "the payload was refused" would send the user looking at the
+        // schema instead of at [remote] url=.
+        if (httpStatus >= 300 && httpStatus < 400) {
+            return QStringLiteral("%1 - the relay answered with a redirect, "
+                                  "which is not followed (set [remote] url= to "
+                                  "the final address)")
+                .arg(httpStatus);
+        }
         return QStringLiteral("%1 - the relay refused this payload (413 means "
                               "it is too large, 422 means a field was rejected)")
             .arg(httpStatus);
@@ -934,7 +952,8 @@ QList<RemoteFieldGroup> remoteFieldGroups() {
         {QStringLiteral("focused app name and pid"), true},
         {QStringLiteral("version, platform and machine name"), true},
         {QStringLiteral("uptime"), true},
-        {QStringLiteral("events (kind, severity, subject, title, up to 50)"),
+        {QStringLiteral("events (kind, severity, subject, title, up to 50) - "
+                        "a subject can be the name you gave a monitor or check"),
          true},
         {QStringLiteral("process list, command lines, environment, file paths, "
                         "logs"),
@@ -958,18 +977,41 @@ RemoteInfo remoteInfoFor(const RemoteOptions &options,
                                + group.name;
     }
 
+    // The boundary of the tier, in the tier's own words: the reporter ships in
+    // the free app, the relay is the paid part, and no third party is involved
+    // either way.
+    info.tierLine = QStringLiteral("paid - the reporter ships in the free app, "
+                                   "the relay is the paid service, and only it "
+                                   "sees this: no third party, no analytics");
+
     // Nothing about the address or the token is shown while the switch is off:
     // a card that lists a relay for a feature that is not running is a claim
     // the machine is not keeping.
     if (!options.enabled) {
+        info.stateLine =
+            QStringLiteral("off - nothing leaves this machine ([remote] "
+                           "enabled=false)");
         info.tokenLine = QStringLiteral("not set - nothing to send");
         info.spoolLine =
             QStringLiteral("none - the spool only opens while reporting is on");
+        info.caLine = QStringLiteral("not used while reporting is off");
         info.lastLine = QStringLiteral("never");
         return info;
     }
 
-    info.ingestUrl = remoteIngestUrl(options.url);
+    QString urlError;
+    info.ingestUrl = remoteIngestUrl(options.url, &urlError);
+    if (info.ingestUrl.isEmpty()) {
+        // Enabled with an address that does not parse: say which address and
+        // why, instead of a state line that ends in nothing.
+        info.stateLine = QStringLiteral("no relay address - %1 ([remote] "
+                                        "url=)")
+                             .arg(urlError.isEmpty()
+                                      ? QStringLiteral("not set")
+                                      : urlError);
+    } else {
+        info.stateLine = QStringLiteral("on -> %1").arg(info.ingestUrl);
+    }
     if (options.token.isEmpty()) {
         info.tokenLine = QStringLiteral("not set - the relay will refuse every "
                                         "report ([remote] token=)");
@@ -977,6 +1019,13 @@ RemoteInfo remoteInfoFor(const RemoteOptions &options,
         info.tokenLine = QStringLiteral("set (%1 chars, never printed)")
                              .arg(options.token.size());
     }
+    info.caLine = options.caFile.isEmpty()
+        ? (info.ingestUrl.startsWith(QStringLiteral("http://"))
+               ? QStringLiteral("not used - plain http to this relay")
+               : QStringLiteral("system certificate store"))
+        : QStringLiteral("%1 (added to the system store, verification stays "
+                         "on)")
+              .arg(options.caFile);
 
     if (options.spoolMb <= 0) {
         info.spoolLine = QStringLiteral("off ([remote] spool_mb=0) - an "
@@ -1032,20 +1081,22 @@ RemoteInfo remoteInfoFor(const RemoteOptions &options,
 
 QString remoteReportCardText(const RemoteInfo &info) {
     if (!info.enabled) {
-        return QStringLiteral("state       off - nothing leaves this machine "
-                              "([remote] enabled=false)\n"
-                              "token       %1\n"
-                              "spool       %2\n"
-                              "last        %3\n"
-                              "%4")
-            .arg(info.tokenLine, info.spoolLine, info.lastLine,
-                 info.neverSentLine);
+        return QStringLiteral("state       %1\n"
+                              "tier        %2\n"
+                              "token       %3\n"
+                              "spool       %4\n"
+                              "last        %5\n"
+                              "%6")
+            .arg(info.stateLine, info.tierLine, info.tokenLine, info.spoolLine,
+                 info.lastLine, info.neverSentLine);
     }
     QStringList lines;
-    lines << QStringLiteral("state       on -> %1").arg(info.ingestUrl);
-    lines << QStringLiteral("token       %1").arg(info.tokenLine);
+    lines << QStringLiteral("state       %1").arg(info.stateLine);
+    lines << QStringLiteral("tier        %1").arg(info.tierLine);
     lines << QStringLiteral("identity    %1").arg(info.identityLine);
+    lines << QStringLiteral("token       %1").arg(info.tokenLine);
     lines << QStringLiteral("spool       %1").arg(info.spoolLine);
+    lines << QStringLiteral("ca          %1").arg(info.caLine);
     lines << QStringLiteral("last        %1").arg(info.lastLine);
     for (int i = 0; i < info.scopeLines.size(); ++i) {
         lines << QStringLiteral("%1%2")
@@ -1111,6 +1162,10 @@ QString remoteDerivedMachineId(const QString &hostname, const QString &mac) {
                     ? ch
                     : QLatin1Char('-');
     }
+    // One record field and one relay column hold this id, and both are 64
+    // bytes: a hostname longer than the budget is cut BEFORE the hash is
+    // appended, so a long name cannot produce an id that will not fit.
+    safe = safe.left(kRemoteMachineIdMaxChars - 13);
     const QByteArray digest = QCryptographicHash::hash(
         (host + QLatin1Char('|') + mac.toLower()).toUtf8(),
         QCryptographicHash::Sha256);
@@ -1119,7 +1174,7 @@ QString remoteDerivedMachineId(const QString &hostname, const QString &mac) {
 }
 
 bool remoteMachineIdLooksValid(const QString &id) {
-    if (id.size() < 8 || id.size() > 64) {
+    if (id.size() < 8 || id.size() > kRemoteMachineIdMaxChars) {
         return false;
     }
     for (const QChar ch : id) {
@@ -1132,7 +1187,8 @@ bool remoteMachineIdLooksValid(const QString &id) {
 }
 
 RemoteIdentity remoteIdentityAt(const QString &path,
-                                const RemoteOptions &options, bool create) {
+                                const RemoteOptions &options, bool create,
+                                const QString &seed) {
     RemoteIdentity identity;
     identity.path = path;
     identity.name = options.name.trimmed().isEmpty() ? remoteShortHostname()
@@ -1161,7 +1217,10 @@ RemoteIdentity remoteIdentityAt(const QString &path,
     // uses it.
     const QDir dir = QFileInfo(path).dir();
     if (dir.exists() || dir.mkpath(QStringLiteral("."))) {
-        const QString fresh = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const bool seeded = remoteMachineIdLooksValid(seed.trimmed());
+        const QString fresh =
+            seeded ? seed.trimmed()
+                   : QUuid::createUuid().toString(QUuid::WithoutBraces);
         QSaveFile out(path);
         bool ok = out.open(QIODevice::WriteOnly);
         if (ok) {
@@ -1172,8 +1231,20 @@ RemoteIdentity remoteIdentityAt(const QString &path,
                                             | QFileDevice::WriteOwner);
             identity.id = fresh;
             identity.created = true;
-            identity.note = QStringLiteral("%1 (name %2, new file at %3)")
-                                .arg(fresh, identity.name, path);
+            if (seeded) {
+                identity.note =
+                    QStringLiteral("%1 (name %2, from [remote] machine_id=)")
+                        .arg(fresh, identity.name);
+            } else if (!seed.trimmed().isEmpty()) {
+                identity.note =
+                    QStringLiteral("%1 (name %2, new file at %3) - the [remote] "
+                                   "machine_id= value is not a usable id (8-64 "
+                                   "of letters, digits, dot, dash, underscore)")
+                        .arg(fresh, identity.name, path);
+            } else {
+                identity.note = QStringLiteral("%1 (name %2, new file at %3)")
+                                    .arg(fresh, identity.name, path);
+            }
             return identity;
         }
     }
@@ -1188,7 +1259,8 @@ RemoteIdentity remoteIdentityAt(const QString &path,
 }
 
 RemoteIdentity remoteLoadIdentity(const RemoteOptions &options) {
-    return remoteIdentityAt(remoteMachineIdPath(), options, options.enabled);
+    return remoteIdentityAt(remoteMachineIdPath(), options, options.enabled,
+                            options.machineId);
 }
 
 

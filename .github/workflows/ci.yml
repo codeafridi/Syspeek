@@ -361,6 +361,8 @@ jobs:
           assert remote["identityDerivedOk"] is True, remote
           assert remote["identityModeOk"] is True, remote
           assert remote["identityNoWriteOk"] is True, remote
+          assert remote["identitySeedOk"] is True, remote
+          assert remote["identityLongHostOk"] is True, remote
           assert remote["machineIdName"], remote
           assert remote["machineIdPath"], remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
@@ -628,6 +630,8 @@ jobs:
           assert remote["identityDerivedOk"] is True, remote
           assert remote["identityModeOk"] is True, remote
           assert remote["identityNoWriteOk"] is True, remote
+          assert remote["identitySeedOk"] is True, remote
+          assert remote["identityLongHostOk"] is True, remote
           assert remote["machineIdName"], remote
           assert remote["machineIdPath"], remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]

@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QMutex>
+#include <QSslConfiguration>
 #include <QObject>
 #include <QString>
 
@@ -28,12 +29,23 @@ struct RemotePostResult {
 };
 
 RemotePostResult remoteHttpPost(const QString &url, const QString &token,
-                                const QByteArray &body, int timeoutMs);
+                                const QByteArray &body, int timeoutMs,
+                                const QString &caFile = QString());
+
+// M100b: the TLS settings every post uses. Verification is ALWAYS on - there is
+// no switch to skip it - and a self-hosted relay behind a private CA is trusted
+// by naming the CA file, which is added to the system store rather than
+// replacing it. Returns an empty configuration and sets `error` when the named
+// file holds no certificate, so the post fails with the file's name instead of
+// a misleading "certificate not trusted".
+QSslConfiguration remoteSslConfiguration(const QString &caFile,
+                                         QString *error);
 
 struct RemoteReportOptions {
     bool enabled = false;
     QString url; // the ingest endpoint, already normalized
     QString token;
+    QString caFile; // optional private CA for a self-hosted relay
     int intervalMs = 15000;
     int timeoutMs = 3000;
     // M98: where undelivered reports wait. An empty path or a budget that
@@ -87,6 +99,7 @@ private:
     // Touched only on the runner's own thread.
     RemoteSpool m_spool;
     QString m_lastSpooledId;
+    int m_consecutiveRefused = 0;
 
     void syncSpoolLocked();
 };

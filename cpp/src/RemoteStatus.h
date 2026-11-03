@@ -182,6 +182,11 @@ bool remoteClassIsTerminal(RemoteClass value);
 // hour costs 8 retries an hour rather than 240.
 int remoteBackoffMs(int consecutiveFailures, int intervalMs);
 
+// How many reports the relay may refuse outright before the drain stops: one
+// refused body is a bad report, three in a row is a bad configuration, and a
+// misconfiguration must not empty an hour of buffered reports one by one.
+constexpr int kRemoteMaxConsecutiveRefused = 3;
+
 // Retry-After in seconds (the shape every 429 carries); -1 when absent or not a
 // number. Dates are not honoured - this client always speaks to one relay.
 qint64 remoteRetryAfterMs(const QByteArray &headerBlock);
@@ -231,7 +236,9 @@ QString remotePrimaryMac(); // "" when no interface reports one
 QString remoteDerivedMachineId(const QString &hostname, const QString &mac);
 
 // 8..64 chars of [A-Za-z0-9._-]. A file full of something else is not an id we
-// wrote, so it is replaced rather than trusted.
+// wrote, so it is replaced rather than trusted. The same ceiling bounds the
+// derived id: one spool record field and one relay column hold this string.
+constexpr int kRemoteMachineIdMaxChars = 64;
 bool remoteMachineIdLooksValid(const QString &id);
 
 struct RemoteIdentity {
@@ -244,9 +251,11 @@ struct RemoteIdentity {
 };
 
 // `create` = false reports what is on disk and writes nothing (a diagnostic must
-// not leave state behind); the app passes create = [remote] enabled.
+// not leave state behind); the app passes create = [remote] enabled. `seed` is
+// an id to write instead of a fresh UUID - [remote] machine_id= provisions a
+// machine, and after the first write the file is the source of truth.
 RemoteIdentity remoteIdentityAt(const QString &path, const RemoteOptions &options,
-                                bool create);
+                                bool create, const QString &seed = QString());
 
 RemoteIdentity remoteLoadIdentity(const RemoteOptions &options);
 
@@ -272,9 +281,12 @@ QList<RemoteFieldGroup> remoteFieldGroups();
 
 struct RemoteInfo {
     bool enabled = false;
+    QString stateLine; // on -> <ingest url> | off | no address - <reason>
+    QString tierLine;
     QString ingestUrl;
     QString tokenLine;
     QString spoolLine;
+    QString caLine;
     QString lastLine;
     QString identityLine;
     QStringList scopeLines;

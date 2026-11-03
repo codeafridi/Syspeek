@@ -25,6 +25,9 @@ echo "qt6-base-dev: $(dpkg-query -W -f='${Version}' qt6-base-dev)"
 
 mkdir -p /work
 cp -a /src/cpp /work/cpp
+# docs/ is not built, but a test reads docs/remote.md to prove the identity and
+# privacy promises the app makes are the ones the documentation makes.
+cp -a /src/docs /work/docs
 # A copied build tree from the host carries the host's Qt (and its 6.10
 # symbols) into the package; the dependency gate below would then inspect a
 # binary this distro can never run.

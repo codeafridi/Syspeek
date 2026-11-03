@@ -153,6 +153,7 @@ int serveRun(int argc, char **argv) {
         reportOptions.enabled = config.remote.enabled;
         reportOptions.url = remoteIngestUrl(config.remote.url, nullptr);
         reportOptions.token = config.remote.token;
+        reportOptions.caFile = config.remote.caFile;
         reportOptions.intervalMs = config.remote.intervalMs;
         reportOptions.timeoutMs = config.remote.timeoutMs;
         reportOptions.spoolBytes =

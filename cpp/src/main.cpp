@@ -882,6 +882,7 @@ int main(int argc, char *argv[]) {
         reportOptions.enabled = true;
         reportOptions.url = remoteIngestUrl(config.remote.url, nullptr);
         reportOptions.token = config.remote.token;
+        reportOptions.caFile = config.remote.caFile;
         reportOptions.intervalMs = config.remote.intervalMs;
         reportOptions.timeoutMs = config.remote.timeoutMs;
         // M98: the spool is a byte budget, and 0 means off - a switch a person

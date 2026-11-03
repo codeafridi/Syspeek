@@ -898,7 +898,8 @@ int main(int argc, char *argv[]) {
                                    "machine_id = mid-1\n"
                                    "interval_ms = 60000\n"
                                    "timeout_ms = 5000\n"
-                                   "spool_mb = 32\n"));
+                                   "spool_mb = 32\n"
+                                   "ca_file = /etc/ssl/corp-ca.pem\n"));
         QString error;
         const Config c = loadConfig(path, &error);
         check(c.remote.enabled && c.remote.url == QStringLiteral("https://relay.example.test/")
@@ -906,8 +907,10 @@ int main(int argc, char *argv[]) {
                   && c.remote.name == QStringLiteral("build-box")
                   && c.remote.machineId == QStringLiteral("mid-1")
                   && c.remote.intervalMs == 60000 && c.remote.timeoutMs == 5000
-                  && c.remote.spoolMb == 32,
-              "remote: the switch, address, token, name and bounds load");
+                  && c.remote.spoolMb == 32
+                  && c.remote.caFile
+                         == QStringLiteral("/etc/ssl/corp-ca.pem"),
+              "remote: the switch, address, token, name, CA and bounds load");
     }
 
     {
