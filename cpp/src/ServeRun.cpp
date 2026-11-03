@@ -142,12 +142,17 @@ int serveRun(int argc, char **argv) {
     if (config.remote.enabled) {
         qRegisterMetaType<RemoteEnvelope>("RemoteEnvelope");
         qRegisterMetaType<RemoteClass>("RemoteClass");
+        qRegisterMetaType<RemoteReportState>("RemoteReportState");
         RemoteReportOptions reportOptions;
         reportOptions.enabled = config.remote.enabled;
         reportOptions.url = remoteIngestUrl(config.remote.url, nullptr);
         reportOptions.token = config.remote.token;
         reportOptions.intervalMs = config.remote.intervalMs;
         reportOptions.timeoutMs = config.remote.timeoutMs;
+        reportOptions.spoolBytes =
+            qint64(config.remote.spoolMb) * 1024 * 1024;
+        reportOptions.spoolPath =
+            reportOptions.spoolBytes > 0 ? remoteSpoolPath() : QString();
         remoteThread = new QThread;
         remoteRunner = new RemoteRunner;
         remoteRunner->moveToThread(remoteThread);

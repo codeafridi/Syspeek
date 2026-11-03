@@ -52,6 +52,7 @@
 #include "FleetStatus.h"
 #include "RemoteStatus.h"
 #include "RemoteSource.h"
+#include "RemoteSpool.h"
 #include "FleetSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
@@ -84,6 +85,7 @@
 #include <cstdio>
 
 #include <atomic>
+#include <memory>
 #include <thread>
 
 int main(int argc, char *argv[]) {
@@ -6977,6 +6979,28 @@ int main(int argc, char *argv[]) {
         RemoteOptions spool;
         check(remoteSpoolPath().endsWith(QStringLiteral("/remote-spool.bin")),
               "remote: the spool lives in one named file under the cache dir");
+
+        // M98: the Settings row is the one place the spool budget is readable.
+        RemoteOptions rowOff;
+        check(remoteSettingsLine(rowOff).contains(
+                  QStringLiteral("nothing leaves this machine")),
+              "remote: the Settings row says off when the switch is off");
+        RemoteOptions rowOn;
+        rowOn.enabled = true;
+        rowOn.url = QStringLiteral("relay.example.com");
+        rowOn.token = QStringLiteral("tok");
+        rowOn.intervalMs = 15000;
+        check(remoteSettingsLine(rowOn).contains(
+                  QStringLiteral("https://relay.example.com"))
+                  && remoteSettingsLine(rowOn).contains(
+                      QStringLiteral("spool 8 MB"))
+                  && remoteSettingsLine(rowOn).contains(
+                      QStringLiteral("every 15 s")),
+              "remote: the Settings row names the relay, the cadence and the "
+              "spool budget");
+        rowOn.spoolMb = 0;
+        check(remoteSettingsLine(rowOn).contains(QStringLiteral("spool off")),
+              "remote: spool_mb=0 reads as spooling off, not as a silent drop");
     }
 
     {
@@ -7342,6 +7366,180 @@ int main(int argc, char *argv[]) {
         check(remoteReportNote(noteState).startsWith(
                   QStringLiteral("remote: stopped - 401")),
               "remote transport: a stopped reporter says which answer stopped it");
+
+        // M98: the verdict and the spool are two facts, and both are shown.
+        RemoteReportState spoolState;
+        spoolState.lastClass = RemoteClass::Transport;
+        spoolState.failed = 2;
+        spoolState.lastLatencyMs = 0;
+        spoolState.spoolOn = true;
+        spoolState.spooled = 5;
+        spoolState.spoolDropped = 3;
+        check(remoteReportNote(spoolState)
+                      .endsWith(QStringLiteral(", 5 spooled, 3 dropped")),
+              "remote spool: the note states what is held and what was lost");
+        RemoteReportState quietSpool;
+        quietSpool.spoolOn = true;
+        quietSpool.spooled = 2;
+        check(remoteReportNote(quietSpool)
+                  == QStringLiteral("remote: 2 report(s) held for delivery"),
+              "remote spool: a start with a full buffer says it is holding, "
+              "not that nothing happened");
+        check(!remoteReportNote(quietSpool).startsWith(
+                  QStringLiteral("remote: nothing sent yet")),
+              "remote spool: a held report is never reported as nothing sent");
+        check(remoteRowText(spoolState).startsWith(
+                  QStringLiteral("0 sent, 2 failed"))
+                  && !remoteRowText(spoolState).startsWith(
+                      QStringLiteral("remote:")),
+              "remote spool: the Settings row drops the label it repeats");
+        check(remoteSpoolNoteSuffix(RemoteReportState{})
+                  == QString(),
+              "remote spool: a reporter with the spool off adds nothing");
+    }
+
+    // --- remote spool (M98): the buffer a closed laptop leaves behind
+    {
+        QTemporaryDir dir;
+        check(dir.isValid(), "remote spool: a temp directory for the probe");
+        const QString path = dir.filePath(QStringLiteral("remote.spool"));
+
+        check(remoteSpoolCapacityFor(0) == 0
+                  && remoteSpoolCapacityFor(1024) == 0
+                  && remoteSpoolCapacityFor(kRemoteSpoolHeaderBytes
+                                            + kRemoteSpoolRecordBytes) == 1
+                  && remoteSpoolCapacityFor(kRemoteSpoolHeaderBytes
+                                            + 8 * kRemoteSpoolRecordBytes) == 8
+                  && remoteSpoolCapacityFor(qint64(256) * 1024 * 1024)
+                         == kRemoteSpoolMaxRecords,
+              "remote spool: the record count comes from the byte budget, never "
+              "from a count somebody has to maintain");
+
+        const qint64 budget =
+            kRemoteSpoolHeaderBytes + 8 * kRemoteSpoolRecordBytes;
+        RemoteSpool spool;
+        check(spool.open(path, budget) && spool.capacity() == 8,
+              "remote spool: a budget opens a file sized for that budget");
+        check(QFileInfo(path).size() == spool.fileBytes()
+                  && spool.fileBytes() == budget,
+              "remote spool: the file on disk is exactly the budget");
+
+        bool exact = true;
+        for (int i = 0; i < 5; ++i) {
+            if (!spool.append(QStringLiteral("id-%1").arg(i), 1000 + i,
+                              QByteArrayLiteral("{\"n\":")
+                                  + QByteArray::number(i) + '}')) {
+                exact = false;
+            }
+        }
+        for (int i = 0; i < 5; ++i) {
+            RemoteSpoolRecord record;
+            if (!spool.readAt(i, record)
+                || record.id != QStringLiteral("id-%1").arg(i)
+                || record.body
+                       != QByteArrayLiteral("{\"n\":")
+                              + QByteArray::number(i) + '}'
+                || record.sentAtMs != 1000 + i) {
+                exact = false;
+            }
+        }
+        RemoteSpoolRecord oldest;
+        check(exact && spool.count() == 5 && spool.peekOldest(oldest)
+                  && oldest.id == QStringLiteral("id-0"),
+              "remote spool: five reports come back byte for byte, oldest first");
+
+        spool.close();
+        RemoteSpool resumed;
+        check(resumed.open(path, budget) && resumed.count() == 5
+                  && resumed.peekOldest(oldest)
+                  && oldest.id == QStringLiteral("id-0"),
+              "remote spool: a restart resumes the buffer instead of losing it");
+
+        for (int i = 5; i < 11; ++i) {
+            resumed.append(QStringLiteral("id-%1").arg(i), 1000 + i,
+                           QByteArrayLiteral("{\"n\":0}"));
+        }
+        check(resumed.count() == 8 && resumed.dropped() == 3
+                  && resumed.peekOldest(oldest)
+                  && oldest.id == QStringLiteral("id-3")
+                  && resumed.readAt(7, oldest)
+                  && oldest.id == QStringLiteral("id-10"),
+              "remote spool: a full ring drops the oldest report and counts it");
+
+        check(resumed.ackOldest() && resumed.count() == 7
+                  && resumed.peekOldest(oldest)
+                  && oldest.id == QStringLiteral("id-4"),
+              "remote spool: an ack advances the front of the ring");
+
+        const QByteArray tooBig(kRemoteSpoolBodyBytes + 1, 'x');
+        check(!resumed.append(QStringLiteral("too-big"), 2000, tooBig)
+                  && resumed.oversized() == 1 && resumed.count() == 7,
+              "remote spool: a body larger than one record is refused and "
+              "counted, never cut into something that is not a report");
+
+        resumed.close();
+        {
+            // Slot 0 holds a live report here (7 of 8 slots are in use) and
+            // offset 200 is inside its body: the CRC must catch it.
+            QFile raw(path);
+            if (raw.open(QIODevice::ReadWrite)
+                && raw.seek(kRemoteSpoolHeaderBytes + 200)) {
+                const QByteArray before = raw.read(1);
+                const char flipped = char(quint8(before.at(0)) ^ 0x01u);
+                raw.seek(kRemoteSpoolHeaderBytes + 200);
+                if (raw.write(&flipped, 1) == 1) {
+                    raw.flush();
+                }
+            }
+        }
+        RemoteSpool damaged;
+        damaged.open(path, budget);
+        int readable = 0;
+        int unreadable = 0;
+        for (int i = 0; i < damaged.count(); ++i) {
+            RemoteSpoolRecord record;
+            if (damaged.readAt(i, record)) {
+                ++readable;
+            } else {
+                ++unreadable;
+            }
+        }
+        check(unreadable == 1 && readable == damaged.count() - 1,
+              "remote spool: one corrupt record is skipped and its neighbours "
+              "still read");
+        damaged.close();
+
+        {
+            QFile foreign(path);
+            if (foreign.open(QIODevice::WriteOnly)) {
+                foreign.write("not-our-file", 12);
+            }
+        }
+        RemoteSpool recreated;
+        check(recreated.open(path, budget) && recreated.count() == 0
+                  && recreated.isOpen(),
+              "remote spool: a foreign file is re-created, never reinterpreted");
+        recreated.append(QStringLiteral("after-reset"), 3000,
+                         QByteArrayLiteral("{}"));
+        recreated.close();
+
+        RemoteSpool widened;
+        check(widened.open(path, budget * 2) && widened.count() == 0
+                  && widened.capacity() == 16,
+              "remote spool: a budget change re-creates the file instead of "
+              "reinterpreting the old one");
+        widened.append(QStringLiteral("one"), 4000, QByteArrayLiteral("{}"));
+        check(widened.clear() && widened.count() == 0 && widened.dropped() == 0,
+              "remote spool: clear() empties the ring and its loss count");
+        widened.close();
+
+        check(remoteSpoolSummaryText(0, 0, 0, 0, false)
+                      .contains(QStringLiteral("spooling off"))
+                  && remoteSpoolSummaryText(3, 8, 0, 1024 * 1024, true)
+                         .contains(QStringLiteral("3/8"))
+                  && remoteSpoolSummaryText(3, 8, 2, 1024 * 1024, true)
+                         .contains(QStringLiteral("2 dropped")),
+              "remote spool: the summary states what is held and what was lost");
     }
 
     // --- remote reporter (M97): live loopback relay
@@ -7614,6 +7812,153 @@ int main(int argc, char *argv[]) {
         passive.setOptions(passiveOptions);
         check(optionsClock.elapsed() < 50,
               "remote runner: setOptions never blocks on the socket");
+
+        // --- M98: the spool carries a report across a dead relay
+        {
+            QTemporaryDir spoolDir;
+            const QString spoolPath =
+                spoolDir.filePath(QStringLiteral("remote.spool"));
+            QThread *thread = new QThread;
+            RemoteRunner *runner = new RemoteRunner;
+            runner->moveToThread(thread);
+            // The receiver lives with the runner, and the record lives on the
+            // heap: a stack capture would outlive this block on the next
+            // emission (the M86 ASan lesson).
+            auto seen = std::make_shared<QVector<RemoteReportState>>();
+            QObject::connect(runner, &RemoteRunner::stateChanged, runner,
+                             [seen](const RemoteReportState &state) {
+                                 seen->append(state);
+                             });
+            auto waitState = [&app, seen](auto test, int maxMs) {
+                QElapsedTimer clock;
+                clock.start();
+                while (clock.elapsed() < maxMs) {
+                    for (const RemoteReportState &state : *seen) {
+                        if (test(state)) {
+                            return true;
+                        }
+                    }
+                    QThread::msleep(10);
+                    app.processEvents();
+                }
+                return false;
+            };
+            RemoteReportOptions options;
+            options.enabled = true;
+            options.url = QStringLiteral("http://127.0.0.1:1/api/v1/ingest");
+            options.token = QStringLiteral("token-abc");
+            options.intervalMs = 1000;
+            options.timeoutMs = 500;
+            options.spoolPath = spoolPath;
+            options.spoolBytes =
+                kRemoteSpoolHeaderBytes + 8 * kRemoteSpoolRecordBytes;
+            runner->setOptions(options);
+            QObject::connect(thread, &QThread::started, runner,
+                             &RemoteRunner::start);
+            QObject::connect(thread, &QThread::finished, runner,
+                             &QObject::deleteLater);
+            thread->start();
+
+            auto deliver = [runner](qint64 sentAtMs) {
+                RemoteEnvelope envelope;
+                envelope.machine.id = QStringLiteral("machine-1");
+                envelope.machine.sentAtMs = sentAtMs;
+                envelope.sample.id =
+                    remoteSampleId(envelope.machine.id, sentAtMs);
+                QMetaObject::invokeMethod(
+                    runner,
+                    [runner, envelope]() { runner->setEnvelope(envelope); },
+                    Qt::QueuedConnection);
+                return envelope.sample.id;
+            };
+
+            QList<QString> ids;
+            for (int i = 0; i < 3; ++i) {
+                ids << deliver(1762000000000LL + i * 1000);
+            }
+            check(waitState([](const RemoteReportState &state) {
+                      return state.spooled == 3 && state.spoolDropped == 0;
+                  }, 5000),
+                  "remote spool: three undelivered reports are on disk before "
+                  "the first socket answer, with nothing dropped");
+            check(waitState([](const RemoteReportState &state) {
+                      return state.spoolOn && state.spoolBytes > 0;
+                  }, 2000),
+                  "remote spool: the card can state the file it is using");
+
+            RelayStub back;
+            back.begin();
+            options.url = back.url();
+            QMetaObject::invokeMethod(
+                runner, [runner, options]() { runner->setOptions(options); },
+                Qt::QueuedConnection);
+            check(waitState([](const RemoteReportState &state) {
+                      return state.spooled == 0 && state.sent >= 3;
+                  }, 10000),
+                  "remote spool: a reachable relay drains the backlog");
+            check(waitState([&back](const RemoteReportState &) {
+                      return back.connections.load() == 3;
+                  }, 3000),
+                  "remote spool: each buffered report is sent exactly once");
+            const int first = back.request.indexOf(ids.at(0).toUtf8());
+            const int second = back.request.indexOf(ids.at(1).toUtf8());
+            const int third = back.request.indexOf(ids.at(2).toUtf8());
+            check(first >= 0 && second > first && third > second,
+                  "remote spool: the backlog replays oldest first");
+
+            // A body the relay refuses outright is dropped with the reason
+            // rather than blocking every report behind it.
+            RelayStub picky;
+            picky.statusLine =
+                QByteArrayLiteral("HTTP/1.1 422 Unprocessable Entity");
+            picky.body = QByteArrayLiteral(
+                "{\"error\":\"sample.uptimeSec must be an integer\"}");
+            picky.begin();
+            options.url = picky.url();
+            QMetaObject::invokeMethod(
+                runner, [runner, options]() { runner->setOptions(options); },
+                Qt::QueuedConnection);
+            deliver(1762000100000LL);
+            deliver(1762000101000LL);
+            check(waitState([](const RemoteReportState &state) {
+                      return state.refused >= 2 && state.spooled == 0;
+                  }, 10000),
+                  "remote spool: a refused body is acked with the reason and "
+                  "the queue keeps moving");
+
+            // A refused token stops the drain and leaves the buffer alone.
+            RelayStub locked;
+            locked.statusLine = QByteArrayLiteral("HTTP/1.1 401 Unauthorized");
+            locked.begin();
+            options.url = locked.url();
+            QMetaObject::invokeMethod(
+                runner, [runner, options]() { runner->setOptions(options); },
+                Qt::QueuedConnection);
+            deliver(1762000200000LL);
+            deliver(1762000201000LL);
+            check(waitState([](const RemoteReportState &state) {
+                      return state.stopped;
+                  }, 10000),
+                  "remote spool: a refused token stops the reporter");
+            pumpFor(1500);
+            RemoteReportState last;
+            if (!seen->isEmpty()) {
+                last = seen->last();
+            }
+            check(last.spooled >= 1,
+                  "remote spool: an auth refusal leaves the buffered reports "
+                  "intact for when the token is fixed");
+
+            thread->quit();
+            QElapsedTimer shutdown;
+            shutdown.start();
+            while (!thread->isFinished() && shutdown.elapsed() < 8000) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+            thread->wait();
+            delete thread;
+        }
     }
 
     std::printf("%d failure(s)\n", failures);

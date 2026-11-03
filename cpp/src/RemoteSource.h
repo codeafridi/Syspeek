@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RemoteStatus.h"
+#include "RemoteSpool.h"
 
 #include <QByteArray>
 #include <QMutex>
@@ -35,6 +36,11 @@ struct RemoteReportOptions {
     QString token;
     int intervalMs = 15000;
     int timeoutMs = 3000;
+    // M98: where undelivered reports wait. An empty path or a budget that
+    // cannot hold one record turns the spool off, and the note says so instead
+    // of pretending a dropped report was delivered.
+    QString spoolPath;
+    qint64 spoolBytes = 0;
 };
 
 // The runner posts whatever envelope was handed to it last, once. The envelope
@@ -60,11 +66,16 @@ public slots:
 signals:
     void reportSent(bool ok, RemoteClass classification, int latencyMs,
                     const QString &note);
+    // The spool changes on its own (a report is written before the attempt), so
+    // the console reads this rather than only the verdict line.
+    void stateChanged(const RemoteReportState &state);
 
 private:
     void poll();
     void schedule(int delayMs);
     void publish(const QString &note);
+    void publishState();
+    void openSpool(const RemoteReportOptions &options);
 
     mutable QMutex m_mutex;
     RemoteReportOptions m_options;
@@ -73,4 +84,9 @@ private:
     RemoteReportState m_state;
     qint64 m_lastSentAtMs = -1;
     QTimer *m_timer = nullptr;
+    // Touched only on the runner's own thread.
+    RemoteSpool m_spool;
+    QString m_lastSpooledId;
+
+    void syncSpoolLocked();
 };

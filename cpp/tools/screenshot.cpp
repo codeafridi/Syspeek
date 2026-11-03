@@ -1371,6 +1371,9 @@ int main(int argc, char *argv[]) {
     settingsInfo.webhookLine =
         QStringLiteral("generic -> https://alerts.example.test/syspeek"
                        " - 4 sent, 0 failed; last ok 17:42 (1 firing)");
+    settingsInfo.remoteLine =
+        QStringLiteral("https://relay.syspeek.dev every 15 s - spool 8 MB - "
+                       "41 sent, 0 failed - last ok in 34ms, 2 spooled");
     settingsInfo.exportLine =
         QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
                        "syspeek-history-20261026-174210.csv");

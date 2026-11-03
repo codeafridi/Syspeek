@@ -703,6 +703,7 @@ int main(int argc, char *argv[]) {
                 ? metricsEndpointText(resolveMetricsEndpoint(config.metrics))
                 : QStringLiteral("disabled ([metrics] enabled=false)");
         settingsInfo.webhookLine = webhookConfigLine(config.webhook);
+        settingsInfo.remoteLine = remoteSettingsLine(config.remote);
         settingsInfo.timelineLine =
             config.timeline.enabled
                 ? QStringLiteral("on - ring %1 events, window +-%2 s, "
@@ -862,6 +863,7 @@ int main(int argc, char *argv[]) {
     if (config.remote.enabled) {
         qRegisterMetaType<RemoteEnvelope>("RemoteEnvelope");
         qRegisterMetaType<RemoteClass>("RemoteClass");
+        qRegisterMetaType<RemoteReportState>("RemoteReportState");
         remoteThread = new QThread;
         remoteRunner = new RemoteRunner;
         remoteRunner->moveToThread(remoteThread);
@@ -871,6 +873,12 @@ int main(int argc, char *argv[]) {
         reportOptions.token = config.remote.token;
         reportOptions.intervalMs = config.remote.intervalMs;
         reportOptions.timeoutMs = config.remote.timeoutMs;
+        // M98: the spool is a byte budget, and 0 means off - a switch a person
+        // can read in [remote] rather than a hidden queue.
+        reportOptions.spoolBytes =
+            qint64(config.remote.spoolMb) * 1024 * 1024;
+        reportOptions.spoolPath =
+            reportOptions.spoolBytes > 0 ? remoteSpoolPath() : QString();
         remoteRunner->setOptions(reportOptions);
         QObject::connect(remoteThread, &QThread::started, remoteRunner,
                          &RemoteRunner::start);
@@ -878,6 +886,10 @@ int main(int argc, char *argv[]) {
                          &QObject::deleteLater);
         QObject::connect(&hud, &HudWindow::remoteEnvelopeReady, remoteRunner,
                          &RemoteRunner::setEnvelope);
+        QObject::connect(remoteRunner, &RemoteRunner::stateChanged, &hud,
+                         [&hud](const RemoteReportState &state) {
+                             hud.setRemoteLine(remoteRowText(state));
+                         });
         QObject::connect(remoteRunner, &RemoteRunner::reportSent, &hud,
                          [](bool ok, RemoteClass, int latencyMs,
                             const QString &note) {

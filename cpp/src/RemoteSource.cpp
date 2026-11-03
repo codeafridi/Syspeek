@@ -18,6 +18,15 @@ void logOnce(const QString &note) {
     qWarning("%s", note.toUtf8().constData());
 }
 
+// The relay's own words when it refuses a body, on one bounded line: a 422 is
+// only actionable if it says which field it did not like.
+QString remoteAnswerReason(const QByteArray &body) {
+    if (body.trimmed().isEmpty()) {
+        return QStringLiteral("no reason given");
+    }
+    return QString::fromUtf8(body).simplified().left(160);
+}
+
 } // namespace
 
 RemotePostResult remoteHttpPost(const QString &url, const QString &token,
@@ -223,9 +232,31 @@ RemoteReportOptions RemoteRunner::options() const {
 }
 
 void RemoteRunner::setEnvelope(const RemoteEnvelope &envelope) {
-    QMutexLocker lock(&m_mutex);
-    m_envelope = envelope;
-    m_haveEnvelope = true;
+    {
+        QMutexLocker lock(&m_mutex);
+        m_envelope = envelope;
+        m_haveEnvelope = true;
+    }
+    // M98 write-ahead: the report is on disk before a socket is opened, so a
+    // closed laptop, a crash or a relay that stays down for an hour costs
+    // nothing - the bytes are already somewhere that survives the process.
+    if (m_spool.isOpen() && !envelope.machine.id.isEmpty()) {
+        const QString id = envelope.sample.id.isEmpty()
+            ? remoteSampleId(envelope.machine.id, envelope.machine.sentAtMs)
+            : envelope.sample.id;
+        if (id != m_lastSpooledId) {
+            const QByteArray body = remoteEnvelopeJson(envelope);
+            if (m_spool.append(id, envelope.machine.sentAtMs, body)) {
+                m_lastSpooledId = id;
+            } else {
+                logOnce(QStringLiteral("remote: a report of %1 bytes does not "
+                                       "fit one spool record - it is sent but "
+                                       "not buffered")
+                            .arg(body.size()));
+            }
+            publishState();
+        }
+    }
 }
 
 RemoteReportState RemoteRunner::state() const {
@@ -240,7 +271,23 @@ void RemoteRunner::start() {
         m_timer->setSingleShot(true);
         connect(m_timer, &QTimer::timeout, this, &RemoteRunner::poll);
     }
+    openSpool(options());
+    publishState();
     poll();
+}
+
+void RemoteRunner::openSpool(const RemoteReportOptions &options) {
+    if (m_spool.isOpen()) {
+        m_spool.close();
+    }
+    if (options.spoolPath.isEmpty() || options.spoolBytes <= 0) {
+        return;
+    }
+    if (!m_spool.open(options.spoolPath, options.spoolBytes)) {
+        logOnce(QStringLiteral("remote: spool %1 could not be opened - an "
+                               "undelivered report is dropped and counted")
+                    .arg(options.spoolPath));
+    }
 }
 
 void RemoteRunner::stop() {
@@ -265,11 +312,37 @@ void RemoteRunner::publish(const QString &note) {
     RemoteReportState copy;
     {
         QMutexLocker lock(&m_mutex);
-        m_state.note = note;
+        syncSpoolLocked();
+        // An empty note means "describe the state as it now stands"; a caller
+        // with a specific verdict ("delivered in 4ms") still carries the spool
+        // line, because a delivery does not empty the spool.
+        m_state.note = note.isEmpty()
+            ? remoteReportNote(m_state)
+            : note + remoteSpoolNoteSuffix(m_state);
         copy = m_state;
     }
     emit reportSent(copy.lastClass == RemoteClass::Ok, copy.lastClass,
                     copy.lastLatencyMs, copy.note);
+    emit stateChanged(copy);
+}
+
+void RemoteRunner::publishState() {
+    RemoteReportState copy;
+    {
+        QMutexLocker lock(&m_mutex);
+        syncSpoolLocked();
+        m_state.note = remoteReportNote(m_state);
+        copy = m_state;
+    }
+    emit stateChanged(copy);
+}
+
+void RemoteRunner::syncSpoolLocked() {
+    m_state.spoolOn = m_spool.isOpen();
+    m_state.spooled = m_spool.isOpen() ? m_spool.count() : 0;
+    m_state.spoolCapacity = m_spool.isOpen() ? m_spool.capacity() : 0;
+    m_state.spoolDropped = m_spool.isOpen() ? m_spool.dropped() : 0;
+    m_state.spoolBytes = m_spool.isOpen() ? m_spool.fileBytes() : 0;
 }
 
 void RemoteRunner::poll() {
@@ -301,33 +374,72 @@ void RemoteRunner::poll() {
     if (before.stopped) {
         return;
     }
-    if (!haveEnvelope) {
-        // The console owns the ring and the tick; the reporter asks for bytes it
-        // has not been handed yet, which is the first second of a start, not a
-        // configuration problem.
-        publish(QStringLiteral("remote: waiting for the first report from the "
-                               "console"));
-        schedule(options.intervalMs);
-        return;
+
+    // M98: with the spool on, the oldest stored report is the next thing to
+    // attempt - a report is written before it is sent, so nothing can be lost
+    // between the tick and the delivery. A record that does not read back is a
+    // corrupt slot: skip it and say so, instead of retrying bytes that will
+    // never parse and blocking the queue behind them.
+    RemoteSpoolRecord oldest;
+    int skipped = 0;
+    while (m_spool.isOpen() && m_spool.count() > 0
+           && !m_spool.peekOldest(oldest)) {
+        m_spool.ackOldest();
+        ++skipped;
     }
-    if (envelope.machine.id.isEmpty()) {
-        publish(QStringLiteral("remote: no report built yet - a report needs "
-                               "a machine id (set [remote] machine_id=)"));
-        schedule(options.intervalMs);
-        return;
+    if (skipped > 0) {
+        qWarning("remote: %d spool record(s) could not be read back - skipped",
+                 skipped);
     }
-    if (envelope.machine.sentAtMs == lastSentAtMs) {
-        // Nothing new since the last accepted report: querying again would only
-        // repeat the same numbers and buy a second copy on the relay.
-        schedule(options.intervalMs);
-        return;
+    const bool fromSpool = m_spool.isOpen() && m_spool.count() > 0;
+
+    QByteArray body;
+    qint64 sentAtMs = -1;
+    if (fromSpool) {
+        body = oldest.body;
+        sentAtMs = oldest.sentAtMs;
+    } else {
+        if (!haveEnvelope) {
+            // The console owns the ring and the tick; the reporter asks for
+            // bytes it has not been handed yet, which is the first second of a
+            // start, not a configuration problem.
+            publish(QStringLiteral("remote: waiting for the first report from "
+                                   "the console"));
+            schedule(options.intervalMs);
+            return;
+        }
+        if (envelope.machine.id.isEmpty()) {
+            publish(QStringLiteral("remote: no report built yet - a report "
+                                   "needs a machine id (set [remote] "
+                                   "machine_id=)"));
+            schedule(options.intervalMs);
+            return;
+        }
+        if (envelope.machine.sentAtMs == lastSentAtMs) {
+            // Nothing new since the last accepted report: querying again would
+            // only repeat the same numbers and buy a second copy on the relay.
+            schedule(options.intervalMs);
+            return;
+        }
+        body = remoteEnvelopeJson(envelope);
+        sentAtMs = envelope.machine.sentAtMs;
     }
 
-    const QByteArray body = remoteEnvelopeJson(envelope);
     const RemotePostResult result = remoteHttpPost(
         options.url, options.token, body, options.timeoutMs);
 
-    RemoteReportState state;
+    // A body the relay refused outright (413/422/other 4xx) will be refused
+    // forever: drop it with the answer on the record and move on, rather than
+    // resending it and stalling every report behind it.
+    const bool refused =
+        fromSpool && result.classification == RemoteClass::Rejected;
+    if (fromSpool
+        && (result.classification == RemoteClass::Ok || refused)) {
+        m_spool.ackOldest();
+    }
+
+    int backlog = 0;
+    int retryMs = -1;
     {
         QMutexLocker lock(&m_mutex);
         m_state.lastClass = result.classification;
@@ -339,7 +451,14 @@ void RemoteRunner::poll() {
             m_state.lastOkMs = m_state.lastAttemptMs;
             m_state.consecutiveFailures = 0;
             m_state.nextRetryMs = -1;
-            m_lastSentAtMs = envelope.machine.sentAtMs;
+            if (!fromSpool) {
+                m_lastSentAtMs = sentAtMs;
+            }
+        } else if (refused) {
+            m_state.failed += 1;
+            m_state.refused += 1;
+            m_state.consecutiveFailures = 0;
+            m_state.nextRetryMs = -1;
         } else {
             m_state.failed += 1;
             m_state.consecutiveFailures += 1;
@@ -356,22 +475,40 @@ void RemoteRunner::poll() {
                     : ladder;
             }
         }
-        state = m_state;
+        backlog = m_spool.isOpen() ? m_spool.count() : 0;
+        retryMs = m_state.nextRetryMs;
     }
+
+    // A backlog is drained quickly but not instantly: 250 ms between records
+    // keeps a reopened laptop from turning an hour of buffered reports into a
+    // burst the relay has to absorb in one connection.
+    const int nextDelay = backlog > 0 ? kRemoteBacklogStepMs
+                                      : options.intervalMs;
 
     if (result.classification == RemoteClass::Ok) {
         publish(QStringLiteral("remote: delivered in %1ms")
                     .arg(result.latencyMs));
-        schedule(options.intervalMs);
+        schedule(nextDelay);
+        return;
+    }
+    if (refused) {
+        logOnce(QStringLiteral("remote: the relay refused a batch with %1 - "
+                               "dropped it: %2")
+                    .arg(result.httpStatus)
+                    .arg(remoteAnswerReason(result.body)));
+        publish(QString());
+        schedule(nextDelay);
         return;
     }
     if (remoteClassIsTerminal(result.classification)) {
+        // Auth/NotFound: the address or the token is wrong. Stop sending, and
+        // leave the spool exactly as it is - those reports are still valid.
         logOnce(QStringLiteral("remote: stopped - %1")
                     .arg(remoteClassText(result.classification,
                                          result.httpStatus)));
-        publish(remoteReportNote(state));
+        publish(QString());
         return;
     }
-    publish(remoteReportNote(state));
-    schedule(state.nextRetryMs > 0 ? state.nextRetryMs : options.intervalMs);
+    publish(QString());
+    schedule(retryMs > 0 ? retryMs : nextDelay);
 }

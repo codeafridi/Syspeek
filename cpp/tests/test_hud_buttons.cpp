@@ -2515,6 +2515,26 @@ int main(int argc, char *argv[]) {
               "settings: a live silence turns the tile amber");
         panel->setSilences({});
 
+        {
+            // M98: the paid-tier reporter's row carries the spool, not only the
+            // verdict - a buffered report is a fact the user must be able to
+            // read, and a dropped one more so.
+            hud.setRemoteLine(QStringLiteral("3 sent, 0 failed - last ok in "
+                                             "12ms, 2 spooled, 1 dropped"));
+            QString remoteText;
+            for (QLabel *label : hud.findChildren<QLabel *>(
+                     QStringLiteral("ddSettingsInfo"))) {
+                if (label->text().contains(QStringLiteral("remote&nbsp;"))) {
+                    remoteText = label->text();
+                }
+            }
+            check(remoteText.contains(QStringLiteral("3 sent"))
+                      && remoteText.contains(QStringLiteral("2 spooled"))
+                      && remoteText.contains(QStringLiteral("1 dropped")),
+                  "settings GENERAL card states what the remote spool holds and "
+                  "what it lost");
+        }
+
         auto *copyReport = static_cast<QPushButton *>(nullptr);
         for (QPushButton *button : hud.findChildren<QPushButton *>()) {
             if (button->text() == QStringLiteral("COPY REPORT")) {
@@ -2530,6 +2550,10 @@ int main(int argc, char *argv[]) {
                       && report.contains(QStringLiteral("monitors"))
                       && report.contains(QStringLiteral("refresh")),
                   "settings: COPY REPORT copies the diagnostic report");
+            check(report.contains(QStringLiteral("remote"))
+                      && report.contains(QStringLiteral("spooled")),
+                  "settings: the copied report carries the reporter and its "
+                  "spool");
             check(copyReport->text() == QStringLiteral("COPIED"),
                   "settings: COPY REPORT confirms the copy");
         }

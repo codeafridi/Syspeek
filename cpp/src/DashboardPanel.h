@@ -88,6 +88,7 @@ struct SettingsInfo {
     QString verbsLine;
     QString metricsLine;
     QString webhookLine;
+    QString remoteLine;
     QString exportLine;
     QString historyLine;
     QString timelineLine;
@@ -154,6 +155,9 @@ public:
     void showTimeline();
 
     void setWebhookLine(const QString &line);
+
+    // M98: the paid-tier reporter's live line (verdict + what the spool holds).
+    void setRemoteLine(const QString &line);
 
     void setExportLine(const QString &line);
 

@@ -256,9 +256,34 @@ QString remoteConfigNote(const RemoteOptions &options) {
                               "will refuse it (set [remote] token=)")
             .arg(base);
     }
-    return QStringLiteral("remote: configured for %1 - transport not started in "
-                          "this build")
+    return QStringLiteral("remote: configured for %1")
         .arg(base);
+}
+
+QString remoteSettingsLine(const RemoteOptions &options) {
+    if (!options.enabled) {
+        return QStringLiteral("off - nothing leaves this machine "
+                              "([remote] enabled=false)");
+    }
+    QString error;
+    const QString base = remoteNormalizeUrl(options.url, &error);
+    if (base.isEmpty()) {
+        return error.isEmpty()
+                   ? QStringLiteral("off - no relay address ([remote] url=)")
+                   : QStringLiteral("off - %1 ([remote] url=)").arg(error);
+    }
+    if (options.token.isEmpty()) {
+        return QStringLiteral("%1 - no token, the relay will refuse it "
+                              "([remote] token=)")
+            .arg(base);
+    }
+    const QString spool = options.spoolMb > 0
+        ? QStringLiteral("spool %1 MB").arg(options.spoolMb)
+        : QStringLiteral("spool off");
+    return QStringLiteral("%1 every %2 s - %3")
+        .arg(base)
+        .arg(options.intervalMs / 1000.0, 0, 'g', 3)
+        .arg(spool);
 }
 
 // ---------------------------------------------------------------------------
@@ -797,11 +822,24 @@ qint64 remoteRetryAfterMs(const QByteArray &headerBlock) {
 }
 
 QString remoteReportNote(const RemoteReportState &state) {
+    // The spool line is appended, never folded into the verdict: "it was
+    // refused" and "there are still reports waiting" are two separate facts.
+    const QString held = remoteSpoolNoteSuffix(state);
     if (state.stopped) {
-        return QStringLiteral("remote: stopped - %1")
-            .arg(remoteClassText(state.lastClass, state.lastStatus));
+        return QStringLiteral("remote: stopped - %1%2")
+            .arg(remoteClassText(state.lastClass, state.lastStatus), held);
     }
     if (state.lastClass == RemoteClass::None) {
+        if (state.spooled > 0) {
+            // The count is already the sentence, so only the loss is added -
+            // "2 report(s) held, 2 spooled" would say the same thing twice.
+            return QStringLiteral("remote: %1 report(s) held for delivery")
+                       .arg(state.spooled)
+                   + (state.spoolDropped > 0
+                          ? QStringLiteral(", %1 dropped")
+                                .arg(state.spoolDropped)
+                          : QString());
+        }
         return QStringLiteral("remote: nothing sent yet");
     }
     QString line = QStringLiteral("remote: %1 sent, %2 failed - last %3 in "
@@ -814,7 +852,28 @@ QString remoteReportNote(const RemoteReportState &state) {
         line += QStringLiteral(", next attempt in %1s")
                     .arg(state.nextRetryMs / 1000.0, 0, 'f', 1);
     }
-    return line;
+    return line + held;
+}
+
+QString remoteSpoolNoteSuffix(const RemoteReportState &state) {
+    if (!state.spoolOn) {
+        return QString();
+    }
+    QString suffix;
+    if (state.spooled > 0) {
+        suffix += QStringLiteral(", %1 spooled").arg(state.spooled);
+    }
+    if (state.spoolDropped > 0) {
+        suffix += QStringLiteral(", %1 dropped").arg(state.spoolDropped);
+    }
+    return suffix;
+}
+
+// The same verdict without its "remote: " prefix, which is the Settings row's
+// own key: a value that repeats the label is a wasted line.
+QString remoteRowText(const RemoteReportState &state) {
+    const QString note = remoteReportNote(state);
+    return note.startsWith(QStringLiteral("remote: ")) ? note.mid(8) : note;
 }
 
 

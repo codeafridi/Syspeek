@@ -120,6 +120,7 @@ public:
     void setFimSnapshot(const FimSnapshot &snapshot);
 
     void setSettingsInfo(const SettingsInfo &info);
+    void setRemoteLine(const QString &line);
     void setHistoryStore(const QString &path, int capacity);
 
     // M97: what the reporter needs from the console. The console owns the event

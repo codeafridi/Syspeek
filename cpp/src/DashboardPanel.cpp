@@ -3802,6 +3802,11 @@ void DashboardPanel::applySettingsInfo() {
             ? muted(QStringLiteral("--"))
             : muted(wrapValue(m_settings.webhookLine, 88)));
     general += row(
+        QStringLiteral("remote"),
+        m_settings.remoteLine.isEmpty()
+            ? muted(QStringLiteral("off - nothing leaves this machine"))
+            : muted(wrapValue(m_settings.remoteLine, 88)));
+    general += row(
         QStringLiteral("export"),
         m_settings.exportLine.isEmpty()
             ? muted(QStringLiteral("--"))
@@ -3995,6 +4000,10 @@ void DashboardPanel::copyDiagnosticsReport() {
                  .arg(m_settings.webhookLine.isEmpty()
                           ? QStringLiteral("--")
                           : m_settings.webhookLine);
+    lines << QStringLiteral("remote     %1")
+                 .arg(m_settings.remoteLine.isEmpty()
+                          ? QStringLiteral("off - nothing leaves this machine")
+                          : m_settings.remoteLine);
     lines << QStringLiteral("export     %1")
                  .arg(m_settings.exportLine.isEmpty()
                           ? QStringLiteral("--")
@@ -4142,6 +4151,11 @@ void DashboardPanel::setSettingsInfo(const SettingsInfo &info) {
 
 void DashboardPanel::setWebhookLine(const QString &line) {
     m_settings.webhookLine = line;
+    applySettingsInfo();
+}
+
+void DashboardPanel::setRemoteLine(const QString &line) {
+    m_settings.remoteLine = line;
     applySettingsInfo();
 }
 

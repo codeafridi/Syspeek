@@ -8,6 +8,7 @@
 #include "Config.h"
 #include "HistoryLog.h"
 #include "RemoteStatus.h"
+#include "RemoteSpool.h"
 #include "TickBudget.h"
 #include "MetricsEndpoint.h"
 #include "CloudFleetSource.h"
@@ -1408,6 +1409,103 @@ QString dumpReportJson(int maxProcs) {
                    == -1
             && remoteRetryAfterMs(QByteArrayLiteral("X-Nothing: 3")) == -1;
         remote.insert(QStringLiteral("retryAfterOk"), retryAfterOk);
+
+        // M98: the spool, proven on a temp file - never the real cache, and
+        // never a report. Eight records and eleven appends, so the wrap, the
+        // drop count and the oldest-first order are all exercised.
+        const QString spoolProbePath =
+            QDir::tempPath()
+            + QStringLiteral("/syspeek-remote-probe-%1.spool").arg(dumpPid());
+        const qint64 probeBudget =
+            kRemoteSpoolHeaderBytes + 8 * kRemoteSpoolRecordBytes;
+        bool spoolOpened = false;
+        bool spoolWrapped = false;
+        bool spoolAcked = false;
+        bool spoolCorruptSkipped = false;
+        int spoolCount = 0;
+        int spoolCapacity = 0;
+        qint64 spoolDropped = 0;
+        qint64 spoolBytes = 0;
+        {
+            RemoteSpool spool;
+            spoolOpened = spool.open(spoolProbePath, probeBudget);
+            if (spoolOpened) {
+                for (int i = 0; i < 11; ++i) {
+                    spool.append(QStringLiteral("probe-%1").arg(i),
+                                 qint64(1000 + i),
+                                 QByteArrayLiteral("{\"n\":")
+                                     + QByteArray::number(i) + '}');
+                }
+                RemoteSpoolRecord oldest;
+                RemoteSpoolRecord newest;
+                spoolWrapped =
+                    spool.count() == 8 && spool.dropped() == 3
+                    && spool.peekOldest(oldest)
+                    && oldest.id == QStringLiteral("probe-3")
+                    && spool.readAt(7, newest)
+                    && newest.id == QStringLiteral("probe-10")
+                    && newest.sentAtMs == 1010;
+                spoolAcked = spool.ackOldest() && spool.count() == 7
+                             && spool.peekOldest(oldest)
+                             && oldest.id == QStringLiteral("probe-4");
+                spoolCount = spool.count();
+                spoolCapacity = spool.capacity();
+                spoolDropped = spool.dropped();
+                spoolBytes = spool.fileBytes();
+            }
+
+            // A byte flipped inside one record must make exactly that record
+            // unreadable and leave its neighbours alone: a corrupt slot is
+            // skipped, never decoded blind. Slot 0 holds the oldest live report
+            // here (7 of 8 slots are in use), and 200 is inside its body.
+            if (spoolOpened) {
+                QFile raw(spoolProbePath);
+                const qint64 offset = qint64(kRemoteSpoolHeaderBytes) + 200;
+                if (raw.open(QIODevice::ReadWrite) && raw.seek(offset)) {
+                    const QByteArray byte = raw.read(1);
+                    const char flipped = char(quint8(byte.at(0)) ^ 0xFFu);
+                    raw.seek(offset);
+                    if (raw.write(&flipped, 1) == 1) {
+                        raw.flush();
+                    }
+                }
+                raw.close();
+                int readable = 0;
+                int unreadable = 0;
+                for (int i = 0; i < spool.count(); ++i) {
+                    RemoteSpoolRecord probe;
+                    if (spool.readAt(i, probe)) {
+                        ++readable;
+                    } else {
+                        ++unreadable;
+                    }
+                }
+                spoolCorruptSkipped = unreadable == 1
+                                      && readable == spool.count() - 1;
+            }
+            spool.close();
+        }
+        RemoteSpool spoolReopened;
+        const bool spoolReset =
+            spoolReopened.open(spoolProbePath, probeBudget * 2)
+            && spoolReopened.count() == 0
+            && spoolReopened.capacity() == 16;
+        spoolReopened.close();
+        QFile::remove(spoolProbePath);
+        remote.insert(QStringLiteral("spoolCount"), spoolCount);
+        remote.insert(QStringLiteral("spoolDropped"), spoolDropped);
+        remote.insert(QStringLiteral("spoolBytes"), spoolBytes);
+        remote.insert(QStringLiteral("spoolCapacity"), spoolCapacity);
+        remote.insert(QStringLiteral("spoolOpenOk"), spoolOpened);
+        remote.insert(QStringLiteral("spoolWrapOk"), spoolWrapped);
+        remote.insert(QStringLiteral("spoolAckOk"), spoolAcked);
+        remote.insert(QStringLiteral("spoolCorruptOk"), spoolCorruptSkipped);
+        remote.insert(QStringLiteral("spoolResetOk"), spoolReset);
+        remote.insert(QStringLiteral("spoolBudgetOk"),
+                      remoteSpoolCapacityFor(0) == 0
+                          && remoteSpoolCapacityFor(probeBudget) == 8
+                          && remoteSpoolCapacityFor(qint64(256) * 1024 * 1024)
+                                 == kRemoteSpoolMaxRecords);
 
         const QByteArray rendered =
             QJsonDocument(remote).toJson(QJsonDocument::Compact);

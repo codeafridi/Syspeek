@@ -1069,6 +1069,12 @@ void HudWindow::setSettingsInfo(const SettingsInfo &info) {
     }
 }
 
+void HudWindow::setRemoteLine(const QString &line) {
+    if (m_panel != nullptr) {
+        m_panel->setRemoteLine(line);
+    }
+}
+
 void HudWindow::setMonitors(const QList<AlertRule> &rules) {
     for (const AlertRule &rule : rules) {
         m_alerts.setRuleThreshold(rule.id, rule.threshold);

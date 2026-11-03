@@ -42,6 +42,10 @@ QString remoteSpoolPath();
 
 QString remoteConfigNote(const RemoteOptions &options);
 
+// The Settings GENERAL value column: no "remote: " prefix, and it names the
+// spool budget, because the Settings page is where that switch is read.
+QString remoteSettingsLine(const RemoteOptions &options);
+
 // ---------------------------------------------------------------------------
 // M96: the envelope. Everything here is pure: it turns a DisplaySnapshot into
 // the exact bytes a report would carry, so the privacy guarantee is a test
@@ -193,14 +197,32 @@ struct RemoteReportState {
     int consecutiveFailures = 0;
     int nextRetryMs = -1;
     bool stopped = false; // a terminal answer; nothing more is sent
+    // M98: the offline spool. A report is written here before the attempt and
+    // released only when the relay answered, so these numbers are the state of
+    // what has not been delivered - not a queue length that hides a loss.
+    bool spoolOn = false;
+    int spooled = 0;
+    int spoolCapacity = 0;
+    qint64 spoolDropped = 0;
+    qint64 spoolBytes = 0;
+    qint64 refused = 0; // bodies the relay refused outright, dropped with reason
     QString note;
 };
 
 QString remoteReportNote(const RemoteReportState &state);
+
+// M98: ", 3 spooled, 1 dropped" - the suffix both a verdict line and a
+// "delivered in 4ms" line carry, because a delivery does not empty the spool.
+QString remoteSpoolNoteSuffix(const RemoteReportState &state);
+
+// The Settings row's value: the verdict without its "remote: " prefix (the row
+// label already says that), including whatever the spool still holds.
+QString remoteRowText(const RemoteReportState &state);
 
 // Queued across the reporter thread, so both the enum and the envelope need a
 // metatype. Declared here rather than in each caller so main.cpp and the tests
 // cannot disagree about it.
 Q_DECLARE_METATYPE(RemoteClass)
 Q_DECLARE_METATYPE(RemoteEnvelope)
+Q_DECLARE_METATYPE(RemoteReportState)
 
