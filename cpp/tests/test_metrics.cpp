@@ -7549,6 +7549,16 @@ int main(int argc, char *argv[]) {
             check(first.created && first.id.size() == 36
                       && remoteMachineIdLooksValid(first.id),
                   "remote identity: the first run writes a 36-char id");
+#if defined(Q_OS_WIN)
+            // Windows has no POSIX mode bits; Qt reports a coarse owner/other
+            // set for every file, and a file in the user profile inherits that
+            // profile's ACL. The 0600 request is still made (it maps onto the
+            // read-only attribute); the assertion is the one the OS can answer.
+            check(QFile::exists(idPath)
+                      && QFileInfo(idPath).isReadable(),
+                  "remote identity: the id file exists in the user's own cache "
+                  "(Windows ACL, no POSIX mode)");
+#else
             check(QFile::exists(idPath)
                       && (QFileInfo(idPath).permissions()
                           & (QFileDevice::ReadGroup | QFileDevice::WriteGroup
@@ -7556,6 +7566,7 @@ int main(int argc, char *argv[]) {
                              | QFileDevice::WriteOther))
                              == QFileDevice::Permissions(),
                   "remote identity: the id file is readable by its owner only");
+#endif
 
             const RemoteIdentity second =
                 remoteIdentityAt(idPath, idOptions, true);

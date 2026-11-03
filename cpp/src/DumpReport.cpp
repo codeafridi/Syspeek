@@ -1540,11 +1540,25 @@ QString dumpReportJson(int maxProcs) {
         if (idModeOk) {
             const QFileDevice::Permissions perms = idFile.permissions();
             idFile.close();
+#if defined(Q_OS_WIN)
+            // No POSIX modes on Windows: Qt reports a coarse owner/other set for
+            // every file, and the id lives in the user's own profile ACL. The
+            // check here is the one the OS can answer.
+            idModeOk = true;
+#else
             idModeOk = !(perms & (QFileDevice::ReadGroup
                                   | QFileDevice::WriteGroup
                                   | QFileDevice::ReadOther
                                   | QFileDevice::WriteOther));
+#endif
         }
+        remote.insert(QStringLiteral("identityModePosix"), [] {
+#if defined(Q_OS_WIN)
+            return false;
+#else
+            return true;
+#endif
+        }());
         QFile::remove(idPath);
         const RemoteIdentity renewedId =
             remoteIdentityAt(idPath, idOptions, true);

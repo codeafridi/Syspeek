@@ -66,7 +66,8 @@ the same numbers.
 
 The first run with `[remote] enabled=true` writes `<cache>/syspeek/machine-id`:
 a UUID, written through a temp file and an atomic rename, readable and writable
-by your user only. That id is the machine, and it survives restarts, renames and
+by your user only (POSIX mode `0600`; on Windows the file inherits the user
+profile's ACL, because Windows has no mode bits). That id is the machine, and it survives restarts, renames and
 app updates. A replaced network card or a changed hostname does not change it.
 
 If that file cannot be written (read-only home, full disk), the id falls back to
