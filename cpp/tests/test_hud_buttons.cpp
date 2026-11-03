@@ -2903,6 +2903,61 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // --- remote reporter (M97): the console hands the reporter one envelope
+    {
+        HudWindow reporter;
+        int emitted = 0;
+        RemoteEnvelope seen;
+        QObject::connect(&reporter, &HudWindow::remoteEnvelopeReady,
+                         &reporter, [&](const RemoteEnvelope &envelope) {
+                             ++emitted;
+                             seen = envelope;
+                         });
+
+        RemoteOptions off;
+        off.url = QStringLiteral("relay.example.test");
+        off.token = QStringLiteral("tok");
+        off.machineId = QStringLiteral("machine-9");
+        reporter.setRemoteConfig(off, QStringLiteral("0.11.2"),
+                                 QStringLiteral("linux/x86_64"));
+        DisplaySnapshot warm = makeSnapshot("alpha", "123", "17%", "8 MB", "OK");
+        warm.hostAvailable = true;
+        warm.hostCpuPercent = 12.5;
+        reporter.setSnapshot(warm);
+        check(emitted == 0,
+              "remote reporter: the off switch builds no envelope");
+
+        RemoteOptions noId = off;
+        noId.enabled = true;
+        noId.machineId.clear();
+        reporter.setRemoteConfig(noId, QStringLiteral("0.11.2"),
+                                 QStringLiteral("linux/x86_64"));
+        reporter.setSnapshot(warm);
+        check(emitted == 0,
+              "remote reporter: a machine with no id is never reported");
+
+        RemoteOptions on = off;
+        on.enabled = true;
+        reporter.setRemoteConfig(on, QStringLiteral("0.11.2"),
+                                 QStringLiteral("linux/x86_64"));
+        DisplaySnapshot real = makeSnapshot("alpha", "123", "17%", "8 MB", "OK");
+        real.hostAvailable = true;
+        real.hostCpuPercent = 12.5;
+        real.hostLoad1 = 0.75;
+        real.hostMemTotalKb = 16000000;
+        real.hostMemAvailableKb = 8000000;
+        reporter.setSnapshot(real);
+        check(emitted == 1 && seen.schema == kRemoteSchemaVersion
+                  && seen.machine.id == QStringLiteral("machine-9")
+                  && seen.machine.version == QStringLiteral("0.11.2")
+                  && seen.sample.hostReady && seen.sample.hostCpu > 12.0
+                  && seen.sample.appName == QStringLiteral("alpha"),
+              "remote reporter: an enabled console hands over one built envelope");
+        QJsonObject wire = remoteEnvelopeObject(seen);
+        check(remotePrivacyOffenders(wire).isEmpty(),
+              "remote reporter: what the console hands over carries no private key");
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

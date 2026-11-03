@@ -1,6 +1,7 @@
 #include "HudWindow.h"
 
 #include "DashboardPanel.h"
+#include "CloudProbe.h"
 #include "Theme.h"
 #include "platform/PlatformFactory.h"
 
@@ -495,6 +496,7 @@ void HudWindow::setSnapshot(const DisplaySnapshot &snapshot) {
             100.0 * snapshot.hostDiskFreeBytes / snapshot.hostDiskTotalBytes;
     }
     evaluateAlerts();
+    publishRemoteEnvelope();
 }
 
 void HudWindow::setDockerSnapshot(const DockerSnapshot &snapshot) {
@@ -534,6 +536,16 @@ void HudWindow::setDockerSnapshot(const DockerSnapshot &snapshot) {
     // per-tick sample, so it lives here where the docker snapshot lands.
     m_idleContainers.update(snapshot.containers,
                             QDateTime::currentMSecsSinceEpoch());
+    // M97: the reporter carries these counts, and only a real reading counts as
+    // a reading. A gated or failed docker source reports nothing (null on the
+    // wire) instead of a zero that would read as "no containers running".
+    if (snapshot.state == DockerState::Ok || snapshot.state == DockerState::Stale) {
+        m_remoteCounts.containersRunning = snapshot.runningCount;
+        m_remoteCounts.containersIssues = snapshot.issueCount;
+    } else {
+        m_remoteCounts.containersRunning = -1;
+        m_remoteCounts.containersIssues = -1;
+    }
     if (m_panel != nullptr) {
         m_panel->setDockerSnapshot(snapshot);
         m_panel->setIdleContainers(m_idleContainers.idle(),
@@ -596,6 +608,15 @@ void HudWindow::setKubeSnapshot(const KubeSnapshot &snapshot) {
 
     if (m_panel != nullptr) {
         m_panel->setKubeSnapshot(snapshot);
+    }
+    // M97: same rule as the container counts - a cluster we could not read is
+    // unknown, not empty.
+    if (snapshot.state == KubeState::Ok || snapshot.state == KubeState::Stale) {
+        m_remoteCounts.kubePods = snapshot.totalPods;
+        m_remoteCounts.kubeNodes = int(snapshot.nodes.size());
+    } else {
+        m_remoteCounts.kubePods = -1;
+        m_remoteCounts.kubeNodes = -1;
     }
     m_alertInput.k8sValid = snapshot.state == KubeState::Ok;
     m_alertInput.k8sIssues = snapshot.issueCount + snapshot.eventCount;
@@ -977,6 +998,40 @@ void HudWindow::focusTimeline(qint64 atMs) {
     if (m_panel != nullptr) {
         m_panel->showTimeline();
     }
+}
+
+void HudWindow::setRemoteConfig(const RemoteOptions &options,
+                                const QString &version, const QString &platform) {
+    m_remote = options;
+    m_remoteVersion = version;
+    m_remotePlatform = platform;
+}
+
+void HudWindow::publishRemoteEnvelope() {
+    // Nothing leaves the machine unless the switch is on, the address parses and
+    // there is a token - the same three facts the card states. A machine with no
+    // id yet (M100 assigns it) is refused here rather than posted under an empty
+    // id, which would split one machine into two on the relay.
+    if (!remoteConfigUsable(m_remote) || m_remote.machineId.isEmpty()) {
+        return;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now == m_remoteLastSampleMs) {
+        return; // one envelope per millisecond, however fast the ticks arrive
+    }
+    m_remoteLastSampleMs = now;
+
+    // Two intervals of overlap: a report that fails is retried by the runner
+    // with the SAME envelope (same sample id), and the next band picks up the
+    // events that were in it. The relay dedupes by event id (M104), so
+    // at-least-once costs nothing and at-most-once would lose a breach.
+    const qint64 overlapMs = qMax<qint64>(m_remote.intervalMs * 2, 30000);
+    const qint64 since = now - overlapMs;
+    const RemoteMachine machine =
+        remoteMachine(m_remote, m_remoteVersion, m_remotePlatform, now);
+    emit remoteEnvelopeReady(remoteBuildEnvelope(
+        machine, m_lastSnapshot, m_events, since, m_remoteCounts,
+        cloudHostUptimeSeconds()));
 }
 
 void HudWindow::publishTimeline() {

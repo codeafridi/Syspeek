@@ -339,8 +339,16 @@ jobs:
           assert remote["intervalMs"] == 15000, remote
           assert remote["timeoutMs"] == 3000, remote
           assert remote["spoolMb"] == 8, remote
+          assert remote["attempted"] is False, remote
+          assert remote["classification"] == "none", remote
+          assert remote["latencyMs"] == -1, remote
+          assert remote["note"] and remote["transportNote"], remote
+          assert remote["classifyOk"] is True, remote
+          assert remote["backoffOk"] is True, remote
+          assert remote["retryAfterOk"] is True, remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
                                         else "off", remote["note"]))
+          print("remote transport ok: %s" % remote["transportNote"])
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -575,8 +583,16 @@ jobs:
           assert remote["intervalMs"] == 15000, remote
           assert remote["timeoutMs"] == 3000, remote
           assert remote["spoolMb"] == 8, remote
+          assert remote["attempted"] is False, remote
+          assert remote["classification"] == "none", remote
+          assert remote["latencyMs"] == -1, remote
+          assert remote["note"] and remote["transportNote"], remote
+          assert remote["classifyOk"] is True, remote
+          assert remote["backoffOk"] is True, remote
+          assert remote["retryAfterOk"] is True, remote
           print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
                                         else "off", remote["note"]))
+          print("remote transport ok: %s" % remote["transportNote"])
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),

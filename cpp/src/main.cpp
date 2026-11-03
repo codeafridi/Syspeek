@@ -18,6 +18,8 @@
 #include "MetricsServer.h"
 #include "MetricsEndpoint.h"
 #include "FleetSource.h"
+#include "RemoteSource.h"
+#include "RemoteStatus.h"
 #include "FleetStatus.h"
 #include "DumpReport.h"
 #include "HistoryLog.h"
@@ -850,6 +852,45 @@ int main(int argc, char *argv[]) {
     }
     fleetThread->start();
 
+    // M97: the paid-tier reporter. Same discipline as the peer poll (own thread,
+    // blocking socket with a hard budget) with one difference that matters: the
+    // thread does not exist at all unless the user turned the switch on, so the
+    // free build never opens a socket and never spends a timer on one.
+    QThread *remoteThread = nullptr;
+    RemoteRunner *remoteRunner = nullptr;
+    hud.setRemoteConfig(config.remote, fleetSelf.version, fleetSelf.platform);
+    if (config.remote.enabled) {
+        qRegisterMetaType<RemoteEnvelope>("RemoteEnvelope");
+        qRegisterMetaType<RemoteClass>("RemoteClass");
+        remoteThread = new QThread;
+        remoteRunner = new RemoteRunner;
+        remoteRunner->moveToThread(remoteThread);
+        RemoteReportOptions reportOptions;
+        reportOptions.enabled = true;
+        reportOptions.url = remoteIngestUrl(config.remote.url, nullptr);
+        reportOptions.token = config.remote.token;
+        reportOptions.intervalMs = config.remote.intervalMs;
+        reportOptions.timeoutMs = config.remote.timeoutMs;
+        remoteRunner->setOptions(reportOptions);
+        QObject::connect(remoteThread, &QThread::started, remoteRunner,
+                         &RemoteRunner::start);
+        QObject::connect(remoteThread, &QThread::finished, remoteRunner,
+                         &QObject::deleteLater);
+        QObject::connect(&hud, &HudWindow::remoteEnvelopeReady, remoteRunner,
+                         &RemoteRunner::setEnvelope);
+        QObject::connect(remoteRunner, &RemoteRunner::reportSent, &hud,
+                         [](bool ok, RemoteClass, int latencyMs,
+                            const QString &note) {
+                             Q_UNUSED(ok);
+                             Q_UNUSED(latencyMs);
+                             logLine(note);
+                         });
+        remoteThread->start();
+        logLine(QStringLiteral("remote: reporting to %1 every %2 ms")
+                    .arg(reportOptions.url)
+                    .arg(reportOptions.intervalMs));
+    }
+
     quint64 lastSequence = 0;
     QObject::connect(worker, &SamplerWorker::snapshotReady, &hud,
                      [&hud, &lastSequence](const DisplaySnapshot &snapshot) {
@@ -1126,6 +1167,17 @@ int main(int argc, char *argv[]) {
     fleetThread->quit();
     fleetThread->wait();
     delete fleetThread;
+
+    // A report can be inside a blocking POST with the full budget, same as a
+    // peer poll: ask it to stop on its own thread and let the socket timeout
+    // bound the wait.
+    if (remoteRunner != nullptr) {
+        QMetaObject::invokeMethod(remoteRunner, "stop",
+                                  Qt::BlockingQueuedConnection);
+        remoteThread->quit();
+        remoteThread->wait();
+        delete remoteThread;
+    }
 
     thread->quit();
     thread->wait();

@@ -676,3 +676,145 @@ QString remotePrivacyOffenders(const QJsonObject &root) {
     return scanForbidden(root);
 }
 
+// ---------------------------------------------------------------------------
+// M97: transport classification
+// ---------------------------------------------------------------------------
+
+RemoteClass remoteClassify(int httpStatus) {
+    if (httpStatus <= 0) {
+        return RemoteClass::Transport;
+    }
+    if (httpStatus >= 200 && httpStatus < 300) {
+        return RemoteClass::Ok;
+    }
+    if (httpStatus == 401 || httpStatus == 403) {
+        return RemoteClass::Auth;
+    }
+    if (httpStatus == 404) {
+        return RemoteClass::NotFound;
+    }
+    if (httpStatus == 429) {
+        return RemoteClass::Throttled;
+    }
+    if (httpStatus >= 500) {
+        return RemoteClass::Server;
+    }
+    // Any other 4xx: the relay understood the request and refused the body, so
+    // the same bytes will be refused again.
+    return RemoteClass::Rejected;
+}
+
+QString remoteClassName(RemoteClass value) {
+    switch (value) {
+    case RemoteClass::None:
+        return QStringLiteral("none");
+    case RemoteClass::Ok:
+        return QStringLiteral("ok");
+    case RemoteClass::Auth:
+        return QStringLiteral("auth");
+    case RemoteClass::NotFound:
+        return QStringLiteral("not-found");
+    case RemoteClass::Rejected:
+        return QStringLiteral("rejected");
+    case RemoteClass::Throttled:
+        return QStringLiteral("throttled");
+    case RemoteClass::Server:
+        return QStringLiteral("server");
+    case RemoteClass::Transport:
+        return QStringLiteral("transport");
+    }
+    return QStringLiteral("none");
+}
+
+QString remoteClassText(RemoteClass value, int httpStatus) {
+    switch (value) {
+    case RemoteClass::None:
+        return QStringLiteral("no report sent yet");
+    case RemoteClass::Ok:
+        return QStringLiteral("ok");
+    case RemoteClass::Auth:
+        return QStringLiteral("%1 - the relay refused this token (check "
+                              "[remote] token= and that it was not revoked)")
+            .arg(httpStatus);
+    case RemoteClass::NotFound:
+        return QStringLiteral("%1 - no ingest endpoint at that address (check "
+                              "[remote] url=)")
+            .arg(httpStatus);
+    case RemoteClass::Rejected:
+        return QStringLiteral("%1 - the relay refused this payload (413 means "
+                              "it is too large, 422 means a field was rejected)")
+            .arg(httpStatus);
+    case RemoteClass::Throttled:
+        return QStringLiteral("%1 - the relay asked us to slow down")
+            .arg(httpStatus);
+    case RemoteClass::Server:
+        return QStringLiteral("%1 - the relay failed the request")
+            .arg(httpStatus);
+    case RemoteClass::Transport:
+        return httpStatus > 0
+            ? QStringLiteral("HTTP %1").arg(httpStatus)
+            : QStringLiteral("no answer from the relay");
+    }
+    return QStringLiteral("no report sent yet");
+}
+
+bool remoteClassIsTerminal(RemoteClass value) {
+    return value == RemoteClass::Auth || value == RemoteClass::NotFound
+        || value == RemoteClass::Rejected;
+}
+
+int remoteBackoffMs(int consecutiveFailures, int intervalMs) {
+    const int cap = std::clamp(intervalMs, kRemoteIntervalMinMs,
+                               kRemoteIntervalMaxMs);
+    if (consecutiveFailures <= 0) {
+        return cap;
+    }
+    const int shift = std::min(consecutiveFailures - 1, 20);
+    const qint64 ladder = qint64(2000) << shift;
+    return int(std::clamp<qint64>(ladder, 2000, cap));
+}
+
+qint64 remoteRetryAfterMs(const QByteArray &headerBlock) {
+    const QList<QByteArray> lines = headerBlock.split('\n');
+    for (const QByteArray &line : lines) {
+        const QByteArray trimmed = line.trimmed();
+        const int colon = trimmed.indexOf(':');
+        if (colon <= 0) {
+            continue;
+        }
+        if (trimmed.left(colon).trimmed().toLower()
+            != QByteArrayLiteral("retry-after")) {
+            continue;
+        }
+        bool ok = false;
+        const qint64 seconds = trimmed.mid(colon + 1).trimmed().toLongLong(&ok);
+        if (!ok || seconds < 0) {
+            return -1;
+        }
+        return qMin<qint64>(seconds * 1000, qint64(kRemoteIntervalMaxMs));
+    }
+    return -1;
+}
+
+QString remoteReportNote(const RemoteReportState &state) {
+    if (state.stopped) {
+        return QStringLiteral("remote: stopped - %1")
+            .arg(remoteClassText(state.lastClass, state.lastStatus));
+    }
+    if (state.lastClass == RemoteClass::None) {
+        return QStringLiteral("remote: nothing sent yet");
+    }
+    QString line = QStringLiteral("remote: %1 sent, %2 failed - last %3 in "
+                                  "%4ms")
+                       .arg(state.sent)
+                       .arg(state.failed)
+                       .arg(remoteClassText(state.lastClass, state.lastStatus))
+                       .arg(state.lastLatencyMs);
+    if (state.nextRetryMs > 0) {
+        line += QStringLiteral(", next attempt in %1s")
+                    .arg(state.nextRetryMs / 1000.0, 0, 'f', 1);
+    }
+    return line;
+}
+
+

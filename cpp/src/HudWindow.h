@@ -25,6 +25,7 @@
 #include "FimStatus.h"
 #include "OverlayStatus.h"
 #include "TimelineStatus.h"
+#include "RemoteStatus.h"
 
 #include <QHash>
 #include <QPoint>
@@ -94,6 +95,9 @@ signals:
     void idleContainersChanged(int count);
     void serviceRestartRequested(const QString &unit);
     void containerActionRequested(const QString &id, const QString &verb);
+    // M97: one report's worth of bytes. Emitted with the sample id already
+    // fixed, so a retry of the same envelope cannot mint a second report.
+    void remoteEnvelopeReady(const RemoteEnvelope &envelope);
 
 public:
 
@@ -117,6 +121,11 @@ public:
 
     void setSettingsInfo(const SettingsInfo &info);
     void setHistoryStore(const QString &path, int capacity);
+
+    // M97: what the reporter needs from the console. The console owns the event
+    // ring and the alert state; the reporter only puts the bytes on a socket.
+    void setRemoteConfig(const RemoteOptions &options, const QString &version,
+                         const QString &platform);
 
     // M86: the event stream. One bounded in-memory ring fed by every
     // collector that can say "something changed".
@@ -181,6 +190,16 @@ private:
     bool m_eventMarkers = true;
     qint64 m_timelineFocusMs = 0;
     qint64 m_timelineWindowMs = 90000;
+
+    // M97: reporter state. The counts come from sources the console polls on
+    // their own cadence, so they are cached here (-1 = no reading, which the
+    // wire carries as null rather than a fabricated zero).
+    RemoteOptions m_remote;
+    QString m_remoteVersion;
+    QString m_remotePlatform;
+    qint64 m_remoteLastSampleMs = -1;
+    RemoteCounts m_remoteCounts;
+    void publishRemoteEnvelope();
 
     QLabel *m_appValue = nullptr;
     QLabel *m_pidValue = nullptr;

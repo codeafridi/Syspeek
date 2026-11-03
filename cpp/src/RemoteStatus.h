@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QString>
 #include <QStringList>
 
@@ -144,3 +145,62 @@ bool parseRemoteEnvelopeJson(const QByteArray &json, RemoteEnvelope *out,
 // Walks every key at any depth and returns the first forbidden one, or an empty
 // string when the document is clean.
 QString remotePrivacyOffenders(const QJsonObject &root);
+
+// ---------------------------------------------------------------------------
+// M97: transport classification. Every answer the relay can give ends in
+// exactly one state, so "it did not work" is never the whole story.
+// ---------------------------------------------------------------------------
+
+enum class RemoteClass {
+    None,      // no attempt yet
+    Ok,        // 2xx
+    Auth,      // 401/403 - the token is wrong; retrying cannot fix it
+    NotFound,  // 404 - no ingest endpoint at that address
+    Rejected,  // 413/422/other 4xx - the body itself was refused
+    Throttled, // 429
+    Server,    // 5xx
+    Transport  // connect refused, timeout, TLS failure
+};
+
+RemoteClass remoteClassify(int httpStatus);
+
+QString remoteClassName(RemoteClass value);
+
+// One line a person can read, including the status code when there was one.
+QString remoteClassText(RemoteClass value, int httpStatus);
+
+// Auth, NotFound and Rejected are answers about the *configuration* or the
+// *body*, so resending the same request is waste. Server, Throttled and
+// Transport are transient by nature and are retried on the ladder.
+bool remoteClassIsTerminal(RemoteClass value);
+
+// 2s, 4s, 8s ... capped at the reporting interval: a relay that is down for an
+// hour costs 8 retries an hour rather than 240.
+int remoteBackoffMs(int consecutiveFailures, int intervalMs);
+
+// Retry-After in seconds (the shape every 429 carries); -1 when absent or not a
+// number. Dates are not honoured - this client always speaks to one relay.
+qint64 remoteRetryAfterMs(const QByteArray &headerBlock);
+
+struct RemoteReportState {
+    RemoteClass lastClass = RemoteClass::None;
+    int lastStatus = 0;
+    int lastLatencyMs = -1;
+    qint64 lastAttemptMs = -1;
+    qint64 lastOkMs = -1;
+    int sent = 0;
+    int failed = 0;
+    int consecutiveFailures = 0;
+    int nextRetryMs = -1;
+    bool stopped = false; // a terminal answer; nothing more is sent
+    QString note;
+};
+
+QString remoteReportNote(const RemoteReportState &state);
+
+// Queued across the reporter thread, so both the enum and the envelope need a
+// metatype. Declared here rather than in each caller so main.cpp and the tests
+// cannot disagree about it.
+Q_DECLARE_METATYPE(RemoteClass)
+Q_DECLARE_METATYPE(RemoteEnvelope)
+

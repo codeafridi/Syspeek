@@ -1,12 +1,15 @@
 #include "ServeRun.h"
 
 #include "AppLog.h"
+#include "CloudProbe.h"
 #include "Config.h"
 #include "FleetSource.h"
 #include "FleetStatus.h"
 #include "FocusProviderFactory.h"
 #include "FocusedWindowProvider.h"
 #include "MetricsServer.h"
+#include "RemoteSource.h"
+#include "RemoteStatus.h"
 #include "SamplerWorker.h"
 #include "platform/PlatformFactory.h"
 
@@ -39,10 +42,11 @@ int serveRun(int argc, char **argv) {
                     configError.toUtf8().constData(),
                     defaultConfigPath().toUtf8().constData());
     }
-    if (!config.metrics.enabled && !config.fleet.share) {
+    if (!config.metrics.enabled && !config.fleet.share
+        && !config.remote.enabled) {
         std::printf(
-            "serve: nothing to serve - both [metrics] enabled and "
-            "[fleet] share are off\n");
+            "serve: nothing to serve - [metrics] enabled, [fleet] share and "
+            "[remote] enabled are all off\n");
         std::fflush(stdout);
         return 2;
     }
@@ -131,6 +135,49 @@ int serveRun(int argc, char **argv) {
     }
     std::printf("serve: %d peer(s) from [fleet] peers, polling every %d ms\n",
                 int(config.fleet.peers.size()), config.fleet.pollMs);
+    // M97: a headless member reports the same envelope the console does, only
+    // without the event ring - there is no console here to collect one.
+    QThread *remoteThread = nullptr;
+    RemoteRunner *remoteRunner = nullptr;
+    if (config.remote.enabled) {
+        qRegisterMetaType<RemoteEnvelope>("RemoteEnvelope");
+        qRegisterMetaType<RemoteClass>("RemoteClass");
+        RemoteReportOptions reportOptions;
+        reportOptions.enabled = config.remote.enabled;
+        reportOptions.url = remoteIngestUrl(config.remote.url, nullptr);
+        reportOptions.token = config.remote.token;
+        reportOptions.intervalMs = config.remote.intervalMs;
+        reportOptions.timeoutMs = config.remote.timeoutMs;
+        remoteThread = new QThread;
+        remoteRunner = new RemoteRunner;
+        remoteRunner->moveToThread(remoteThread);
+        remoteRunner->setOptions(reportOptions);
+        QObject::connect(remoteThread, &QThread::started, remoteRunner,
+                         &RemoteRunner::start);
+        QObject::connect(remoteThread, &QThread::finished, remoteRunner,
+                         &QObject::deleteLater);
+        QObject::connect(
+            worker, &SamplerWorker::snapshotReady, remoteRunner,
+            [remoteRunner, config, self](const DisplaySnapshot &snapshot) {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                const RemoteMachine machine =
+                    remoteMachine(config.remote, self.version, self.platform,
+                                  now);
+                remoteRunner->setEnvelope(remoteBuildEnvelope(
+                    machine, snapshot, {}, now - config.remote.intervalMs,
+                    RemoteCounts{}, cloudHostUptimeSeconds()));
+            });
+        QObject::connect(remoteRunner, &RemoteRunner::reportSent, &app,
+                         [](bool, RemoteClass, int, const QString &note) {
+                             std::printf("serve: %s\n",
+                                         note.toUtf8().constData());
+                             std::fflush(stdout);
+                         });
+        std::printf("serve: reporting to %s\n",
+                    reportOptions.url.toUtf8().constData());
+    } else {
+        std::printf("serve: reporting off ([remote] enabled=false)\n");
+    }
     std::printf("serve: ctrl+c to stop\n");
     std::fflush(stdout);
 
@@ -141,6 +188,9 @@ int serveRun(int argc, char **argv) {
                      &QObject::deleteLater);
     workerThread->start();
     fleetThread->start();
+    if (remoteThread != nullptr) {
+        remoteThread->start();
+    }
 
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
@@ -159,6 +209,14 @@ int serveRun(int argc, char **argv) {
     fleetThread->quit();
     fleetThread->wait();
     delete fleetThread;
+
+    if (remoteRunner != nullptr) {
+        QMetaObject::invokeMethod(remoteRunner, "stop",
+                                  Qt::BlockingQueuedConnection);
+        remoteThread->quit();
+        remoteThread->wait();
+        delete remoteThread;
+    }
 
     QMetaObject::invokeMethod(worker, "stop", Qt::BlockingQueuedConnection);
     workerThread->quit();

@@ -1359,6 +1359,56 @@ QString dumpReportJson(int maxProcs) {
                                && probe.spoolMb == kRemoteSpoolMaxMb;
         remote.insert(QStringLiteral("clampOk"), floorOk && ceilingOk);
 
+        // M97: the transport's answers, proven without a relay. `--dump` never
+        // sends a report - a diagnostic must not become a report - so it states
+        // that and proves the taxonomy the runner uses.
+        remote.insert(QStringLiteral("attempted"), false);
+        remote.insert(QStringLiteral("ok"), false);
+        remote.insert(QStringLiteral("classification"),
+                      remoteClassName(RemoteClass::None));
+        remote.insert(QStringLiteral("latencyMs"), -1);
+        remote.insert(QStringLiteral("transportNote"),
+                      QStringLiteral("remote: --dump never sends a report - the "
+                                     "console or `serve` does"));
+        const bool classifyOk =
+            remoteClassify(200) == RemoteClass::Ok
+            && remoteClassify(204) == RemoteClass::Ok
+            && remoteClassify(401) == RemoteClass::Auth
+            && remoteClassify(403) == RemoteClass::Auth
+            && remoteClassify(404) == RemoteClass::NotFound
+            && remoteClassify(413) == RemoteClass::Rejected
+            && remoteClassify(422) == RemoteClass::Rejected
+            && remoteClassify(429) == RemoteClass::Throttled
+            && remoteClassify(500) == RemoteClass::Server
+            && remoteClassify(503) == RemoteClass::Server
+            && remoteClassify(0) == RemoteClass::Transport
+            && remoteClassIsTerminal(RemoteClass::Auth)
+            && remoteClassIsTerminal(RemoteClass::NotFound)
+            && remoteClassIsTerminal(RemoteClass::Rejected)
+            && !remoteClassIsTerminal(RemoteClass::Server)
+            && !remoteClassIsTerminal(RemoteClass::Throttled)
+            && !remoteClassIsTerminal(RemoteClass::Transport)
+            && !remoteClassIsTerminal(RemoteClass::Ok)
+            && !remoteClassIsTerminal(RemoteClass::None);
+        remote.insert(QStringLiteral("classifyOk"), classifyOk);
+        const bool backoffOk = remoteBackoffMs(1, 15000) == 2000
+                               && remoteBackoffMs(2, 15000) == 4000
+                               && remoteBackoffMs(3, 15000) == 8000
+                               && remoteBackoffMs(4, 15000) == 15000
+                               && remoteBackoffMs(9, 15000) == 15000
+                               && remoteBackoffMs(2, 5000) == 4000
+                               && remoteBackoffMs(0, 15000) == 15000;
+        remote.insert(QStringLiteral("backoffOk"), backoffOk);
+        const bool retryAfterOk =
+            remoteRetryAfterMs(QByteArrayLiteral(
+                                   "HTTP/1.1 429 Too Many Requests\r\n"
+                                   "Retry-After: 1\r\n")) == 1000
+            && remoteRetryAfterMs(QByteArrayLiteral("retry-after: 7")) == 7000
+            && remoteRetryAfterMs(QByteArrayLiteral("Retry-After: sooner"))
+                   == -1
+            && remoteRetryAfterMs(QByteArrayLiteral("X-Nothing: 3")) == -1;
+        remote.insert(QStringLiteral("retryAfterOk"), retryAfterOk);
+
         const QByteArray rendered =
             QJsonDocument(remote).toJson(QJsonDocument::Compact);
         const bool tokenLeaked = !dumpConfig.remote.token.isEmpty()

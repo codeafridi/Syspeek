@@ -51,6 +51,7 @@
 #include "TimelineStatus.h"
 #include "FleetStatus.h"
 #include "RemoteStatus.h"
+#include "RemoteSource.h"
 #include "FleetSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
@@ -81,6 +82,9 @@
 
 #include <cmath>
 #include <cstdio>
+
+#include <atomic>
+#include <thread>
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -7256,6 +7260,360 @@ int main(int argc, char *argv[]) {
         }
         check(everyOffenderCaught,
               "remote privacy: every forbidden key is caught at any depth");
+    }
+
+    // --- remote reporter (M97): every relay answer has exactly one state
+    {
+        check(remoteClassify(200) == RemoteClass::Ok
+                  && remoteClassify(204) == RemoteClass::Ok
+                  && remoteClassify(401) == RemoteClass::Auth
+                  && remoteClassify(403) == RemoteClass::Auth
+                  && remoteClassify(404) == RemoteClass::NotFound
+                  && remoteClassify(413) == RemoteClass::Rejected
+                  && remoteClassify(422) == RemoteClass::Rejected
+                  && remoteClassify(429) == RemoteClass::Throttled
+                  && remoteClassify(500) == RemoteClass::Server
+                  && remoteClassify(503) == RemoteClass::Server
+                  && remoteClassify(0) == RemoteClass::Transport
+                  && remoteClassify(-1) == RemoteClass::Transport,
+              "remote transport: every status lands in one class");
+        check(remoteClassIsTerminal(RemoteClass::Auth)
+                  && remoteClassIsTerminal(RemoteClass::NotFound)
+                  && remoteClassIsTerminal(RemoteClass::Rejected)
+                  && !remoteClassIsTerminal(RemoteClass::Ok)
+                  && !remoteClassIsTerminal(RemoteClass::Throttled)
+                  && !remoteClassIsTerminal(RemoteClass::Server)
+                  && !remoteClassIsTerminal(RemoteClass::Transport)
+                  && !remoteClassIsTerminal(RemoteClass::None),
+              "remote transport: only a config or body refusal stops retrying");
+        check(remoteClassName(RemoteClass::NotFound)
+                      == QStringLiteral("not-found")
+                  && remoteClassName(RemoteClass::Throttled)
+                      == QStringLiteral("throttled"),
+              "remote transport: the class names are the wire vocabulary");
+        check(remoteClassText(RemoteClass::Auth, 401).contains(
+                  QStringLiteral("[remote] token="))
+                  && remoteClassText(RemoteClass::NotFound, 404).contains(
+                      QStringLiteral("[remote] url="))
+                  && remoteClassText(RemoteClass::Rejected, 413).contains(
+                      QStringLiteral("too large")),
+              "remote transport: a refusal names the switch that fixes it");
+        check(remoteClassText(RemoteClass::Transport, 0)
+                  == QStringLiteral("no answer from the relay"),
+              "remote transport: a silent relay is not rendered as HTTP 0");
+
+        check(remoteBackoffMs(1, 15000) == 2000
+                  && remoteBackoffMs(2, 15000) == 4000
+                  && remoteBackoffMs(3, 15000) == 8000
+                  && remoteBackoffMs(4, 15000) == 15000
+                  && remoteBackoffMs(9, 15000) == 15000,
+              "remote transport: the backoff ladder is 2s, 4s, 8s, capped");
+        check(remoteBackoffMs(2, 5000) == 4000
+                  && remoteBackoffMs(3, 5000) == 5000
+                  && remoteBackoffMs(0, 15000) == 15000,
+              "remote transport: the ladder never exceeds the interval");
+        check(remoteRetryAfterMs(QByteArrayLiteral("HTTP/1.1 429\r\n"
+                                                   "Retry-After: 1\r\n"))
+                      == 1000
+                  && remoteRetryAfterMs(QByteArrayLiteral("retry-after: 7"))
+                      == 7000
+                  && remoteRetryAfterMs(QByteArrayLiteral("Retry-After: soon"))
+                      == -1
+                  && remoteRetryAfterMs(QByteArrayLiteral("X-Other: 3")) == -1,
+              "remote transport: Retry-After seconds are honoured, dates are not");
+
+        RemoteReportState noteState;
+        check(remoteReportNote(noteState)
+                  == QStringLiteral("remote: nothing sent yet"),
+              "remote transport: the note starts honest");
+        noteState.sent = 3;
+        noteState.failed = 1;
+        noteState.lastClass = RemoteClass::Server;
+        noteState.lastStatus = 503;
+        noteState.lastLatencyMs = 42;
+        noteState.nextRetryMs = 4000;
+        check(remoteReportNote(noteState).contains(QStringLiteral("3 sent"))
+                  && remoteReportNote(noteState).contains(
+                      QStringLiteral("next attempt in 4.0s")),
+              "remote transport: the note counts deliveries and the next try");
+        noteState.stopped = true;
+        noteState.lastClass = RemoteClass::Auth;
+        noteState.lastStatus = 401;
+        check(remoteReportNote(noteState).startsWith(
+                  QStringLiteral("remote: stopped - 401")),
+              "remote transport: a stopped reporter says which answer stopped it");
+    }
+
+    // --- remote reporter (M97): live loopback relay
+    {
+        struct RelayStub {
+            QTcpServer server;
+            QByteArray request;
+            QByteArray statusLine = QByteArrayLiteral("HTTP/1.1 200 OK");
+            QByteArray headers;
+            QByteArray body = QByteArrayLiteral("{\"ok\":true}");
+            bool answer = true;
+            std::atomic<int> connections{0};
+
+            bool begin() {
+                if (!server.listen(QHostAddress::LocalHost, 0)) {
+                    return false;
+                }
+                QObject::connect(
+                    &server, &QTcpServer::newConnection, &server, [this]() {
+                        QTcpSocket *socket = server.nextPendingConnection();
+                        connections.fetch_add(1);
+                        QObject::connect(
+                            socket, &QTcpSocket::readyRead, socket,
+                            [this, socket]() {
+                                request += socket->readAll();
+                                if (!answer
+                                    || !request.contains(QByteArrayLiteral(
+                                        "\r\n\r\n"))) {
+                                    return;
+                                }
+                                const QByteArray reply =
+                                    statusLine + QByteArrayLiteral("\r\n")
+                                    + headers
+                                    + QByteArrayLiteral("Content-Length: ")
+                                    + QByteArray::number(body.size())
+                                    + QByteArrayLiteral(
+                                        "\r\nConnection: close\r\n\r\n")
+                                    + body;
+                                socket->write(reply);
+                                socket->flush();
+                                socket->disconnectFromHost();
+                            });
+                    });
+                return true;
+            }
+            QString url() const {
+                return QStringLiteral("http://127.0.0.1:%1/api/v1/ingest")
+                    .arg(server.serverPort());
+            }
+        };
+
+        auto postTo = [&app](RelayStub &stub, int timeoutMs) {
+            RemotePostResult result;
+            std::atomic<bool> done{false};
+            std::thread worker([&]() {
+                result = remoteHttpPost(stub.url(), QStringLiteral("token-abc"),
+                                        QByteArrayLiteral("{\"schema\":1}"),
+                                        timeoutMs);
+                done.store(true);
+            });
+            QElapsedTimer wait;
+            wait.start();
+            while (!done.load() && wait.elapsed() < timeoutMs + 5000) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+            worker.join();
+            return result;
+        };
+
+        RelayStub accepted;
+        check(accepted.begin(), "remote transport: loopback relay listening");
+        const RemotePostResult delivered = postTo(accepted, 3000);
+        check(delivered.classification == RemoteClass::Ok
+                  && delivered.httpStatus == 200,
+              "remote transport: a 200 is Ok");
+        check(accepted.request.startsWith(
+                  QByteArrayLiteral("POST /api/v1/ingest HTTP/1.1")),
+              "remote transport: the request is a POST to the ingest route");
+        check(accepted.request.contains(QByteArrayLiteral(
+                  "Authorization: Bearer token-abc")),
+              "remote transport: the token rides as a bearer header");
+        check(accepted.request.contains(QByteArrayLiteral("Content-Length: 12")),
+              "remote transport: the body length is declared");
+        check(delivered.body == QByteArrayLiteral("{\"ok\":true}"),
+              "remote transport: the relay's answer body is kept");
+
+        RelayStub forbidden;
+        forbidden.statusLine = QByteArrayLiteral("HTTP/1.1 403 Forbidden");
+        forbidden.begin();
+        check(postTo(forbidden, 3000).classification == RemoteClass::Auth,
+              "remote transport: a 403 is an auth refusal");
+
+        RelayStub missing;
+        missing.statusLine = QByteArrayLiteral("HTTP/1.1 404 Not Found");
+        missing.begin();
+        check(postTo(missing, 3000).classification == RemoteClass::NotFound,
+              "remote transport: a 404 is a wrong address");
+
+        RelayStub tooBig;
+        tooBig.statusLine =
+            QByteArrayLiteral("HTTP/1.1 413 Payload Too Large");
+        tooBig.begin();
+        check(postTo(tooBig, 3000).classification == RemoteClass::Rejected,
+              "remote transport: a 413 refuses the payload, not the token");
+
+        RelayStub throttled;
+        throttled.statusLine =
+            QByteArrayLiteral("HTTP/1.1 429 Too Many Requests");
+        throttled.headers = QByteArrayLiteral("Retry-After: 1\r\n");
+        throttled.begin();
+        const RemotePostResult slow = postTo(throttled, 3000);
+        check(slow.classification == RemoteClass::Throttled
+                  && slow.retryAfterMs == 1000,
+              "remote transport: a 429 keeps the relay's Retry-After");
+
+        RelayStub broken;
+        broken.statusLine =
+            QByteArrayLiteral("HTTP/1.1 503 Service Unavailable");
+        broken.begin();
+        check(postTo(broken, 3000).classification == RemoteClass::Server,
+              "remote transport: a 503 is a server failure");
+
+        RelayStub silent;
+        silent.answer = false;
+        silent.begin();
+        const RemotePostResult timedOut = postTo(silent, 400);
+        check(timedOut.classification == RemoteClass::Transport
+                  && timedOut.latencyMs >= 350 && timedOut.error.contains(
+                      QStringLiteral("no answer")),
+              "remote transport: a relay that never answers hits the budget");
+
+        RelayStub closed;
+        closed.begin();
+        const quint16 closedPort = closed.server.serverPort();
+        closed.server.close();
+        RemotePostResult refused;
+        refused = remoteHttpPost(
+            QStringLiteral("http://127.0.0.1:%1/api/v1/ingest")
+                .arg(closedPort),
+            QStringLiteral("token-abc"), QByteArrayLiteral("{}"), 1000);
+        check(refused.classification == RemoteClass::Transport
+                  && !refused.error.isEmpty(),
+              "remote transport: a dead port is a transport failure");
+
+        // The runner's own decisions, driven on a thread of its own the way
+        // main.cpp drives it. The stub answers from the main event loop, which
+        // is exactly why the reporter must not share the caller's thread.
+        auto pumpUntil = [&app](const std::atomic<int> &attempts, int want,
+                                int maxMs) {
+            QElapsedTimer clock;
+            clock.start();
+            while (attempts.load() < want && clock.elapsed() < maxMs) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+            return attempts.load() >= want;
+        };
+        auto pumpFor = [&app](int ms) {
+            QElapsedTimer clock;
+            clock.start();
+            while (clock.elapsed() < ms) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+        };
+        auto runRunner = [&](RelayStub &stub, int intervalMs, int timeoutMs) {
+            QThread *thread = new QThread;
+            RemoteRunner *runner = new RemoteRunner;
+            runner->moveToThread(thread);
+            RemoteReportOptions options;
+            options.enabled = true;
+            options.url = stub.url();
+            options.token = QStringLiteral("token-abc");
+            options.intervalMs = intervalMs;
+            options.timeoutMs = timeoutMs;
+            RemoteEnvelope envelope;
+            envelope.machine.id = QStringLiteral("machine-1");
+            envelope.machine.name = QStringLiteral("box");
+            envelope.machine.version = QStringLiteral("0.11.2");
+            envelope.machine.platform = QStringLiteral("linux/x86_64");
+            envelope.machine.sentAtMs = 1762000000000LL;
+            envelope.sample.id = remoteSampleId(envelope.machine.id,
+                                                envelope.machine.sentAtMs);
+            runner->setOptions(options);
+            runner->setEnvelope(envelope);
+            QObject::connect(thread, &QThread::started, runner,
+                             &RemoteRunner::start);
+            QObject::connect(thread, &QThread::finished, runner,
+                             &QObject::deleteLater);
+            thread->start();
+            return thread;
+        };
+        auto stopRunner = [&app](QThread *thread) {
+            thread->quit();
+            QElapsedTimer clock;
+            clock.start();
+            while (!thread->isFinished() && clock.elapsed() < 8000) {
+                QThread::msleep(10);
+                app.processEvents();
+            }
+            thread->wait();
+            delete thread;
+        };
+
+        RelayStub authOnce;
+        authOnce.statusLine = QByteArrayLiteral("HTTP/1.1 401 Unauthorized");
+        authOnce.begin();
+        QThread *authThread = runRunner(authOnce, 1000, 2000);
+        check(pumpUntil(authOnce.connections, 1, 4000),
+              "remote runner: the first report reaches the relay");
+        pumpFor(2600);
+        check(authOnce.connections.load() == 1,
+              "remote runner: a refused token is not retried");
+        stopRunner(authThread);
+
+        RelayStub wrongPath;
+        wrongPath.statusLine = QByteArrayLiteral("HTTP/1.1 404 Not Found");
+        wrongPath.begin();
+        QThread *pathThread = runRunner(wrongPath, 1000, 2000);
+        check(pumpUntil(wrongPath.connections, 1, 4000),
+              "remote runner: a wrong ingest path is tried once");
+        pumpFor(2600);
+        check(wrongPath.connections.load() == 1,
+              "remote runner: a wrong address is not retried");
+        stopRunner(pathThread);
+
+        RelayStub refusedBody;
+        refusedBody.statusLine =
+            QByteArrayLiteral("HTTP/1.1 413 Payload Too Large");
+        refusedBody.begin();
+        QThread *bodyThread = runRunner(refusedBody, 1000, 2000);
+        check(pumpUntil(refusedBody.connections, 1, 4000),
+              "remote runner: a refused payload is tried once");
+        pumpFor(2600);
+        check(refusedBody.connections.load() == 1,
+              "remote runner: the same refused body is never resent");
+        stopRunner(bodyThread);
+
+        RelayStub serverErrors;
+        serverErrors.statusLine =
+            QByteArrayLiteral("HTTP/1.1 500 Internal Server Error");
+        serverErrors.begin();
+        QThread *errorThread = runRunner(serverErrors, 5000, 2000);
+        check(pumpUntil(serverErrors.connections, 1, 4000),
+              "remote runner: a 500 is retried, unlike a token refusal");
+        check(pumpUntil(serverErrors.connections, 2, 3000),
+              "remote runner: the retry arrives on the 2s ladder step");
+        stopRunner(errorThread);
+
+        RelayStub throttledRunner;
+        throttledRunner.statusLine =
+            QByteArrayLiteral("HTTP/1.1 429 Too Many Requests");
+        throttledRunner.headers = QByteArrayLiteral("Retry-After: 1\r\n");
+        throttledRunner.begin();
+        QThread *throttleThread = runRunner(throttledRunner, 5000, 2000);
+        check(pumpUntil(throttledRunner.connections, 1, 4000),
+              "remote runner: a 429 is tried again");
+        check(pumpUntil(throttledRunner.connections, 2, 1400),
+              "remote runner: Retry-After wins over the 4s ladder step");
+        stopRunner(throttleThread);
+
+        RemoteRunner passive;
+        RemoteReportOptions passiveOptions;
+        passiveOptions.enabled = true;
+        passiveOptions.url = QStringLiteral("https://relay.example.test");
+        passiveOptions.token = QStringLiteral("t");
+        QElapsedTimer optionsClock;
+        optionsClock.start();
+        passive.setOptions(passiveOptions);
+        check(optionsClock.elapsed() < 50,
+              "remote runner: setOptions never blocks on the socket");
     }
 
     std::printf("%d failure(s)\n", failures);
