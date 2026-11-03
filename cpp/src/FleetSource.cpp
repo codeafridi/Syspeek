@@ -10,6 +10,8 @@
 #include <QUrl>
 #include <QtMath>
 
+#include <memory>
+
 namespace {
 
 constexpr int kMinPollMs = 2000;
@@ -111,8 +113,15 @@ FleetFetchResult fleetHttpGet(const QString &url, const QByteArray &token,
     const int port = target.port(defaultPort);
 
     QTcpSocket plain;
-    QSslSocket secure;
-    QTcpSocket *socket = tls ? static_cast<QTcpSocket *>(&secure) : &plain;
+    // Constructing a QSslSocket touches Qt's TLS backend, which is not
+    // available in the QCoreApplication-free --dump path and warns there.
+    // Only an https peer needs it.
+    std::unique_ptr<QSslSocket> secure;
+    QTcpSocket *socket = &plain;
+    if (tls) {
+        secure = std::make_unique<QSslSocket>();
+        socket = secure.get();
+    }
 
     QString hostHeader = target.host();
     if (port != defaultPort) {
@@ -132,17 +141,17 @@ FleetFetchResult fleetHttpGet(const QString &url, const QByteArray &token,
     clock.start();
 
     if (tls) {
-        secure.connectToHostEncrypted(target.host(), quint16(port));
-        if (!secure.waitForConnected(budget)) {
+        secure->connectToHostEncrypted(target.host(), quint16(port));
+        if (!secure->waitForConnected(budget)) {
             result.latencyMs = int(clock.elapsed());
-            result.error = secure.errorString();
+            result.error = secure->errorString();
             return result;
         }
-        if (!secure.waitForEncrypted(budget)) {
+        if (!secure->waitForEncrypted(budget)) {
             result.latencyMs = int(clock.elapsed());
             result.error = QStringLiteral("TLS handshake failed: %1")
-                               .arg(secure.errorString());
-            secure.abort();
+                               .arg(secure->errorString());
+            secure->abort();
             return result;
         }
     } else {
