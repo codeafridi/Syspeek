@@ -103,6 +103,29 @@ struct FleetConfig {
     int timeoutMs = 2000;
 };
 
+struct RemoteOptions {
+    // [remote] enabled: off by default. Turning it on is the whole upgrade -
+    // there is no licence check, and the local console never depends on it.
+    bool enabled = false;
+    // [remote] url: the relay base. A bare host means https (hosted relay); a
+    // self-hosted relay states http:// explicitly.
+    QString url;
+    // [remote] token: the per-machine ingest token from the relay. Empty means
+    // the relay will refuse the report, which is why the note says so.
+    QString token;
+    // [remote] name: what the relay calls this machine. Empty means the
+    // machine id is shown instead.
+    QString name;
+    // [remote] machine_id: derived once by M100 and kept, never regenerated on
+    // a restart.
+    QString machineId;
+    int intervalMs = 15000;
+    int timeoutMs = 3000;
+    // [remote] spool_mb: bounded offline buffer. 0 disables the spool (a
+    // dropped report stays dropped, and the count is stated).
+    int spoolMb = 8;
+};
+
 struct WebhookConfig {
     bool enabled = false;
     QString url;
@@ -259,6 +282,7 @@ struct Config {
     StatsdConfig dogstatsd;
     MetricsConfig metrics;
     FleetConfig fleet;
+    RemoteOptions remote;
     HistoryConfig history;
     TimelineConfig timeline;
     SilencesConfig silences;

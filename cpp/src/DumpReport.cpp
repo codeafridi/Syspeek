@@ -7,6 +7,7 @@
 #include "CloudStatus.h"
 #include "Config.h"
 #include "HistoryLog.h"
+#include "RemoteStatus.h"
 #include "TickBudget.h"
 #include "MetricsEndpoint.h"
 #include "CloudFleetSource.h"
@@ -1279,6 +1280,92 @@ QString dumpReportJson(int maxProcs) {
         fleet.insert(QStringLiteral("peersConfigured"),
                      parseFleetPeers(dumpConfig.fleet.peers).size());
         root.insert(QStringLiteral("fleet"), fleet);
+    }
+
+    {
+        // M95: the reporter's config surface, with no transport. The URL rules
+        // are asserted here so a runner with no relay address still proves
+        // them: https for a bare host, the port kept, cleartext only when the
+        // user asked for it, and a reason for every refusal.
+        QJsonObject remote;
+        const Config dumpConfig = loadConfig(defaultConfigPath(), nullptr);
+        QString urlError;
+        const QString normalized =
+            remoteNormalizeUrl(dumpConfig.remote.url, &urlError);
+        remote.insert(QStringLiteral("enabled"), dumpConfig.remote.enabled);
+        remote.insert(QStringLiteral("url"), dumpConfig.remote.url);
+        remote.insert(QStringLiteral("normalizedUrl"), normalized);
+        remote.insert(QStringLiteral("urlError"), urlError);
+        remote.insert(QStringLiteral("ingestUrl"),
+                      remoteIngestUrl(dumpConfig.remote.url));
+        remote.insert(QStringLiteral("intervalMs"), dumpConfig.remote.intervalMs);
+        remote.insert(QStringLiteral("timeoutMs"), dumpConfig.remote.timeoutMs);
+        remote.insert(QStringLiteral("spoolMb"), dumpConfig.remote.spoolMb);
+        remote.insert(QStringLiteral("spoolPath"), remoteSpoolPath());
+        remote.insert(QStringLiteral("hasToken"),
+                      !dumpConfig.remote.token.isEmpty());
+        remote.insert(QStringLiteral("valid"),
+                      remoteConfigUsable(dumpConfig.remote));
+        remote.insert(QStringLiteral("note"),
+                      remoteConfigNote(dumpConfig.remote));
+
+        remote.insert(QStringLiteral("urlOk"),
+                      remoteNormalizeUrl(QStringLiteral("relay.example.test"))
+                              == QStringLiteral("https://relay.example.test")
+                          && remoteNormalizeUrl(
+                                 QStringLiteral("http://127.0.0.1:8080/"))
+                                 == QStringLiteral("http://127.0.0.1:8080")
+                          && remoteIngestUrl(
+                                 QStringLiteral("https://relay.example.test"))
+                                 == QStringLiteral(
+                                     "https://relay.example.test/api/v1/ingest")
+                          && remoteIngestUrl(QStringLiteral("[::1]:8443"))
+                                 == QStringLiteral(
+                                     "https://[::1]:8443/api/v1/ingest"));
+
+        QString reason;
+        const bool refuseScheme =
+            remoteNormalizeUrl(QStringLiteral("ftp://relay.example.test"),
+                               &reason)
+                .isEmpty()
+            && !reason.isEmpty();
+        reason.clear();
+        const bool refuseUserinfo =
+            remoteNormalizeUrl(
+                QStringLiteral("https://user:pw@relay.example.test"), &reason)
+                .isEmpty()
+            && !reason.isEmpty();
+        reason.clear();
+        const bool refuseEmpty = remoteNormalizeUrl(QString(), &reason).isEmpty()
+                                 && !reason.isEmpty();
+        remote.insert(QStringLiteral("urlOk"),
+                      remote["urlOk"].toBool() && refuseScheme
+                          && refuseUserinfo && refuseEmpty);
+
+        RemoteOptions probe;
+        probe.intervalMs = 1;
+        probe.timeoutMs = 1;
+        probe.spoolMb = -1;
+        remoteValidate(probe);
+        const bool floorOk = probe.intervalMs == kRemoteIntervalMinMs
+                             && probe.timeoutMs == kRemoteTimeoutMinMs
+                             && probe.spoolMb == kRemoteSpoolMinMb;
+        probe.intervalMs = 999999;
+        probe.timeoutMs = 999999;
+        probe.spoolMb = 999;
+        remoteValidate(probe);
+        const bool ceilingOk = probe.intervalMs == kRemoteIntervalMaxMs
+                               && probe.timeoutMs == kRemoteTimeoutMaxMs
+                               && probe.spoolMb == kRemoteSpoolMaxMb;
+        remote.insert(QStringLiteral("clampOk"), floorOk && ceilingOk);
+
+        const QByteArray rendered =
+            QJsonDocument(remote).toJson(QJsonDocument::Compact);
+        const bool tokenLeaked = !dumpConfig.remote.token.isEmpty()
+                                 && QString::fromUtf8(rendered).contains(
+                                     dumpConfig.remote.token);
+        remote.insert(QStringLiteral("tokenOk"), !tokenLeaked);
+        root.insert(QStringLiteral("remote"), remote);
     }
 
     QJsonObject services;

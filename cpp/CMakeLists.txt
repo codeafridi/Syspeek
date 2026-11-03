@@ -221,6 +221,8 @@ add_library(syspeek_core STATIC
     src/CloudSpendSource.h
     src/FleetStatus.cpp
     src/FleetStatus.h
+    src/RemoteStatus.cpp
+    src/RemoteStatus.h
     src/FleetSource.cpp
     src/FleetSource.h
     src/OverlayStatus.cpp

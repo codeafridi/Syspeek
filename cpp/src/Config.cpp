@@ -1,5 +1,6 @@
 #include "Config.h"
 
+#include "RemoteStatus.h"
 #include "WallpaperArt.h"
 
 #include <QDateTime>
@@ -152,6 +153,8 @@ void validate(Config &config) {
     if (config.fleet.peers.size() > 64) {
         config.fleet.peers = config.fleet.peers.mid(0, 64);
     }
+
+    remoteValidate(config.remote);
 }
 
 } // namespace
@@ -643,6 +646,39 @@ Config loadConfig(const QString &path, QString *errorMessage) {
             settings.value(QStringLiteral("timeout_ms")).toInt();
         if (timeout > 0) {
             config.fleet.timeoutMs = timeout;
+        }
+    }
+    settings.endGroup();
+
+    settings.beginGroup(QStringLiteral("remote"));
+    {
+        if (settings.contains(QStringLiteral("enabled"))) {
+            config.remote.enabled =
+                settings.value(QStringLiteral("enabled")).toBool();
+        }
+        config.remote.url =
+            settings.value(QStringLiteral("url")).toString().trimmed();
+        config.remote.token =
+            settings.value(QStringLiteral("token")).toString().trimmed();
+        config.remote.name =
+            settings.value(QStringLiteral("name")).toString().trimmed();
+        config.remote.machineId =
+            settings.value(QStringLiteral("machine_id")).toString().trimmed();
+        const int interval =
+            settings.value(QStringLiteral("interval_ms")).toInt();
+        if (interval > 0) {
+            config.remote.intervalMs = interval;
+        }
+        const int remoteTimeout =
+            settings.value(QStringLiteral("timeout_ms")).toInt();
+        if (remoteTimeout > 0) {
+            config.remote.timeoutMs = remoteTimeout;
+        }
+        // spool_mb=0 means "no spool", so an explicit zero must survive; only a
+        // missing key keeps the default.
+        if (settings.contains(QStringLiteral("spool_mb"))) {
+            config.remote.spoolMb =
+                settings.value(QStringLiteral("spool_mb")).toInt();
         }
     }
     settings.endGroup();

@@ -1,5 +1,6 @@
 #include "Config.h"
 #include "MetricsEndpoint.h"
+#include "RemoteStatus.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -878,6 +879,93 @@ int main(int argc, char *argv[]) {
         const Config c = loadConfig(path, &error);
         check(c.timeline.events == 20000 && c.timeline.windowSeconds == 3600,
               "timeline: an absurd ring and window clamp to their ceilings");
+    }
+
+    check(!defaults.remote.enabled && defaults.remote.url.isEmpty()
+              && defaults.remote.token.isEmpty()
+              && defaults.remote.intervalMs == 15000
+              && defaults.remote.timeoutMs == 3000 && defaults.remote.spoolMb == 8,
+          "remote: off by default with a 15 s cadence, 3 s budget and 8 MB spool");
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[remote]\n"
+                                   "enabled = true\n"
+                                   "url = https://relay.example.test/\n"
+                                   "token = tok-123\n"
+                                   "name = build-box\n"
+                                   "machine_id = mid-1\n"
+                                   "interval_ms = 60000\n"
+                                   "timeout_ms = 5000\n"
+                                   "spool_mb = 32\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.remote.enabled && c.remote.url == QStringLiteral("https://relay.example.test/")
+                  && c.remote.token == QStringLiteral("tok-123")
+                  && c.remote.name == QStringLiteral("build-box")
+                  && c.remote.machineId == QStringLiteral("mid-1")
+                  && c.remote.intervalMs == 60000 && c.remote.timeoutMs == 5000
+                  && c.remote.spoolMb == 32,
+              "remote: the switch, address, token, name and bounds load");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[remote]\n"
+                                   "interval_ms = 1000\n"
+                                   "timeout_ms = 100\n"
+                                   "spool_mb = 999\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.remote.intervalMs == 5000 && c.remote.timeoutMs == 500
+                  && c.remote.spoolMb == 256,
+              "remote: a tiny cadence falls to 5 s and the spool caps at 256 MB");
+    }
+
+    {
+        QTemporaryDir dir;
+        const QString path = writeConfig(
+            dir, QByteArrayLiteral("[remote]\n"
+                                   "interval_ms = 999999\n"
+                                   "timeout_ms = 40000\n"
+                                   "spool_mb = 0\n"));
+        QString error;
+        const Config c = loadConfig(path, &error);
+        check(c.remote.intervalMs == 300000 && c.remote.timeoutMs == 30000
+                  && c.remote.spoolMb == 0,
+              "remote: an absurd cadence caps and spool_mb=0 survives as no spool");
+    }
+
+    {
+        QString error;
+        check(remoteNormalizeUrl(QStringLiteral("relay.example.test"), &error)
+                  == QStringLiteral("https://relay.example.test")
+                  && error.isEmpty(),
+              "remote url: a bare host becomes https");
+        check(remoteNormalizeUrl(QStringLiteral("relay.example.test:8443/"),
+                                 &error)
+                  == QStringLiteral("https://relay.example.test:8443"),
+              "remote url: an explicit port is kept and the trailing slash drops");
+        check(remoteNormalizeUrl(QStringLiteral("http://127.0.0.1:8080"), &error)
+                  == QStringLiteral("http://127.0.0.1:8080"),
+              "remote url: an explicit http:// is kept for a self-hosted relay");
+        check(remoteNormalizeUrl(QStringLiteral("https://host/syspeek/"), &error)
+                  == QStringLiteral("https://host/syspeek"),
+              "remote url: a path prefix survives");
+        check(remoteNormalizeUrl(
+                  QStringLiteral("https://user:pw@relay.example.test"), &error)
+                  .isEmpty()
+                  && !error.isEmpty(),
+              "remote url: credentials in the url are refused with a reason");
+        check(remoteNormalizeUrl(QStringLiteral("ftp://relay.example.test"),
+                                 &error)
+                  .isEmpty()
+                  && !error.isEmpty(),
+              "remote url: a non-http scheme is refused with a reason");
+        check(remoteNormalizeUrl(QString(), &error).isEmpty() && !error.isEmpty(),
+              "remote url: an empty address is refused with a reason");
     }
 
     std::printf("%d failure(s)\n", failures);

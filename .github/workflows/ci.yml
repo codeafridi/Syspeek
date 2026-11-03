@@ -331,6 +331,16 @@ jobs:
           print("fleet ok: %d configured peer(s), sharing %s"
                 % (fleet["peersConfigured"],
                    "on" if fleet["share"] else "off"))
+          remote = d["remote"]
+          assert remote["urlOk"] is True, remote
+          assert remote["clampOk"] is True, remote
+          assert remote["tokenOk"] is True, remote
+          assert remote["valid"] == remote["enabled"], remote
+          assert remote["intervalMs"] == 15000, remote
+          assert remote["timeoutMs"] == 3000, remote
+          assert remote["spoolMb"] == 8, remote
+          print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
+                                        else "off", remote["note"]))
           PY
         env:
           QT_QPA_PLATFORM: offscreen
@@ -557,6 +567,16 @@ jobs:
           print("fleet ok: %d configured peer(s), sharing %s"
                 % (fleet["peersConfigured"],
                    "on" if fleet["share"] else "off"))
+          remote = d["remote"]
+          assert remote["urlOk"] is True, remote
+          assert remote["clampOk"] is True, remote
+          assert remote["tokenOk"] is True, remote
+          assert remote["valid"] == remote["enabled"], remote
+          assert remote["intervalMs"] == 15000, remote
+          assert remote["timeoutMs"] == 3000, remote
+          assert remote["spoolMb"] == 8, remote
+          print("remote ok: %s - %s" % ("enabled" if remote["enabled"]
+                                        else "off", remote["note"]))
           software = d.get("software", {})
           assert software.get("programs", 0) > 0, software
           print("software ok:", software.get("programs"),

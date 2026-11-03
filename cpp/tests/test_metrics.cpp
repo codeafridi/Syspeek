@@ -50,6 +50,7 @@
 #include "CloudSpendSource.h"
 #include "TimelineStatus.h"
 #include "FleetStatus.h"
+#include "RemoteStatus.h"
 #include "FleetSource.h"
 #include "TickBudget.h"
 #include "QtCompat.h"
@@ -6920,6 +6921,58 @@ int main(int argc, char *argv[]) {
                          QStringLiteral("syspeek_fleet_peer_cpu_percent{peer=\"hot-box\"}"))
                       == 1,
               "fleet: one HELP/TYPE block per family, however many peers");
+    }
+
+    {
+        QString error;
+        check(remoteIngestUrl(QStringLiteral("relay.example.com"), &error)
+                      == QStringLiteral(
+                          "https://relay.example.com/api/v1/ingest")
+                  && error.isEmpty(),
+              "remote: a bare relay host becomes an https ingest endpoint");
+        check(remoteIngestUrl(
+                  QStringLiteral("https://Relay.Example.com:8443/"), &error)
+                      == QStringLiteral(
+                          "https://Relay.Example.com:8443/api/v1/ingest"),
+              "remote: an explicit https port is kept on the ingest endpoint");
+        check(remoteIngestUrl(QStringLiteral("http://127.0.0.1:8080/syspeek"),
+                              &error)
+                      == QStringLiteral(
+                          "http://127.0.0.1:8080/syspeek/api/v1/ingest"),
+              "remote: a self-hosted http relay keeps its path prefix");
+        check(remoteIngestUrl(
+                  QStringLiteral("https://relay.example.com/api/v1/ingest"),
+                  &error)
+                      == QStringLiteral(
+                          "https://relay.example.com/api/v1/ingest"),
+              "remote: a pasted ingest url is not doubled");
+        check(remoteIngestUrl(QString(), &error).isEmpty() && !error.isEmpty(),
+              "remote: an empty relay address yields no ingest url");
+
+        RemoteOptions off;
+        check(remoteConfigNote(off)
+                  == QStringLiteral("remote: off - nothing leaves this machine"),
+              "remote: the disabled note says nothing leaves the machine");
+
+        RemoteOptions on;
+        on.enabled = true;
+        on.url = QStringLiteral("relay.example.com");
+        check(remoteConfigNote(on).contains(QStringLiteral("no token")),
+              "remote: a tokenless config says the relay will refuse it");
+
+        on.token = QStringLiteral("tok");
+        check(remoteConfigNote(on).contains(
+                  QStringLiteral("https://relay.example.com")),
+              "remote: an enabled config names the address it would report to");
+
+        on.url = QStringLiteral("ftp://relay.example.com");
+        check(remoteConfigNote(on).contains(QStringLiteral("not http or https"))
+                  && !remoteConfigUsable(on),
+              "remote: a refused url reaches the note and blocks the config");
+
+        RemoteOptions spool;
+        check(remoteSpoolPath().endsWith(QStringLiteral("/remote-spool.bin")),
+              "remote: the spool lives in one named file under the cache dir");
     }
 
     std::printf("%d failure(s)\n", failures);
