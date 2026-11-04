@@ -22,6 +22,27 @@ Never sent: the process list, command lines, environment, paths, logs. The
 schema and the client both refuse those keys, and a test scans every payload
 built from a real snapshot for them.
 
+## The contract
+
+The wire format is one file set, owned by two repositories at once. The relay
+(`syspeek-relay`) keeps it in `schema/`; this repository keeps an identical copy
+in `cpp/tests/fixtures/remote/`:
+
+```
+ingest.json        a whole envelope, exactly the bytes this client emits
+ingest-nulls.json  the same envelope with every reading absent
+machine.json       ingest.json's machine block on its own
+event.json         ingest.json's first event on its own
+lock               sha256 over the four files
+```
+
+`ingest.json` is not authored here — `SYSPEEK_WRITE_FIXTURE=1` regenerates it
+from the real builder, so the fixture cannot describe a payload the code does not
+produce. Both builds recompute the lock; whichever side changes a byte alone goes
+red with `schema drift: update both repos`. The full rules (additive-only, when
+the version int moves, what each side does with a newer schema) are in the relay's
+`schema/README.md`, which is the canonical copy.
+
 ## Configuration
 
 ```ini

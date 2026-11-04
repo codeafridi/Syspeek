@@ -375,6 +375,12 @@ RemoteSample remoteBuildSample(const DisplaySnapshot &snapshot, qint64 uptimeSec
     }
     sample.netRxPerSec = snapshot.hostNetRxPerSec;
     sample.netTxPerSec = snapshot.hostNetTxPerSec;
+    if (!sample.hostReady) {
+        // 0 B/s is a measurement and -1 is the documented "not read" sentinel, so
+        // a host section that could not be sampled must never look idle.
+        sample.netRxPerSec = -1.0;
+        sample.netTxPerSec = -1.0;
+    }
 
     sample.connections = snapshot.connections.size();
     sample.listening = snapshot.listeningPorts.size();

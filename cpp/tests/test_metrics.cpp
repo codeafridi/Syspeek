@@ -67,8 +67,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QHostAddress>
+#include <QMap>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -7075,16 +7077,95 @@ int main(int argc, char *argv[]) {
             remoteBuildEnvelope(machine, snap, ring, 0, counts, 86400);
         const QByteArray goldenJson = remoteEnvelopeJson(golden);
 
-        const QString fixturePath =
-            QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote/envelope.json");
+        // The absent-reading shape is part of the contract too: every reading is
+        // either a number or null, and a relay that receives `0` where the client
+        // had nothing would chart a measurement nobody made.
+        RemoteMachine nullsMachine;
+        nullsMachine.id = QStringLiteral("mid-nulls");
+        nullsMachine.version = QStringLiteral("0.11.2");
+        nullsMachine.platform = QStringLiteral("linux");
+        nullsMachine.sentAtMs = 1762000000000LL;
+        const RemoteEnvelope nulls = remoteBuildEnvelope(
+            nullsMachine, DisplaySnapshot(), {}, 0, RemoteCounts(), -1);
+        const QByteArray nullsJson = remoteEnvelopeJson(nulls);
+
+        const QJsonObject goldenObject = remoteEnvelopeObject(golden);
+        const QJsonObject machineExcerpt =
+            goldenObject.value(QStringLiteral("machine")).toObject();
+        const QJsonObject eventExcerpt = goldenObject.value(QStringLiteral("events"))
+                                             .toArray()
+                                             .at(0)
+                                             .toObject();
+        auto compactObject = [](const QJsonObject &object) {
+            return QJsonDocument(object).toJson(QJsonDocument::Compact);
+        };
+
+        // The shared contract (M102). The relay recomputes this same lock over the
+        // same documents in syspeek-relay/internal/schema; whichever side changes
+        // a byte alone goes red, and both sides print the same sentence.
+        const QString fixtureDir =
+            QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote");
+        auto contractLock = [](const QString &dir) {
+            // QMap iterates in key order and Go sorts bytewise: the two sides feed
+            // the hash the same sequence, names are ASCII.
+            QMap<QString, QByteArray> docs;
+            const QStringList names =
+                QDir(dir).entryList({QStringLiteral("*.json")}, QDir::Files,
+                                    QDir::Name);
+            for (const QString &name : names) {
+                QFile doc(dir + QLatin1Char('/') + name);
+                if (!doc.open(QIODevice::ReadOnly)) {
+                    return QString();
+                }
+                docs.insert(name, doc.readAll());
+            }
+            if (docs.isEmpty()) {
+                return QString();
+            }
+            // name, "\n", bytes, "\n" — the name and the newline framing mean no
+            // re-split of the same bytes can hash the same.
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            for (auto it = docs.cbegin(); it != docs.cend(); ++it) {
+                hash.addData(it.key().toUtf8());
+                hash.addData("\n");
+                hash.addData(it.value());
+                hash.addData("\n");
+            }
+            return QString::fromLatin1(hash.result().toHex());
+        };
+        auto readText = [](const QString &path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QByteArray();
+            }
+            return file.readAll();
+        };
+
+        const QString fixturePath = fixtureDir + QStringLiteral("/ingest.json");
         if (qEnvironmentVariableIsSet("SYSPEEK_WRITE_FIXTURE")) {
-            QDir().mkpath(QFileInfo(fixturePath).absolutePath());
-            QFile writer(fixturePath);
-            if (writer.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                writer.write(goldenJson);
-                writer.close();
+            QDir().mkpath(fixtureDir);
+            const QMap<QString, QByteArray> docs = {
+                {QStringLiteral("event.json"), compactObject(eventExcerpt)},
+                {QStringLiteral("ingest-nulls.json"), nullsJson},
+                {QStringLiteral("ingest.json"), goldenJson},
+                {QStringLiteral("machine.json"), compactObject(machineExcerpt)},
+            };
+            for (auto it = docs.cbegin(); it != docs.cend(); ++it) {
+                QFile writer(fixtureDir + QLatin1Char('/') + it.key());
+                if (writer.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                    writer.write(it.value());
+                    writer.close();
+                }
+            }
+            const QString lock = contractLock(fixtureDir);
+            QFile lockFile(fixtureDir + QStringLiteral("/lock"));
+            if (!lock.isEmpty()
+                && lockFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                lockFile.write(lock.toLatin1() + '\n');
+                lockFile.close();
             }
         }
+
         QFile fixture(fixturePath);
         const bool fixtureOpened = fixture.open(QIODevice::ReadOnly);
         const QByteArray fixtureBytes =
@@ -7092,7 +7173,52 @@ int main(int argc, char *argv[]) {
         check(fixtureOpened && goldenJson == fixtureBytes,
               "remote envelope: byte-identical to the committed golden fixture");
 
-        const QJsonObject goldenObject = remoteEnvelopeObject(golden);
+        const QByteArray nullsBytes =
+            readText(fixtureDir + QStringLiteral("/ingest-nulls.json"));
+        check(!nullsBytes.isEmpty() && nullsJson == nullsBytes,
+              "remote envelope: the every-reading-absent fixture is our own "
+              "output too");
+
+        check(readText(fixtureDir + QStringLiteral("/machine.json"))
+                  == compactObject(machineExcerpt),
+              "remote envelope: machine.json is this envelope's machine block");
+        check(readText(fixtureDir + QStringLiteral("/event.json"))
+                  == compactObject(eventExcerpt),
+              "remote envelope: event.json is this envelope's first event");
+
+        const QString committedLock = QString::fromLatin1(
+            readText(fixtureDir + QStringLiteral("/lock"))).trimmed();
+        const QString computedLock = contractLock(fixtureDir);
+        const bool lockOk = !computedLock.isEmpty() && computedLock == committedLock;
+        if (!lockOk) {
+            // The sentence both repositories print, with the two hashes, so a red
+            // build says which side went first without anyone reading the test.
+            std::printf("  detail: schema drift: update both repos: fixtures hash "
+                        "to %s, lock says %s\n",
+                        computedLock.toUtf8().constData(),
+                        committedLock.isEmpty()
+                            ? "nothing (run SYSPEEK_WRITE_FIXTURE=1)"
+                            : committedLock.toUtf8().constData());
+        }
+        check(lockOk, "remote envelope: the fixture lock matches the committed "
+                      "lock");
+
+        const int fixtureSchema =
+            QJsonDocument::fromJson(fixtureBytes).object()
+                .value(QStringLiteral("schema"))
+                .toInt(-1);
+        check(fixtureSchema == kRemoteSchemaVersion
+                  && QJsonDocument::fromJson(nullsBytes)
+                             .object()
+                             .value(QStringLiteral("schema"))
+                             .toInt(-1)
+                         == kRemoteSchemaVersion,
+              "remote envelope: the fixtures carry this build's schema int");
+        check(nulls.sample.netRxPerSec == -1.0 && nulls.sample.netTxPerSec == -1.0
+                  && nulls.sample.connections == 0,
+              "remote envelope: an unsampled host reports no rate and not zero "
+              "bytes, while zero sockets stays zero");
+
         check(remotePrivacyOffenders(goldenObject).isEmpty(),
               "remote envelope: the golden fixture carries no forbidden field");
         {
