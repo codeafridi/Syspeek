@@ -958,8 +958,8 @@ QList<RemoteFieldGroup> remoteFieldGroups() {
         {QStringLiteral("focused app name and pid"), true},
         {QStringLiteral("version, platform and machine name"), true},
         {QStringLiteral("uptime"), true},
-        {QStringLiteral("events (kind, severity, subject, title, up to 50) - "
-                        "a subject can be the name you gave a monitor or check"),
+        {QStringLiteral("events - up to 50 per report, each with a kind, "
+                        "severity, subject and title"),
          true},
         {QStringLiteral("process list, command lines, environment, file paths, "
                         "logs"),
@@ -986,9 +986,9 @@ RemoteInfo remoteInfoFor(const RemoteOptions &options,
     // The boundary of the tier, in the tier's own words: the reporter ships in
     // the free app, the relay is the paid part, and no third party is involved
     // either way.
-    info.tierLine = QStringLiteral("paid - the reporter ships in the free app, "
-                                   "the relay is the paid service, and only it "
-                                   "sees this: no third party, no analytics");
+    // One line, no pitch: the facts a person checking a disclosure needs are
+    // who receives this (your relay) and who does not (anybody else).
+    info.tierLine = QStringLiteral("free app, paid relay - no third party, no analytics");
 
     // Nothing about the address or the token is shown while the switch is off:
     // a card that lists a relay for a feature that is not running is a claim
@@ -1096,22 +1096,52 @@ QString remoteReportCardText(const RemoteInfo &info) {
             .arg(info.stateLine, info.tierLine, info.tokenLine, info.spoolLine,
                  info.lastLine, info.neverSentLine);
     }
-    QStringList lines;
-    lines << QStringLiteral("state       %1").arg(info.stateLine);
-    lines << QStringLiteral("tier        %1").arg(info.tierLine);
-    lines << QStringLiteral("identity    %1").arg(info.identityLine);
-    lines << QStringLiteral("token       %1").arg(info.tokenLine);
-    lines << QStringLiteral("spool       %1").arg(info.spoolLine);
-    lines << QStringLiteral("ca          %1").arg(info.caLine);
-    lines << QStringLiteral("last        %1").arg(info.lastLine);
-    for (int i = 0; i < info.scopeLines.size(); ++i) {
-        lines << QStringLiteral("%1%2")
-                     .arg(i == 0 ? QStringLiteral("fields      ")
-                                 : QStringLiteral("            "),
-                          info.scopeLines.at(i));
+    // The enabled card is a real table, not padded spaces in a label. Its
+    // values are long (a spool path, a list of field groups, the never-sent
+    // promise) and a plain label wraps them back to the left margin, where a
+    // continuation looks like a new row. A two-column table keeps the key
+    // column fixed and wraps the value under itself.
+    //
+    // Only `&` and `<` are escaped: `->` is the separator every row uses and
+    // `&gt;` would make the card say something other than what it means.
+    auto esc = [](QString text) {
+        text.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
+        text.replace(QLatin1Char('<'), QStringLiteral("&lt;"));
+        return text;
+    };
+    auto row = [&esc](const QString &key, const QString &value) {
+        return QStringLiteral(
+                   "<tr><td style=\"padding-right:14px; vertical-align:top; "
+                   "white-space:nowrap;\">%1</td><td>%2</td></tr>")
+            .arg(key, esc(value));
+    };
+
+    QString html = QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">");
+    html += row(QStringLiteral("state"), info.stateLine);
+    html += row(QStringLiteral("tier"), info.tierLine);
+    html += row(QStringLiteral("identity"), info.identityLine);
+    html += row(QStringLiteral("token"), info.tokenLine);
+    html += row(QStringLiteral("spool"), info.spoolLine);
+    html += row(QStringLiteral("ca"), info.caLine);
+    html += row(QStringLiteral("last"), info.lastLine);
+    // The field list is already one line per group, so the breaks are markup,
+    // not text: they go in unescaped while each group is escaped on its own.
+    QStringList groups;
+    for (const QString &line : info.scopeLines) {
+        groups << esc(line);
     }
-    lines << info.neverSentLine;
-    return lines.join(QLatin1Char('\n'));
+    html += QStringLiteral(
+                "<tr><td style=\"padding-right:14px; vertical-align:top; "
+                "white-space:nowrap;\">fields</td><td>%1</td></tr>")
+                .arg(groups.join(QStringLiteral("<br/>")));
+    // The promise gets its own row so it is not the tail of another line.
+    QString neverSent = info.neverSentLine;
+    if (neverSent.startsWith(QStringLiteral("never sent: "))) {
+        neverSent = neverSent.mid(int(QStringLiteral("never sent: ").size()));
+    }
+    html += row(QStringLiteral("never sent"), neverSent);
+    html += QStringLiteral("</table>");
+    return html;
 }
 
 QString remoteMachineIdPath() {

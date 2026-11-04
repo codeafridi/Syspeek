@@ -63,14 +63,22 @@ void paintWallpaper(QPainter &painter, const QRect &rect, const QString &id,
     if (key.isEmpty() || key == QLatin1String("none") || rect.isEmpty()) {
         return;
     }
-    const WallpaperPreset *chosen = nullptr;
+    // By value, deliberately. wallpaperPresets() returns the list itself, so a
+    // pointer into one of its elements dangles the moment the range-for ends -
+    // and every read of the gradient colours below is then a use-after-free.
+    // ASan caught it on the first Settings construction (the previews paint
+    // through this function), which is why the appearance controls could crash
+    // the HUD with no message.
+    bool found = false;
+    WallpaperPreset chosen;
     for (const WallpaperPreset &preset : wallpaperPresets()) {
         if (preset.id == key) {
-            chosen = &preset;
+            chosen = preset;
+            found = true;
             break;
         }
     }
-    if (chosen == nullptr) {
+    if (!found) {
         return;
     }
 
@@ -80,9 +88,9 @@ void paintWallpaper(QPainter &painter, const QRect &rect, const QString &id,
     // the full gradient because nothing dense sits on top of it.
     const double weight = expanded ? 0.40 : 1.0;
     QLinearGradient gradient(rect.topLeft(), rect.bottomRight());
-    QColor top = chosen->top;
-    QColor bottom = chosen->bottom;
-    QColor glow = chosen->glow;
+    QColor top = chosen.top;
+    QColor bottom = chosen.bottom;
+    QColor glow = chosen.glow;
     top.setAlphaF(top.alphaF() * weight);
     bottom.setAlphaF(bottom.alphaF() * weight);
     glow.setAlphaF(glow.alphaF() * weight);

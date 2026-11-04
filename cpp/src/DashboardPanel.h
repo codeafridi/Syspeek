@@ -42,6 +42,7 @@ class QSpinBox;
 class QComboBox;
 class QLineEdit;
 class QCheckBox;
+class QColorDialog;
 class Sparkline;
 class TimeseriesChart;
 
@@ -125,6 +126,9 @@ public:
     // Re-applies the console stylesheet and re-tints the accent banners, so a
     // colour change lands without a restart.
     void applyTheme();
+    // The accent picker's window contract (always on top of the HUD, never the
+    // window whose close quits the process). Public so a test can assert it.
+    static void configureAccentDialog(QColorDialog &dialog);
     // How opaque the page sits over the HUD backdrop. 255 = solid; a curated
     // wallpaper lets a little through the page but never through a card.
     void setBackdropAlpha(int alpha);
@@ -750,9 +754,12 @@ private:
     TickCost m_liveTick;
     QLabel *m_settingsSoftware = nullptr;
     QLabel *m_settingsGeneral = nullptr;
-    QLabel *m_settingsDiagnostics = nullptr;
+
     QLabel *m_remoteReport = nullptr;
     QLabel *m_settingsScope = nullptr;
+    // The two switches that decide what leaves this machine, on the Remote
+    // section: the reporter row and the webhook row.
+    QLabel *m_settingsRemote = nullptr;
     QLabel *m_settingsTileVersion = nullptr;
     QLabel *m_settingsTileRefresh = nullptr;
     QLabel *m_settingsTileMonitors = nullptr;

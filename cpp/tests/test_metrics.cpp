@@ -7601,15 +7601,20 @@ int main(int argc, char *argv[]) {
               "sent");
         check(onCard.contains(QStringLiteral("- process list")),
               "remote card: the scope matrix states what is not sent");
-        check(onCard.contains(neverSent),
-              "remote card: the closing line is the shared never-sent list");
-        check(onCard.contains(QStringLiteral("tier        paid - the reporter "
-                                             "ships in the free app")),
+        // The card is a two-column table (a padded label cannot wrap a value
+        // under itself), so a row is asserted by its key cell and its text, not
+        // by the run of spaces that used to align them.
+        const QString neverSentBody =
+            neverSent.mid(int(QStringLiteral("never sent: ").size()));
+        check(onCard.contains(QStringLiteral(">never sent<"))
+                  && onCard.contains(neverSentBody),
+              "remote card: the closing row is the shared never-sent list");
+        check(onCard.contains(QStringLiteral("free app, paid relay")),
               "remote card: the tier line states what is free and what is paid");
-        check(onInfo.caLine
-                  == QStringLiteral("system certificate store")
+        check(onInfo.caLine == QStringLiteral("system certificate store")
+                  && onCard.contains(QStringLiteral(">ca<"))
                   && onCard.contains(QStringLiteral(
-                      "ca          system certificate store")),
+                      "system certificate store")),
               "remote card: the ca row names the trust the connection uses");
         {
             RemoteOptions broken = cardOn;

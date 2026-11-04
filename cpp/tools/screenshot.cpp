@@ -1589,6 +1589,17 @@ int main(int argc, char *argv[]) {
             app.processEvents();
         }
     }
+    // Settings is five sections behind its own sub-nav, so one rail index is
+    // not enough to see the page: the env var picks the section for local
+    // captures without changing the CLI the CI loop drives.
+    if (const QByteArray section = qgetenv("SYSPEEK_SHOT_SETTINGS_SECTION");
+        !section.isEmpty()) {
+        if (auto *nav = panel.findChild<QListWidget *>(
+                QStringLiteral("ddSettingsNav"))) {
+            nav->setCurrentRow(section.toInt());
+            app.processEvents();
+        }
+    }
     const QString out = argc > 1 ? QString::fromUtf8(argv[1])
                                  : QStringLiteral("panel.png");
     tracePhase("drive history");

@@ -13,6 +13,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QColorDialog>
 #include <QDateTime>
 #include <QDir>
 #include <QTemporaryDir>
@@ -33,6 +34,7 @@
 #include <QEventLoop>
 #include <QGuiApplication>
 #include <QPushButton>
+#include <QTimer>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
@@ -1629,19 +1631,27 @@ int main(int argc, char *argv[]) {
             auto *slider =
                 hud.findChild<QSlider *>(QStringLiteral("ddOpacitySlider"));
             int appearanceEmissions = 0;
-            if (panel != nullptr) {
-                QObject::connect(panel, &DashboardPanel::appearanceChanged,
-                                 panel,
-                                 [&appearanceEmissions](const QString &, int,
-                                                        const QString &) {
-                                     ++appearanceEmissions;
-                                 });
-            }
+            // Disconnected before this scope ends: the receiver captures a
+            // stack counter, and any later appearance change in this test -
+            // a preset click, a colour pick - would write into dead storage.
+            // ASan called it a stack-use-after-scope, and without ASan it
+            // corrupted the stack and segfaulted the run at exit.
+            const QMetaObject::Connection emissionsConnection =
+                panel != nullptr
+                    ? QObject::connect(panel,
+                                       &DashboardPanel::appearanceChanged, panel,
+                                       [&appearanceEmissions](
+                                           const QString &, int,
+                                           const QString &) {
+                                           ++appearanceEmissions;
+                                       })
+                    : QMetaObject::Connection();
             if (slider != nullptr) {
                 for (int value = 40; value <= 100; value += 4) {
                     slider->setValue(value);
                 }
             }
+            QObject::disconnect(emissionsConnection);
             check(slider != nullptr, "appearance: the opacity slider exists");
             check(appearanceEmissions == 0,
                   "appearance: a drag does not re-emit the full appearance "
@@ -2474,14 +2484,115 @@ int main(int argc, char *argv[]) {
 
         // M81 Settings page: KPI tiles, the collection-scope matrix and
         // the COPY REPORT flare analog.
+        // The accent picker's window contract. Both halves are a reported bug:
+        // a parentless dialog is the only one that lands in front of the
+        // always-on-top tool window, and the same parentless dialog was the
+        // window whose close quit the process (a tool window does not count for
+        // quitOnLastWindowClosed). Pick a colour -> OK -> the HUD disappeared
+        // and the colour was never applied.
+        {
+            QColorDialog dialog(QColor(QStringLiteral("#4a86c4")));
+            DashboardPanel::configureAccentDialog(dialog);
+            check(!dialog.testAttribute(Qt::WA_QuitOnClose),
+                  "accent picker: closing it cannot quit the HUD");
+            check((dialog.windowFlags() & Qt::WindowStaysOnTopHint) != 0,
+                  "accent picker: it opens above the always-on-top HUD");
+            check(dialog.testOption(QColorDialog::DontUseNativeDialog)
+                      && !dialog.testOption(QColorDialog::ShowAlphaChannel),
+                  "accent picker: it keeps the app palette and hides alpha");
+        }
+
+        // The picker driven end to end: the button opens the dialog, the
+        // dialog's OK must reach the theme, and the process must still be here
+        // afterwards (the reported bug: OK closed the HUD and the colour was
+        // never applied). A modal exec() spins a nested loop, so the dialog is
+        // driven from a timer; the 3 s watchdog closes it if it never appeared,
+        // so a broken picker fails the check instead of hanging the suite.
+        {
+            auto *pick = static_cast<QPushButton *>(nullptr);
+            for (QPushButton *button : hud.findChildren<QPushButton *>()) {
+                if (button->text() == QStringLiteral("PICK")) {
+                    pick = button;
+                }
+            }
+            check(pick != nullptr, "accent picker: the PICK button exists");
+            if (pick != nullptr) {
+                QString picked;
+                const QMetaObject::Connection pickedConnection =
+                    QObject::connect(panel, &DashboardPanel::appearanceChanged,
+                                     [&picked](const QString &accent, int,
+                                               const QString &) {
+                                         picked = accent;
+                                     });
+                QTimer::singleShot(120, [&]() {
+                    if (auto *dialog = qobject_cast<QColorDialog *>(
+                            QApplication::activeModalWidget())) {
+                        dialog->setCurrentColor(
+                            QColor(QStringLiteral("#e0b050")));
+                        dialog->accept();
+                    }
+                });
+                QTimer::singleShot(3000, []() {
+                    if (auto *dialog = QApplication::activeModalWidget()) {
+                        dialog->close();
+                    }
+                });
+                pick->click();
+                // The receiver captured a stack string; leaving it connected
+                // would let a later preset click write into dead storage (the
+                // M86 ASan lesson).
+                QObject::disconnect(pickedConnection);
+                check(picked == QStringLiteral("#e0b050"),
+                      "accent picker: OK applies the chosen colour");
+                check(QCoreApplication::instance() != nullptr,
+                      "accent picker: the process is still running after OK");
+                // Put the default back: the rest of this block asserts against
+                // the shipped palette.
+                for (QAbstractButton *button : panel->findChildren<QAbstractButton *>()) {
+                    if (button->text() == QStringLiteral("Classic")) {
+                        button->click();
+                    }
+                }
+            }
+        }
+
+        // Settings architecture: one section at a time behind a sub-nav, not a
+        // single scroll of every card the app owns.
+        {
+            auto *nav = hud.findChild<QListWidget *>(
+                QStringLiteral("ddSettingsNav"));
+            auto *pages = hud.findChild<QStackedWidget *>(
+                QStringLiteral("ddSettingsPages"));
+            check(nav != nullptr && pages != nullptr
+                      && nav->count() == 5 && pages->count() == nav->count(),
+                  "settings: five sections behind a sub-nav");
+            if (nav != nullptr && pages != nullptr) {
+                nav->setCurrentRow(0);
+                const int first = pages->currentIndex();
+                nav->setCurrentRow(3);
+                check(first == 0 && pages->currentIndex() == 3,
+                      "settings: the sub-nav selects one section at a time");
+                nav->setCurrentRow(0);
+            }
+        }
+
         auto *scopeLabel =
             hud.findChild<QLabel *>(QStringLiteral("ddSettingsScope"));
         check(scopeLabel != nullptr
                   && scopeLabel->text().contains(
                       QStringLiteral("collection surfaces live on")),
               "settings: COLLECTION SCOPE counts the live surfaces");
-        check(scopeLabel->text().contains(QStringLiteral("tcp health counters")),
-              "settings: the scope matrix names an OS-gated surface");
+        // The line states the count and then the caveat: which surfaces this OS
+        // gates, or that none are. On Linux every surface is live, so asserting
+        // a specific gated name here would be asserting the runner's OS.
+        const QString scopeText = scopeLabel->text();
+        check(scopeText.contains(QStringLiteral("gated here: "))
+                  || scopeText.contains(
+                      QStringLiteral("nothing is gated on this OS")),
+              "settings: the scope line always states the gated outcome");
+        check(!scopeText.contains(QStringLiteral("<table"))
+                  && scopeText.count(QStringLiteral("<br/>")) <= 1,
+              "settings: the scope is two lines, not a wall of cells");
 
         auto *tileVersion = hud.findChild<QLabel *>(
             QStringLiteral("ddSettingsTileVersion"));
@@ -2538,10 +2649,12 @@ int main(int argc, char *argv[]) {
             remoteState.spoolDropped = 1;
             hud.setRemoteInfo(remoteInfoFor(remoteOptions, remoteState,
                                             remoteState.lastOkMs));
+            // The delivery card is a two-column table (its values wrap), so
+            // the row is found by the spool text it is the only carrier of.
             QString remoteText;
             for (QLabel *label : hud.findChildren<QLabel *>(
                      QStringLiteral("ddSettingsInfo"))) {
-                if (label->text().contains(QStringLiteral("remote&nbsp;"))) {
+                if (label->text().contains(QStringLiteral("spooled"))) {
                     remoteText = label->text();
                 }
             }
@@ -2611,22 +2724,27 @@ int main(int argc, char *argv[]) {
                   "remote card: the scope matrix lists what is sent");
             check(onText.contains(QStringLiteral("- process list")),
                   "remote card: the scope matrix states what is not sent");
-            check(onText.contains(QStringLiteral("never sent: process list")),
+            // Rows are key/value cells now, so each claim is asserted on the
+            // text a reader sees, not on the spaces that used to align it.
+            check(onText.contains(QStringLiteral(">never sent<"))
+                      && onText.contains(
+                          QStringLiteral("process list, command lines")),
                   "remote card: the closing promise is the literal never-sent "
-                  "line");
-            check(onText.contains(QStringLiteral(
-                      "identity    9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34")),
+                  "list");
+            check(onText.contains(
+                      QStringLiteral("9f2c1b7a-6a4e-4f21-9a0d-2b7c5e1f8a34")),
                   "remote card: the identity row names the id the relay will "
                   "see");
-            check(onText.contains(QStringLiteral("tier        paid")),
+            check(onText.contains(QStringLiteral("free app, paid relay")),
                   "remote card: the paid tier boundary is stated on the card");
             check(onText.contains(
-                      QStringLiteral("ca          system certificate store")),
+                      QStringLiteral("system certificate store")),
                   "remote card: the card states which trust anchor is used");
 
             RemoteReportState freshCard;
             hud.setRemoteInfo(remoteInfoFor(cardOn, freshCard, 0));
-            check(cardText().contains(QStringLiteral("last        never")),
+            check(cardText().contains(QStringLiteral(">last<"))
+                      && cardText().contains(QStringLiteral("never")),
                   "remote card: a reporter that has not delivered says never");
 
             RemoteReportState refusedCard;

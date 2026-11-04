@@ -586,6 +586,13 @@ QString DashboardPanel::consoleStyleSheet() const {
         "  font-size: 11px; }"
         "#ddRail::item { padding: 7px 14px; border-left: 3px solid transparent; }"
         "#ddRail::item:hover { background-color: %HOVER%; color: %TEXT%; }"
+        "#ddSettingsNav { background-color: %SURFACE%; border: 1px solid %BORDER%;"
+        "  border-radius: 4px; padding: 4px; outline: none; }"
+        "#ddSettingsNav::item { color: %MUTED%; padding: 7px 10px;"
+        "  border-radius: 3px; font-size: 11px; }"
+        "#ddSettingsNav::item:hover { color: %TEXT%; background-color: %HOVER%; }"
+        "#ddSettingsNav::item:selected { color: %TEXT%; background-color: %HOVER%;"
+        "  border-left: 2px solid %ACCENT%; }"
         "#ddRail::item:selected { background-color: %HOVER%; color: %TEXT%;"
         "  border-left: 3px solid %ACCENT%; }"
         "#ddViews { background-color: %BG%; }"
@@ -3199,6 +3206,45 @@ QWidget *DashboardPanel::buildErrorsView() {
     return view;
 }
 
+// configureAccentDialog is the one place the accent picker's window contract is
+// stated, because getting it wrong closes the process.
+//
+// The HUD is a frameless Qt::Tool window kept above everything, so a dialog
+// parented to it renders BEHIND it and a dialog that inherits the tool level
+// stays under the window it was opened from. A parentless dialog asking for
+// WindowStaysOnTopHint is the shape that lands in front (M0.10.0 report: the
+// file picker parented to the HUD rendered behind it and froze the console).
+//
+// The other half is ownership of the process's lifetime. A tool window does not
+// count as a window for QApplication::quitOnLastWindowClosed, and this dialog
+// does - so opening it made it the only window, and closing it quit Syspeek.
+// That is the reported bug: pick a colour, press OK, the HUD disappears and the
+// colour was never applied (the run ended before the accepted colour reached
+// the stylesheet). WA_QuitOnClose keeps the dialog from owning the exit.
+void DashboardPanel::configureAccentDialog(QColorDialog &dialog) {
+    dialog.setOption(QColorDialog::DontUseNativeDialog, true);
+    dialog.setOption(QColorDialog::ShowAlphaChannel, false);
+    dialog.setWindowTitle(QStringLiteral("Accent colour"));
+    dialog.setWindowFlag(Qt::WindowStaysOnTopHint, true);
+    dialog.setAttribute(Qt::WA_QuitOnClose, false);
+    dialog.setAttribute(Qt::WA_DeleteOnClose, false);
+}
+
+// settingsRowHtml is one key/value row for a settings card whose values wrap.
+// A two-column table keeps the key column fixed and wraps the value under
+// itself; a padded label cannot, because Qt rich text has no hanging indent
+// (M81: `text-indent` is parsed and ignored by QTextLayout).
+static QString settingsRowHtml(const QString &key, const QString &value) {
+    QString escaped = value;
+    escaped.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
+    escaped.replace(QLatin1Char('<'), QStringLiteral("&lt;"));
+    return QStringLiteral(
+               "<tr><td style=\"padding-right:14px; vertical-align:top; "
+               "white-space:nowrap;\"><span style=\"color:%1\">%2</span></td>"
+               "<td><span style=\"color:%3\">%4</span></td></tr>")
+        .arg(ui_theme::dim(), key, ui_theme::muted(), escaped);
+}
+
 QWidget *DashboardPanel::buildSettingsView() {
     auto *view = new QWidget(this);
     auto *content = new QWidget(view);
@@ -3234,6 +3280,49 @@ QWidget *DashboardPanel::buildSettingsView() {
                               m_settingsTileSilenced, nullptr, view), 1);
     layout->addLayout(tiles);
 
+    // Settings is six unrelated jobs in one page: what the app looks like, what
+    // it collects, what it alerts on, what it sends, and how to diagnose it.
+    // Stacked vertically they read as one long wall of text, so they are a
+    // sub-nav now: one section visible at a time, the summary tiles always on
+    // top. No banner is needed per section - the nav item already says it.
+    auto *settingsNav = new QListWidget(content);
+    settingsNav->setObjectName(QStringLiteral("ddSettingsNav"));
+    settingsNav->setFixedWidth(132);
+    settingsNav->setFocusPolicy(Qt::NoFocus);
+    settingsNav->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto *settingsPages = new QStackedWidget(content);
+    settingsPages->setObjectName(QStringLiteral("ddSettingsPages"));
+    // The stack is exactly as wide as the space it is given. Without this its
+    // size hint is the widest page (the diagnostics card's long command lines),
+    // so every section was laid out wider than the viewport and the disclosure
+    // card was clipped at the right edge.
+    settingsPages->setMinimumWidth(1);
+    settingsPages->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+
+    auto addSettingsPage = [&](const QString &name) {
+        auto *page = new QWidget(settingsPages);
+        auto *pageLayout = new QVBoxLayout(page);
+        pageLayout->setContentsMargins(0, 0, 0, 0);
+        pageLayout->setSpacing(10);
+        settingsNav->addItem(name);
+        settingsPages->addWidget(page);
+        return pageLayout;
+    };
+    QVBoxLayout *appearancePage = addSettingsPage(QStringLiteral("Appearance"));
+    QVBoxLayout *collectionPage = addSettingsPage(QStringLiteral("Collection"));
+    QVBoxLayout *alertsPage = addSettingsPage(QStringLiteral("Alerts"));
+    QVBoxLayout *remotePage = addSettingsPage(QStringLiteral("Remote"));
+    QVBoxLayout *aboutPage = addSettingsPage(QStringLiteral("About"));
+    connect(settingsNav, &QListWidget::currentRowChanged, settingsPages,
+            &QStackedWidget::setCurrentIndex);
+    settingsNav->setCurrentRow(0);
+
+    auto *settingsSplit = new QHBoxLayout;
+    settingsSplit->setSpacing(12);
+    settingsSplit->addWidget(settingsNav);
+    settingsSplit->addWidget(settingsPages, 1);
+    layout->addLayout(settingsSplit, 1);
+
     // --- Software + runtime identity (agent "Host Info" block analog).
     m_settingsSoftware = new QLabel(QStringLiteral("--"), view);
     m_settingsSoftware->setObjectName(QStringLiteral("ddSettingsInfo"));
@@ -3243,10 +3332,8 @@ QWidget *DashboardPanel::buildSettingsView() {
     // page, so they wrap instead of clipping past the card edge.
     m_settingsSoftware->setWordWrap(true);
 
-    layout->addWidget(makeBanner(QStringLiteral("SOFTWARE & RUNTIME"),
-        ui_theme::accent(), view));
-    layout->addWidget(makeCard(QStringLiteral("SOFTWARE"),
-                               m_settingsSoftware, view));
+    aboutPage->addWidget(makeCard(QStringLiteral("SOFTWARE"),
+                                  m_settingsSoftware, view));
 
     // --- Collection settings (agent config-group analog: what is collected
     // and how often, plus the local-only scope guarantee).
@@ -3260,14 +3347,12 @@ QWidget *DashboardPanel::buildSettingsView() {
     m_settingsScope->setObjectName(QStringLiteral("ddSettingsScope"));
     m_settingsScope->setFont(monoFont(10));
     m_settingsScope->setTextFormat(Qt::RichText);
-    m_settingsScope->setWordWrap(false);
+    m_settingsScope->setWordWrap(true);
 
-    layout->addWidget(makeBanner(QStringLiteral("COLLECTION"),
-        ui_theme::banner(), view));
-    layout->addWidget(makeCard(QStringLiteral("GENERAL"),
-                               m_settingsGeneral, view));
-    layout->addWidget(makeCard(QStringLiteral("COLLECTION SCOPE"),
-                               m_settingsScope, view));
+    collectionPage->addWidget(makeCard(QStringLiteral("GENERAL"),
+                                       m_settingsGeneral, view));
+    collectionPage->addWidget(makeCard(QStringLiteral("COLLECTION SCOPE"),
+                                       m_settingsScope, view));
 
     // M66: editable monitors — runtime threshold/cycles reconfiguration
     // grounded on shipped monit 5.34.2 strings ("Monit reloaded",
@@ -3385,9 +3470,8 @@ QWidget *DashboardPanel::buildSettingsView() {
     resetRow->addWidget(monitorReset);
     monLayout->addLayout(resetRow);
 
-    layout->addWidget(makeBanner(QStringLiteral("MONITORS"),
-        ui_theme::warn(), view));
-    layout->addWidget(makeCard(QStringLiteral("alert rules"), monitorsCard, view));
+    alertsPage->addWidget(makeCard(QStringLiteral("alert rules"),
+                                   monitorsCard, view));
 
     // --- M99: what the paid tier leaves this machine, field group by field
     // group. The shape is the M84 CLOUD FOOTPRINT card, because a disclosure is
@@ -3398,10 +3482,18 @@ QWidget *DashboardPanel::buildSettingsView() {
     m_remoteReport->setWordWrap(true);
     m_remoteReport->setMinimumWidth(1);
 
-    layout->addWidget(makeBanner(QStringLiteral("REMOTE REPORTING"),
-        ui_theme::accent(), view));
-    layout->addWidget(makeCard(QStringLiteral("what would leave this host"),
-                               m_remoteReport, view));
+    // The two switches that decide what leaves this machine, then the
+    // disclosure card that lists it field group by field group.
+    m_settingsRemote = new QLabel(QStringLiteral("--"), view);
+    m_settingsRemote->setObjectName(QStringLiteral("ddSettingsInfo"));
+    m_settingsRemote->setFont(monoFont(10));
+    m_settingsRemote->setTextFormat(Qt::RichText);
+    m_settingsRemote->setWordWrap(true);
+
+    remotePage->addWidget(makeCard(QStringLiteral("delivery"),
+                                   m_settingsRemote, view));
+    remotePage->addWidget(makeCard(QStringLiteral("what would leave this host"),
+                                   m_remoteReport, view));
 
     // Diagnostics: command rows with copy buttons. Mirrors the shipped
     // Datadog agent's local surface (status/configcheck/flare per its
@@ -3414,28 +3506,15 @@ QWidget *DashboardPanel::buildSettingsView() {
     diagLayout->setContentsMargins(14, 12, 14, 14);
     diagLayout->setSpacing(10);
 
-    m_settingsDiagnostics = new QLabel(QStringLiteral("--"), view);
-    m_settingsDiagnostics->setObjectName(QStringLiteral("ddSettingsPath"));
-    m_settingsDiagnostics->setFont(monoFont(9));
-    diagLayout->addWidget(m_settingsDiagnostics);
-
+    // Two commands, because these are the two a person reaches for while
+    // looking at the GUI: the snapshot they can paste into a report, and the log
+    // tail. `--probe`, `--record`, `status`, `stop` and `restart` are the
+    // service verbs and the docs; a settings page is not a manual.
     const QList<QPair<QString, QString>> commands = {
         {QStringLiteral("machine snapshot (JSON)"),
          QStringLiteral("syspeek --dump")},
-        {QStringLiteral("pipeline probe (headless tick log)"),
-         QStringLiteral("syspeek --probe")},
-        {QStringLiteral("record history (CSV, sadf dialect)"),
-         QStringLiteral("syspeek --record=60s --format=csv --out=syspeek.csv")},
-        {QStringLiteral("record history (JSON)"),
-         QStringLiteral("syspeek --record=60s --format=json --out=syspeek.json")},
         {QStringLiteral("tail the HUD log"),
          QStringLiteral("syspeek logs")},
-        {QStringLiteral("instance + autostart state"),
-         QStringLiteral("syspeek status")},
-        {QStringLiteral("stop every HUD instance"),
-         QStringLiteral("syspeek stop")},
-        {QStringLiteral("restart the HUD"),
-         QStringLiteral("syspeek restart")},
     };
     for (const auto &pair : commands) {
         auto *row = new QHBoxLayout();
@@ -3446,6 +3525,8 @@ QWidget *DashboardPanel::buildSettingsView() {
         auto *cmd = new QLabel(pair.second, diagCard);
         cmd->setObjectName(QStringLiteral("ddSettingsPath"));
         cmd->setFont(monoFont(9));
+        cmd->setWordWrap(false);
+        cmd->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         auto *copy = new QPushButton(QStringLiteral("COPY"), diagCard);
         copy->setObjectName(QStringLiteral("ddCopy"));
         copy->setCursor(Qt::PointingHandCursor);
@@ -3491,8 +3572,10 @@ QWidget *DashboardPanel::buildSettingsView() {
     auto *reportRow = new QHBoxLayout();
     reportRow->setSpacing(8);
     auto *reportWhat = new QLabel(
-        QStringLiteral("copy the diagnostic report (agent flare analog)"),
-        diagCard);
+        QStringLiteral("copy the diagnostic report"), diagCard);
+    reportWhat->setToolTip(QStringLiteral(
+        "version, paths, collection settings and monitor counts - the analog "
+        "of the agent's flare bundle"));
     reportWhat->setObjectName(QStringLiteral("ddSettingsLabel"));
     reportWhat->setFont(monoFont(10));
     auto *copyReport = new QPushButton(QStringLiteral("COPY REPORT"), diagCard);
@@ -3565,21 +3648,27 @@ QWidget *DashboardPanel::buildSettingsView() {
     accentPick->setFont(monoFont(9));
     accentPick->setCursor(Qt::PointingHandCursor);
     accentPick->setFocusPolicy(Qt::NoFocus);
-    connect(accentPick, &QPushButton::clicked, this, [this]() {
-        // The HUD is an always-on-top tool window, so a dialog parented to it
-        // renders BEHIND it. A parentless dialog that asks for the same level
-        // is the only shape that reliably lands in front.
+    connect(accentPick, &QPushButton::clicked, this, [this, accentGroup]() {
         QColorDialog dialog{QColor(m_accentHex)};
-        dialog.setOption(QColorDialog::DontUseNativeDialog, true);
-        dialog.setWindowTitle(QStringLiteral("Accent colour"));
-        dialog.setWindowFlag(Qt::WindowStaysOnTopHint, true);
+        configureAccentDialog(dialog);
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }
         m_accentHex = dialog.selectedColor().name(QColor::HexRgb);
-        m_accentSwatch->setText(m_accentHex);
-        m_accentSwatch->setStyleSheet(
-            QStringLiteral("color: %1;").arg(m_accentHex));
+        if (m_accentSwatch != nullptr) {
+            m_accentSwatch->setText(m_accentHex);
+            m_accentSwatch->setStyleSheet(
+                QStringLiteral("color: %1;").arg(m_accentHex));
+        }
+        // A hand-picked colour is not one of the presets, and leaving the last
+        // preset checked would claim it was.
+        if (accentGroup != nullptr) {
+            accentGroup->setExclusive(false);
+            for (QAbstractButton *button : accentGroup->buttons()) {
+                button->setChecked(false);
+            }
+            accentGroup->setExclusive(true);
+        }
         emit appearanceChanged(accentHex(), accentOpacity(), wallpaperId());
     });
     accentRow->addWidget(accentPick);
@@ -3668,21 +3757,22 @@ QWidget *DashboardPanel::buildSettingsView() {
     opacityRow->addStretch(1);
     appLayout->addLayout(opacityRow);
 
-    layout->addWidget(makeBanner(QStringLiteral("APPEARANCE"),
-        ui_theme::accent(), view));
-    layout->addWidget(
+    appearancePage->addWidget(
         makeCard(QStringLiteral("accent, backdrop, strip opacity"),
                  appearanceCard, view));
 
-    layout->addWidget(makeBanner(QStringLiteral("DIAGNOSTICS & SUPPORT"),
-        ui_theme::warn(), view));
-    layout->addWidget(diagCard);
-    layout->addStretch(1);
+    aboutPage->addWidget(diagCard);
+    aboutPage->addStretch(1);
+    appearancePage->addStretch(1);
+    collectionPage->addStretch(1);
+    alertsPage->addStretch(1);
+    remotePage->addStretch(1);
 
     // Fit the viewport width: width-only clamps (heights stay natural).
     m_settingsSoftware->setMinimumWidth(1);
     m_settingsGeneral->setMinimumWidth(1);
     m_settingsScope->setMinimumWidth(1);
+    m_settingsRemote->setMinimumWidth(1);
 
     auto *scroll = new QScrollArea(view);
     scroll->setObjectName(QStringLiteral("ddScroll"));
@@ -3727,10 +3817,12 @@ void DashboardPanel::applySettingsInfo() {
     // Wrapped values break at a space and continue under the value column
     // (Qt rich text has no hanging indent, so the padding is repeated).
     auto wrapValue = [](const QString &text, int width) {
+        QString clean = text;
+        clean.replace(QLatin1Char('\n'), QStringLiteral(" \u00b7 "));
         QString out;
         int column = 0;
-        for (int i = 0; i < text.size(); ++i) {
-            const QChar ch = text.at(i);
+        for (int i = 0; i < clean.size(); ++i) {
+            const QChar ch = clean.at(i);
             if (ch == QLatin1Char('\n')) {
                 out += QStringLiteral("<br/>");
                 out += QStringLiteral("&nbsp;").repeated(11);
@@ -3782,45 +3874,19 @@ void DashboardPanel::applySettingsInfo() {
     QString software;
     software += row(QStringLiteral("version"),
                     strong(version) + dim(QStringLiteral(" on ")) + strong(platform));
-    software += row(QStringLiteral("health"),
-                                              configOk ? span(ui_theme::ok(), QStringLiteral("config loaded"))
-                                                       : span(ui_theme::crit(), QStringLiteral("config error")));
     software += row(QStringLiteral("config"),
                     configPath + QStringLiteral("  ") + configStatus);
     software += row(QStringLiteral("log"), logPath);
-    software += row(QStringLiteral("build"),
-                      muted(QStringLiteral("local collection only - no telemetry, "
-                                           "no outbound traffic unless you configure it")));
     m_settingsSoftware->setText(software);
 
     QString general;
     general += row(QStringLiteral("refresh"),
                    strong(QStringLiteral("%1 ms").arg(m_settings.sampleIntervalMs)));
     general += row(
-        QStringLiteral("alerts"),
-        strong(QStringLiteral("cpu warn %1% - high %2% - rss %3 GB")
-                   .arg(QString::number(m_settings.cpuWarnPercent, 'f', 0),
-                        QString::number(m_settings.cpuHighPercent, 'f', 0),
-                        QString::number(m_settings.rssWarnGb, 'f', 1))));
-    general += row(
-        QStringLiteral("autostart"),
-        m_settings.autostartLine.isEmpty() ? muted(QStringLiteral("--"))
-                                           : muted(m_settings.autostartLine));
-    general += row(
         QStringLiteral("prometheus"),
         m_settings.metricsLine.isEmpty()
             ? muted(QStringLiteral("--"))
             : muted(wrapValue(m_settings.metricsLine, 88)));
-    general += row(
-        QStringLiteral("webhook"),
-        m_settings.webhookLine.isEmpty()
-            ? muted(QStringLiteral("--"))
-            : muted(wrapValue(m_settings.webhookLine, 88)));
-    general += row(
-        QStringLiteral("remote"),
-        m_settings.remoteLine.isEmpty()
-            ? muted(QStringLiteral("off - nothing leaves this machine"))
-            : muted(wrapValue(m_settings.remoteLine, 88)));
     general += row(
         QStringLiteral("export"),
         m_settings.exportLine.isEmpty()
@@ -3857,6 +3923,23 @@ void DashboardPanel::applySettingsInfo() {
         muted(wrapValue(tickbudget::tickSectionText(m_liveTick), 88)));
     m_settingsGeneral->setText(general);
 
+    // Remote: the two switches that decide what leaves this machine. They live
+    // on their own section because they are the paid tier's whole setup, not a
+    // collection detail.
+    if (m_settingsRemote != nullptr) {
+        const QString remoteValue = m_settings.remoteLine.isEmpty()
+            ? QStringLiteral("off - nothing leaves this machine")
+            : m_settings.remoteLine;
+        const QString webhookValue = m_settings.webhookLine.isEmpty()
+            ? QStringLiteral("--")
+            : m_settings.webhookLine;
+        m_settingsRemote->setText(
+            QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">")
+            + settingsRowHtml(QStringLiteral("remote"), remoteValue)
+            + settingsRowHtml(QStringLiteral("webhook"), webhookValue)
+            + QStringLiteral("</table>"));
+    }
+
     // Collection scope: every surface the backend can reach on this OS.
     // Unsupported surfaces are named rather than silently missing (the
     // capability-gate rule every page follows).
@@ -3892,47 +3975,26 @@ void DashboardPanel::applySettingsInfo() {
         {QStringLiteral("pause / resume"), caps.processPause},
     };
     int liveCount = 0;
-    QStringList scopeLines;
-    QString line;
-    for (int i = 0; i < scope.size(); ++i) {
-        const ScopeRow &entry = scope.at(i);
+    QStringList gated;
+    for (const ScopeRow &entry : scope) {
         if (entry.live) {
             ++liveCount;
-        }
-        QString cell = entry.live
-            ? span(ui_theme::ok(), QStringLiteral("+ "))
-                  + span(ui_theme::dim(), entry.name)
-            : muted(QStringLiteral("- ") + entry.name);
-        if (line.isEmpty()) {
-            line = cell;
         } else {
-            scopeLines << line + QStringLiteral("   ") + cell;
-            line.clear();
+            gated << entry.name;
         }
     }
-    if (!line.isEmpty()) {
-        scopeLines << line;
-    }
-    scopeLines << QString()
-               << muted(QStringLiteral("%1 of %2 collection surfaces live on %3")
-                            .arg(liveCount)
-                            .arg(scope.size())
-                            .arg(platform))
-               << muted(QStringLiteral("unsupported surfaces state the OS gate "
-                                       "where they would appear"));
-    m_settingsScope->setText(scopeLines.join(QStringLiteral("<br/>")));
-
-    QString diagnostics;
-    diagnostics += QStringLiteral("log file  %1<br/>")
-        .arg(logPath);
-    diagnostics += QStringLiteral("verbs     %1<br/>")
-        .arg((m_settings.verbsLine.isEmpty()
-                  ? QStringLiteral("start stop restart status uninstall")
-                  : m_settings.verbsLine));
-    diagnostics += muted(QStringLiteral(
-        "copy report bundles the version, paths, collection settings and "
-        "monitor counts - the analog of the agent's flare bundle"));
-    m_settingsDiagnostics->setText(diagnostics);
+    // Two lines instead of a 24-cell grid: the count is the fact, the gated
+    // names are the caveat, and every gated page already says so where the
+    // surface would be.
+    QString scopeText =
+        strong(QStringLiteral("%1 of %2").arg(liveCount).arg(scope.size()))
+        + muted(QStringLiteral(" collection surfaces live on ") + platform)
+        + QStringLiteral("<br/>")
+        + (gated.isEmpty()
+               ? muted(QStringLiteral("nothing is gated on this OS"))
+               : muted(QStringLiteral("gated here: ")
+                       + gated.join(QStringLiteral(", "))));
+    m_settingsScope->setText(scopeText);
 
     refreshSettingsTiles();
 }
