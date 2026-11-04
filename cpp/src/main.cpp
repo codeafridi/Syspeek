@@ -489,7 +489,13 @@ int main(int argc, char *argv[]) {
 #if defined(Q_OS_WIN)
     attachParentConsole();
 #endif
-    QCoreApplication::setApplicationName(QStringLiteral("syspeek"));
+    // One name for both phases. This runs before QApplication because the
+    // diagnostics (--dump, --probe, --record) must not need a GUI - but the
+    // name is what QStandardPaths builds every cache path from, so a different
+    // one here sent those diagnostics to `<cache>/dev.syspeek/syspeek/` while
+    // the HUD used `<cache>/dev.syspeek/Syspeek/`: `--dump remote` named a
+    // spool and a machine id the running app never touched.
+    QCoreApplication::setApplicationName(QStringLiteral("Syspeek"));
     QCoreApplication::setOrganizationName(QStringLiteral("dev.syspeek"));
     installAppMessageLogger();
 

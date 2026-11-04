@@ -98,7 +98,9 @@ private:
     QTimer *m_timer = nullptr;
     // Touched only on the runner's own thread.
     RemoteSpool m_spool;
-    QString m_lastSpooledId;
+    // The client clock of the newest report that was queued, so a burst of
+    // sampler ticks cannot queue more than the cadence asks for.
+    qint64 m_lastQueuedSentAtMs = 0;
     int m_consecutiveRefused = 0;
 
     void syncSpoolLocked();

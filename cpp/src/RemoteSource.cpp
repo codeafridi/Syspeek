@@ -276,31 +276,42 @@ RemoteReportOptions RemoteRunner::options() const {
 }
 
 void RemoteRunner::setEnvelope(const RemoteEnvelope &envelope) {
+    qint64 intervalMs = 0;
     {
         QMutexLocker lock(&m_mutex);
         m_envelope = envelope;
         m_haveEnvelope = true;
+        intervalMs = m_options.intervalMs;
     }
+    if (!m_spool.isOpen() || envelope.machine.id.isEmpty()
+        || envelope.machine.sentAtMs <= 0) {
+        return;
+    }
+    // The console hands over a fresh envelope on every sampler tick - it must,
+    // the numbers move - and the cadence decides which of those are reports.
+    // Queueing every envelope filled the ring with fifteen reports the interval
+    // never asked for: two accepted posts plus two 429s per cycle, dropped
+    // records, and a relay that learned a cadence half the real one, which then
+    // made a healthy machine go `suspect` between its own reports.
+    if (m_lastQueuedSentAtMs != 0
+        && envelope.machine.sentAtMs - m_lastQueuedSentAtMs < intervalMs) {
+        return;
+    }
+    const QString id = envelope.sample.id.isEmpty()
+        ? remoteSampleId(envelope.machine.id, envelope.machine.sentAtMs)
+        : envelope.sample.id;
     // M98 write-ahead: the report is on disk before a socket is opened, so a
     // closed laptop, a crash or a relay that stays down for an hour costs
     // nothing - the bytes are already somewhere that survives the process.
-    if (m_spool.isOpen() && !envelope.machine.id.isEmpty()) {
-        const QString id = envelope.sample.id.isEmpty()
-            ? remoteSampleId(envelope.machine.id, envelope.machine.sentAtMs)
-            : envelope.sample.id;
-        if (id != m_lastSpooledId) {
-            const QByteArray body = remoteEnvelopeJson(envelope);
-            if (m_spool.append(id, envelope.machine.sentAtMs, body)) {
-                m_lastSpooledId = id;
-            } else {
-                logOnce(QStringLiteral("remote: a report of %1 bytes does not "
-                                       "fit one spool record - it is sent but "
-                                       "not buffered")
-                            .arg(body.size()));
-            }
-            publishState();
-        }
+    const QByteArray body = remoteEnvelopeJson(envelope);
+    if (m_spool.append(id, envelope.machine.sentAtMs, body)) {
+        m_lastQueuedSentAtMs = envelope.machine.sentAtMs;
+    } else {
+        logOnce(QStringLiteral("remote: a report of %1 bytes does not fit one "
+                               "spool record - it is sent but not buffered")
+                    .arg(body.size()));
     }
+    publishState();
 }
 
 RemoteReportState RemoteRunner::state() const {
@@ -420,8 +431,7 @@ void RemoteRunner::poll() {
     }
 
     // M98: with the spool on, the oldest stored report is the next thing to
-    // attempt - a report is written before it is sent, so nothing can be lost
-    // between the tick and the delivery. A record that does not read back is a
+    // attempt. A record that does not read back is a
     // corrupt slot: skip it and say so, instead of retrying bytes that will
     // never parse and blocking the queue behind them.
     RemoteSpoolRecord oldest;
@@ -497,7 +507,10 @@ void RemoteRunner::poll() {
             m_state.consecutiveFailures = 0;
             m_state.nextRetryMs = -1;
             m_consecutiveRefused = 0;
-            if (!fromSpool) {
+            // Whether it left through the spool or straight from the console,
+            // this report has been delivered: the next poll must not offer it
+            // again just because the queue is now empty.
+            if (sentAtMs > 0) {
                 m_lastSentAtMs = sentAtMs;
             }
         } else if (refused) {
