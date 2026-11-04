@@ -3747,13 +3747,12 @@ QWidget *DashboardPanel::buildSettingsView() {
     });
     opacityRow->addWidget(m_opacitySlider);
     opacityRow->addWidget(m_opacityValue);
-    auto *opacityHint = new QLabel(
-        QStringLiteral("collapsed HUD only - MORE is always fully solid"),
-        appearanceCard);
-    opacityHint->setFont(monoFont(9));
-    opacityHint->setObjectName(QStringLiteral("ddSettingsLabel"));
-    opacityHint->setMinimumWidth(1);
-    opacityRow->addWidget(opacityHint);
+    // No explanatory label here: the slider already says what it is, and the
+    // sentence that used to sit at the end of the row ("collapsed HUD only -
+    // MORE is always fully solid") pushed the row past the card and clipped
+    // its own caption. It is the slider's tooltip now.
+    m_opacitySlider->setToolTip(QStringLiteral(
+        "opacity of the collapsed strip - MORE is always fully solid"));
     opacityRow->addStretch(1);
     appLayout->addLayout(opacityRow);
 
