@@ -1,5 +1,5 @@
 #!/bin/sh
-# Syspeek macOS service management (mirrors install.sh on Linux).
+# Crowsnest macOS service management (mirrors install.sh on Linux).
 #
 # Installs run | start | stop | restart | status | logs | uninstall | path
 # through launchctl + ~/Library/LaunchAgents (login autostart, no login item
@@ -7,17 +7,17 @@
 
 set -eu
 
-BUNDLE_ID="dev.syspeek.hud"
+BUNDLE_ID="dev.crowsnest.hud"
 LABEL="$BUNDLE_ID"
 PLIST="${HOME}/Library/LaunchAgents/${BUNDLE_ID}.plist"
-LOG_FILE="${HOME}/Library/Logs/Syspeek/syspeek.log"
-ERR_FILE="${HOME}/Library/Logs/Syspeek/syspeek.err.log"
+LOG_FILE="${HOME}/Library/Logs/Crowsnest/crowsnest.log"
+ERR_FILE="${HOME}/Library/Logs/Crowsnest/crowsnest.err.log"
 
-BIN_DEFAULT="/Applications/Syspeek.app/Contents/MacOS/syspeek"
-BIN="${SYSPEEK_BIN:-$BIN_DEFAULT}"
-if [ ! -x "$BIN" ] && [ -x "/Applications/Syspeek.app/Contents/MacOS/Syspeek" ]; then
+BIN_DEFAULT="/Applications/Crowsnest.app/Contents/MacOS/crowsnest"
+BIN="${CROWSNEST_BIN:-$BIN_DEFAULT}"
+if [ ! -x "$BIN" ] && [ -x "/Applications/Crowsnest.app/Contents/MacOS/Crowsnest" ]; then
     # Older bundles capitalised the executable name; tolerate both.
-    BIN="/Applications/Syspeek.app/Contents/MacOS/Syspeek"
+    BIN="/Applications/Crowsnest.app/Contents/MacOS/Crowsnest"
 fi
 if [ ! -x "$BIN" ]; then
     BIN="{{BIN_PATH}}"
@@ -27,7 +27,7 @@ mkdir -p "$(dirname "$PLIST")" 2>/dev/null || true
 
 usage() {
     cat <<'USAGE'
-usage: syspeek.sh {run|start|stop|restart|status|logs|enable|disable|uninstall|path}
+usage: crowsnest.sh {run|start|stop|restart|status|logs|enable|disable|uninstall|path}
 
   run         run the HUD in the foreground (management mode: no LaunchAgent)
   start       load the LaunchAgent and start the HUD
@@ -118,9 +118,9 @@ case "$cmd" in
     update)
         cat <<'UPDATE'
 update: re-run the install one-liner:
-  curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh
 UPDATE
-        curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+        curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh
         ;;
     enable)
         write_plist

@@ -226,7 +226,7 @@ void logLine(const QString &message) {
 
     const QString path =
         QProcessEnvironment::systemEnvironment().value(
-            QStringLiteral("SYSPEEK_LOG"));
+            QStringLiteral("CROWSNEST_LOG"));
     if (path.isEmpty()) {
         return;
     }
@@ -249,28 +249,28 @@ QString settingsAutostartLine() {
         QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft"
                        "\\Windows\\CurrentVersion\\Run"),
         QSettings::NativeFormat);
-    const QString value = run.value(QStringLiteral("Syspeek")).toString();
+    const QString value = run.value(QStringLiteral("Crowsnest")).toString();
     return value.isEmpty()
-        ? QStringLiteral("off - syspeek --autostart=on enables it")
+        ? QStringLiteral("off - crowsnest --autostart=on enables it")
         : QStringLiteral("on (HKCU Run)");
 #elif defined(Q_OS_MACOS)
     const QString plist = QDir::homePath()
-        + QStringLiteral("/Library/LaunchAgents/dev.syspeek.hud.plist");
+        + QStringLiteral("/Library/LaunchAgents/dev.crowsnest.hud.plist");
     return QFile::exists(plist)
-        ? QStringLiteral("on (LaunchAgent dev.syspeek.hud)")
+        ? QStringLiteral("on (LaunchAgent dev.crowsnest.hud)")
         : QStringLiteral("off - install_macos.sh enable enables it");
 #else
     const QString unit = QDir::homePath()
-        + QStringLiteral("/.config/systemd/user/syspeek.service");
+        + QStringLiteral("/.config/systemd/user/crowsnest.service");
     return QFile::exists(unit)
-        ? QStringLiteral("on (systemd user unit syspeek.service)")
+        ? QStringLiteral("on (systemd user unit crowsnest.service)")
         : QStringLiteral("off - install.sh enable enables it");
 #endif
 }
 
 QString settingsVerbsLine() {
 #if defined(Q_OS_WIN)
-    return QStringLiteral("syspeek start|stop|restart|status|disable"
+    return QStringLiteral("crowsnest start|stop|restart|status|disable"
                           "|uninstall|logs|--dump|--probe|--record");
 #elif defined(Q_OS_MACOS)
     return QStringLiteral("install_macos.sh run|start|stop|restart|status"
@@ -326,7 +326,7 @@ void autostartCommand(const QString &mode) {
         QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft"
                        "\\Windows\\CurrentVersion\\Run"),
         QSettings::NativeFormat);
-    const QString name = QStringLiteral("Syspeek");
+    const QString name = QStringLiteral("Crowsnest");
     if (mode == QStringLiteral("on")) {
         run.setValue(name, QStringLiteral("\"%1\"")
                               .arg(windowsSelfExePath()));
@@ -367,7 +367,7 @@ bool processAlreadyExited(DWORD pid) {
     return exited;
 }
 
-QList<DWORD> syspeekPidsExcludingSelf() {
+QList<DWORD> crowsnestPidsExcludingSelf() {
     QList<DWORD> out;
     HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
@@ -378,7 +378,7 @@ QList<DWORD> syspeekPidsExcludingSelf() {
     const DWORD selfId = ::GetCurrentProcessId();
     if (Process32FirstW(snapshot, &entry)) {
         do {
-            if (_wcsicmp(entry.szExeFile, L"syspeek.exe") == 0
+            if (_wcsicmp(entry.szExeFile, L"crowsnest.exe") == 0
                     && entry.th32ProcessID != selfId
                     && !processAlreadyExited(entry.th32ProcessID)) {
                 out.append(entry.th32ProcessID);
@@ -391,7 +391,7 @@ QList<DWORD> syspeekPidsExcludingSelf() {
 
 int windowsStopOthers() {
     int stopped = 0;
-    for (DWORD pid : syspeekPidsExcludingSelf()) {
+    for (DWORD pid : crowsnestPidsExcludingSelf()) {
         HANDLE process = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
                                        pid);
         if (process == nullptr) {
@@ -416,7 +416,7 @@ int windowsStopOthers() {
 
 bool windowsVerb(const QString &verb) {
     if (verb == QStringLiteral("start")) {
-        const QList<DWORD> others = syspeekPidsExcludingSelf();
+        const QList<DWORD> others = crowsnestPidsExcludingSelf();
         if (!others.isEmpty()) {
             std::fprintf(stdout, "already running: %d instance(s)\n",
                          others.size());
@@ -436,7 +436,7 @@ bool windowsVerb(const QString &verb) {
     }
     if (verb == QStringLiteral("status")) {
         autostartCommand(QStringLiteral("status"));
-        const QList<DWORD> others = syspeekPidsExcludingSelf();
+        const QList<DWORD> others = crowsnestPidsExcludingSelf();
         std::fprintf(stdout, "other instances: %d\n", others.size());
         std::fflush(stdout);
         return true;
@@ -454,8 +454,8 @@ bool windowsVerb(const QString &verb) {
             const QString shimDir = QDir::fromNativeSeparators(
                 qEnvironmentVariable("LOCALAPPDATA")
                 + QStringLiteral("/Microsoft/WindowsApps"));
-            QFile::remove(shimDir + QStringLiteral("/syspeek.cmd"));
-            QFile::remove(shimDir + QStringLiteral("/syspeek"));
+            QFile::remove(shimDir + QStringLiteral("/crowsnest.cmd"));
+            QFile::remove(shimDir + QStringLiteral("/crowsnest"));
             const QString appDir = QFileInfo(
                     windowsSelfExePath()).absolutePath();
             std::fprintf(stdout,
@@ -492,11 +492,11 @@ int main(int argc, char *argv[]) {
     // One name for both phases. This runs before QApplication because the
     // diagnostics (--dump, --probe, --record) must not need a GUI - but the
     // name is what QStandardPaths builds every cache path from, so a different
-    // one here sent those diagnostics to `<cache>/dev.syspeek/syspeek/` while
-    // the HUD used `<cache>/dev.syspeek/Syspeek/`: `--dump remote` named a
+    // one here sent those diagnostics to `<cache>/dev.crowsnest/crowsnest/` while
+    // the HUD used `<cache>/dev.crowsnest/Crowsnest/`: `--dump remote` named a
     // spool and a machine id the running app never touched.
-    QCoreApplication::setApplicationName(QStringLiteral("Syspeek"));
-    QCoreApplication::setOrganizationName(QStringLiteral("dev.syspeek"));
+    QCoreApplication::setApplicationName(QStringLiteral("Crowsnest"));
+    QCoreApplication::setOrganizationName(QStringLiteral("dev.crowsnest"));
     installAppMessageLogger();
 
     for (int i = 1; i < argc; ++i) {
@@ -566,9 +566,9 @@ int main(int argc, char *argv[]) {
     }
 
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("Syspeek"));
+    QApplication::setApplicationName(QStringLiteral("Crowsnest"));
     QApplication::setApplicationVersion(
-        QString::fromLatin1(SYSPEEK_APP_VERSION));
+        QString::fromLatin1(CROWSNEST_APP_VERSION));
 
     // Fusion honours a palette on every platform; the platform styles only
     // do so partially. The palette is what makes the widgets the stylesheet
@@ -589,7 +589,7 @@ int main(int argc, char *argv[]) {
     // Single-instance gate, scoped to THIS display: the same screen stays
     // single, another session is not blocked.
     const InstanceSession session = instanceSession();
-    const QString instanceKey = QStringLiteral("syspeek-hud-")
+    const QString instanceKey = QStringLiteral("crowsnest-hud-")
         + instanceUserKey() + QLatin1Char('-') + session.key;
     const QString instancePidFile = instancePidPath(instanceKey);
     QLocalSocket instanceProbe;
@@ -598,16 +598,16 @@ int main(int argc, char *argv[]) {
         const qint64 holder = readInstancePid(instancePidFile);
         if (instancePidAlive(holder)) {
             std::fprintf(stdout,
-                         "syspeek: a HUD is already running on %s (pid %lld)\n"
+                         "crowsnest: a HUD is already running on %s (pid %lld)\n"
                          "  close it, or start a second one with "
-                         "'syspeek --new-instance'\n",
+                         "'crowsnest --new-instance'\n",
                          qUtf8Printable(session.label),
                          static_cast<long long>(holder));
         } else {
             std::fprintf(stdout,
-                         "syspeek: a HUD is already running on %s\n"
+                         "crowsnest: a HUD is already running on %s\n"
                          "  close it, or start a second one with "
-                         "'syspeek --new-instance'\n",
+                         "'crowsnest --new-instance'\n",
                          qUtf8Printable(session.label));
         }
         return 0;
@@ -643,7 +643,7 @@ int main(int argc, char *argv[]) {
     ui_theme::setAccent(config.theme.accent);
     QApplication::setPalette(ui_theme::darkPalette());
     if (!configError.isEmpty()) {
-        std::fprintf(stderr, "[syspeek] config: %s\n",
+        std::fprintf(stderr, "[crowsnest] config: %s\n",
                      qUtf8Printable(configError));
     }
     logLine(QStringLiteral("config path=%1 error=%2")
@@ -662,7 +662,7 @@ int main(int argc, char *argv[]) {
     qRegisterMetaType<TlsSnapshot>("TlsSnapshot");
     qRegisterMetaType<FimSnapshot>("FimSnapshot");
 
-    g_latencyProbe = qEnvironmentVariableIsSet("SYSPEEK_LATENCY");
+    g_latencyProbe = qEnvironmentVariableIsSet("CROWSNEST_LATENCY");
 
 #if !defined(Q_OS_WIN)
     struct sigaction ignoreAction;
@@ -782,7 +782,7 @@ int main(int argc, char *argv[]) {
         kdeService->registerService();
     }
 
-    if (qEnvironmentVariableIsSet("SYSPEEK_PROBE")) {
+    if (qEnvironmentVariableIsSet("CROWSNEST_PROBE")) {
         int pid = provider->focusedPid();
         if (pid <= 0 && provider->name() == QStringLiteral("kde-dbus")) {
             QEventLoop loop;

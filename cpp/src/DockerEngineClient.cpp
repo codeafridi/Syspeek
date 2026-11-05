@@ -10,7 +10,7 @@ QByteArray requestBytes(const QByteArray &method, const QString &path) {
     return QStringLiteral(
                "%1 %2 HTTP/1.1\r\n"
                "Host: docker\r\n"
-               "User-Agent: syspeek/0.8\r\n"
+               "User-Agent: crowsnest/0.8\r\n"
                "Accept: application/json\r\n"
                "Connection: close\r\n"
                "\r\n")

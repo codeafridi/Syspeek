@@ -1,6 +1,6 @@
 #pragma once
 
-// M58: `syspeek --probe[=ticks]` - a headless diagnostic of the live
+// M58: `crowsnest --probe[=ticks]` - a headless diagnostic of the live
 // pipeline (no window, runs under a plain QCoreApplication). Prints one
 // machine-parseable line per tick:
 //   probe tick=<n> seq=... provider=<name> status=<...> app=<..|->

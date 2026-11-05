@@ -1117,8 +1117,8 @@ int main(int argc, char *argv[]) {
         // here) while the monitor keeps evaluating.
         QTemporaryDir silenceDir;
         const QByteArray previousConfig =
-            qgetenv("SYSPEEK_CONFIG");
-        qputenv("SYSPEEK_CONFIG",
+            qgetenv("CROWSNEST_CONFIG");
+        qputenv("CROWSNEST_CONFIG",
                 silenceDir.filePath(QStringLiteral("config.ini")).toUtf8());
         auto openIncidents = [&hud]() {
             auto *label =
@@ -1162,9 +1162,9 @@ int main(int argc, char *argv[]) {
         check(savedText.contains(QStringLiteral("app_cpu_until")),
               "an authored silence persists to the config file");
         if (previousConfig.isEmpty()) {
-            qunsetenv("SYSPEEK_CONFIG");
+            qunsetenv("CROWSNEST_CONFIG");
         } else {
-            qputenv("SYSPEEK_CONFIG", previousConfig);
+            qputenv("CROWSNEST_CONFIG", previousConfig);
         }
         hud.setSnapshot(withProcs);
     }
@@ -2313,7 +2313,7 @@ int main(int argc, char *argv[]) {
 
         SettingsInfo info;
         info.version = QStringLiteral("9.9.9-test");
-        info.configPath = QStringLiteral("/tmp/syspeek.conf");
+        info.configPath = QStringLiteral("/tmp/crowsnest.conf");
         info.configError = QStringLiteral("bad key");
         info.logPath = QStringLiteral("/tmp/hud.log");
         info.autostartLine = QStringLiteral("on");
@@ -2414,7 +2414,7 @@ int main(int argc, char *argv[]) {
             }
             check(costText.contains(QStringLiteral("cpu 6.04%"))
                       && costText.contains(QStringLiteral("rss 36.0 MB")),
-                  "settings GENERAL card states Syspeek's own cpu and rss");
+                  "settings GENERAL card states Crowsnest's own cpu and rss");
             check(costText.contains(QStringLiteral("tick&nbsp;"))
                       && costText.contains(QStringLiteral("62 ms"))
                       && costText.contains(QStringLiteral("worst 84 ms")),
@@ -2471,7 +2471,7 @@ int main(int argc, char *argv[]) {
                 const QJsonObject root =
                     QJsonDocument::fromJson(body).object();
                 const QJsonObject envelope =
-                    root.value(QStringLiteral("syspeek")).toObject();
+                    root.value(QStringLiteral("crowsnest")).toObject();
                 check(opened
                           && envelope.value(QStringLiteral("samples"))
                                  .toArray()
@@ -2771,8 +2771,8 @@ int main(int argc, char *argv[]) {
         if (copyReport != nullptr) {
             copyReport->click();
             const QString report = QGuiApplication::clipboard()->text();
-            check(report.contains(QStringLiteral("syspeek 9.9.9-test"))
-                      && report.contains(QStringLiteral("/tmp/syspeek.conf"))
+            check(report.contains(QStringLiteral("crowsnest 9.9.9-test"))
+                      && report.contains(QStringLiteral("/tmp/crowsnest.conf"))
                       && report.contains(QStringLiteral("monitors"))
                       && report.contains(QStringLiteral("refresh")),
                   "settings: COPY REPORT copies the diagnostic report");

@@ -9,9 +9,9 @@
 
 // M94: many machines, one window.
 //
-// Each Syspeek exposes a bounded summary of the machine it runs on at
+// Each Crowsnest exposes a bounded summary of the machine it runs on at
 // /api/v1/snapshot behind the same bearer token the /metrics endpoint uses;
-// every Syspeek polls the peers listed in [fleet] peers=. Nothing leaves the
+// every Crowsnest polls the peers listed in [fleet] peers=. Nothing leaves the
 // network the user authored, there is no account and no hosted service - the
 // aggregation is the same shape as Prometheus federation and netdata's
 // parent/child pair, which is what the two artifacts in /tmp/opencode/m94

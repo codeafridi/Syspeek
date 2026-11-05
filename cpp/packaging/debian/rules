@@ -1,10 +1,10 @@
 #!/usr/bin/make -f
-# Debian/PPA source package for Syspeek.
+# Debian/PPA source package for Crowsnest.
 #
 # The .spec/PKGBUILD build from the GitHub tag tarball (which has cpp/ at
 # the top level). For debuild/PPA, copy this directory to debian/ first:
 #   cp -r cpp/packaging/debian debian
-#   debuild -S -sa            # then dput ppa:<you>/syspeek ../syspeek_*_source.changes
+#   debuild -S -sa            # then dput ppa:<you>/crowsnest ../crowsnest_*_source.changes
 # Or: bash cpp/packaging/build_ppa.sh  (does the copy in a temp dir)
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
@@ -22,24 +22,24 @@ ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	QT_QPA_PLATFORM=offscreen ctest --test-dir cpp/build --output-on-failure
 endif
 
-# NOTE: file install is declarative via debian/syspeek.install (dh_install
+# NOTE: file install is declarative via debian/crowsnest.install (dh_install
 # copies build output + generated files); no override_dh_auto_install needed.
 # The systemd user unit + .desktop + icon land in their FHS paths and
 # dh_installsystemd picks up the unit automatically.
 override_dh_auto_install:
 	dh_auto_install
-	sed 's|@BINARY@|/usr/bin/syspeek|g' \
-		cpp/packaging/syspeek.service.in \
-		> debian/syspeek.service
+	sed 's|@BINARY@|/usr/bin/crowsnest|g' \
+		cpp/packaging/crowsnest.service.in \
+		> debian/crowsnest.service
 	printf '%s\n' \
 		'[Desktop Entry]' \
 		'Type=Application' \
-		'Name=Syspeek' \
+		'Name=Crowsnest' \
 		'Comment=Compact on-screen focused-process monitor' \
-		'Exec=/usr/bin/syspeek' \
-		'Icon=syspeek' \
+		'Exec=/usr/bin/crowsnest' \
+		'Icon=crowsnest' \
 		'Terminal=false' \
 		'Categories=Utility;System;Monitor;' \
-		> debian/syspeek.desktop
+		> debian/crowsnest.desktop
 
 

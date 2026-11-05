@@ -334,7 +334,7 @@ DisplaySnapshot demoSnapshot(int tick) {
         return row;
     };
     s.endpoints = {
-        mkEndpoint("tcp", "127.0.0.1", 4318, "local", "syspeek", false, 0),
+        mkEndpoint("tcp", "127.0.0.1", 4318, "local", "crowsnest", false, 0),
         mkEndpoint("tcp", "0.0.0.0", 5432, "public", "postgres", true, 41),
         mkEndpoint("tcp", "10.0.0.5", 8080, "public", "nginx", false, 0),
         mkEndpoint("tcp", "[::1]", 6379, "local", "redis", false, -1),
@@ -468,7 +468,7 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.cloud.ratePerHour = 0.2920;
     s.cloud.rateKey = QStringLiteral("aws/c7g.2xlarge");
     s.cloud.rateSource =
-        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt");
+        QStringLiteral("/home/dev/.config/crowsnest/cloud-rates.txt");
     s.cloud.rateImportDate = QStringLiteral("2026-09-01");
     s.cloud.rateStaleDays = 56;
     const CloudCostMath cloudMath =
@@ -556,7 +556,7 @@ DisplaySnapshot demoSnapshot(int tick) {
     s.cloud.footprint.lastSweepMs = 62;
     s.cloud.footprint.lastRequests = 4;
     s.cloud.footprint.ratesPath = QStringLiteral(
-        "/home/you/.config/syspeek/cloud-rates.txt");
+        "/home/you/.config/crowsnest/cloud-rates.txt");
     s.cloud.footprint.spend = true;
     s.cloud.footprint.spendTimeoutMs = 30000;
     s.cloud.footprint.spendCommand = QStringLiteral(
@@ -814,8 +814,8 @@ QList<TimelineEvent> demoTimelineEvents(qint64 baseMs) {
              QStringLiteral("monitor:app_mem"),
              QStringLiteral("app_mem recovered")),
         make(at(201), TimelineKind::FileChange, TimelineSeverity::Warning,
-             QStringLiteral("file:/usr/local/bin/syspeek-agent"),
-             QStringLiteral("created /usr/local/bin/syspeek-agent"),
+             QStringLiteral("file:/usr/local/bin/crowsnest-agent"),
+             QStringLiteral("created /usr/local/bin/crowsnest-agent"),
              QStringLiteral("sha256 4c1e8f20")),
         make(at(212), TimelineKind::Cloud, TimelineSeverity::Info,
              QStringLiteral("cloud:aws/i-0a1b2c3d"),
@@ -845,6 +845,16 @@ int main(int argc, char *argv[]) {
     if (!panelMode) {
         HudWindow hud;
         hud.setSnapshot(demoSnapshot(0));
+        DockerSnapshot docker;
+        docker.state = DockerState::Ok;
+        docker.runningCount = 3;
+        docker.issueCount = 1;
+        hud.setDockerSnapshot(docker);
+        KubeSnapshot kube;
+        kube.state = KubeState::Ok;
+        kube.totalPods = 14;
+        kube.issueCount = 2;
+        hud.setKubeSnapshot(kube);
         hud.show();
         app.processEvents();
         const QString out = argc > 1 ? QString::fromUtf8(argv[1])
@@ -1359,34 +1369,34 @@ int main(int argc, char *argv[]) {
     panel.setIncidents(incidents);
 
     SettingsInfo settingsInfo;
-    settingsInfo.version = QStringLiteral(SYSPEEK_APP_VERSION);
-    settingsInfo.configPath = QStringLiteral("~/.config/Syspeek/syspeek.conf");
-    settingsInfo.logPath = QStringLiteral("~/.cache/dev.syspeek/syspeek/hud.log");
+    settingsInfo.version = QStringLiteral(CROWSNEST_APP_VERSION);
+    settingsInfo.configPath = QStringLiteral("~/.config/Crowsnest/crowsnest.conf");
+    settingsInfo.logPath = QStringLiteral("~/.cache/dev.crowsnest/crowsnest/hud.log");
     settingsInfo.autostartLine =
-        QStringLiteral("on (systemd user unit syspeek.service)");
+        QStringLiteral("on (systemd user unit crowsnest.service)");
     settingsInfo.verbsLine =
         QStringLiteral("install.sh run|start|stop|restart|status|enable|"
                        "disable|update|uninstall|logs|vers");
     settingsInfo.metricsLine = QStringLiteral(
         "http://127.0.0.1:9107/metrics (no auth, loopback only)");
     settingsInfo.webhookLine =
-        QStringLiteral("generic -> https://alerts.example.test/syspeek"
+        QStringLiteral("generic -> https://alerts.example.test/crowsnest"
                        " - 4 sent, 0 failed; last ok 17:42 (1 firing)");
     settingsInfo.remoteLine =
-        QStringLiteral("https://relay.syspeek.dev every 15 s - spool 8 MB - "
+        QStringLiteral("https://relay.crowsnest.dev every 15 s - spool 8 MB - "
                        "41 sent, 0 failed - last ok in 34ms, 2 spooled");
     settingsInfo.exportLine =
-        QStringLiteral("csv - 412 samples -> ~/.cache/dev.syspeek/syspeek/"
-                       "syspeek-history-20261026-174210.csv");
+        QStringLiteral("csv - 412 samples -> ~/.cache/dev.crowsnest/crowsnest/"
+                       "crowsnest-history-20261026-174210.csv");
     settingsInfo.historyLine =
-        QStringLiteral("3600 samples max - ~/.cache/dev.syspeek/syspeek/"
+        QStringLiteral("3600 samples max - ~/.cache/dev.crowsnest/crowsnest/"
                        "history.ring");
     settingsInfo.overlayLine = QStringLiteral(
         "wm GNOME Shell - pinned above - follows every desktop - "
         "click-through on - 430x191 at 200,120");
     settingsInfo.cloudLine = cloudSettingsLine(
         true,
-        QStringLiteral("/home/dev/.config/syspeek/cloud-rates.txt"),
+        QStringLiteral("/home/dev/.config/crowsnest/cloud-rates.txt"),
         parseCloudRateFile(QStringLiteral("# imported 2026-09-01\n"
                                           "aws/c7g.2xlarge = 0.2920\n")),
         QDateTime(QDate(2026, 10, 28), QTime(12, 0)).toMSecsSinceEpoch());
@@ -1402,7 +1412,7 @@ int main(int argc, char *argv[]) {
         // delivered report with a small backlog still on disk.
         RemoteOptions demoRemote;
         demoRemote.enabled = true;
-        demoRemote.url = QStringLiteral("https://relay.syspeek.dev");
+        demoRemote.url = QStringLiteral("https://relay.crowsnest.dev");
         demoRemote.token = QStringLiteral("0123456789abcdef0123456789abcdef");
         demoRemote.intervalMs = 15000;
         demoRemote.spoolMb = 8;
@@ -1460,7 +1470,7 @@ int main(int argc, char *argv[]) {
         const qint64 baseMs = QDateTime::currentMSecsSinceEpoch() - 900 * 1000;
         HistoryViewInfo info;
         info.enabled = true;
-        info.path = QStringLiteral("/home/dev/.cache/dev.syspeek/syspeek/"
+        info.path = QStringLiteral("/home/dev/.cache/dev.crowsnest/crowsnest/"
                                    "history.ring");
         info.count = 900;
         info.capacity = 3600;
@@ -1592,7 +1602,7 @@ int main(int argc, char *argv[]) {
     // Settings is five sections behind its own sub-nav, so one rail index is
     // not enough to see the page: the env var picks the section for local
     // captures without changing the CLI the CI loop drives.
-    if (const QByteArray section = qgetenv("SYSPEEK_SHOT_SETTINGS_SECTION");
+    if (const QByteArray section = qgetenv("CROWSNEST_SHOT_SETTINGS_SECTION");
         !section.isEmpty()) {
         if (auto *nav = panel.findChild<QListWidget *>(
                 QStringLiteral("ddSettingsNav"))) {

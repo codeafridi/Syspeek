@@ -116,7 +116,7 @@ struct CloudFleetStatus {
 };
 
 // M84: the outbound footprint, in one struct, so the page can state every
-// network action Syspeek takes on its own instead of leaving it in docs. The
+// network action Crowsnest takes on its own instead of leaving it in docs. The
 // guarantee it renders is the whole point of the cloud path: link-local reads
 // plus the user's own CLI login, nothing stored, nothing changed.
 struct CloudFootprint {
@@ -246,7 +246,7 @@ double cloudConsumerTotal(const QList<CloudConsumer> &consumers);
 // --- fleet inventory (M83) ------------------------------------------------
 // The account's own instances, listed by the provider's CLI instead of the
 // link-local metadata service, so the page can answer "how old is this box"
-// and "what else is in the account". Syspeek never reads or stores
+// and "what else is in the account". Crowsnest never reads or stores
 // credentials: the CLI uses the profile the user already configured.
 //
 // Grounding (each provider's own shipped client, kept /tmp/opencode/m83):

@@ -2,7 +2,7 @@
 #
 # build_portable.sh — build a self-contained (bundled-Qt) portable tarball.
 #
-# Produces dist/syspeek-portable.tar.gz, which runs on any glibc-based
+# Produces dist/crowsnest-portable.tar.gz, which runs on any glibc-based
 # Linux with glibc >= 2.34 WITHOUT Qt installed (Qt 6, ICU and the needed
 # system libraries are bundled). Verification matrix is in the README.
 #
@@ -18,7 +18,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../.." && pwd)"
 out_dir="${1:-$repo_root/dist}"
 mkdir -p "$out_dir"
-tarball="$out_dir/syspeek-portable.tar.gz"
+tarball="$out_dir/crowsnest-portable.tar.gz"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "error: docker is required to build the portable bundle" >&2
@@ -47,8 +47,8 @@ set -euo pipefail
 
   echo ">> bundling Qt and dependencies"
   rm -rf /outapp && mkdir -p /outapp/lib /outapp/plugins/platforms
-  cp /w/syspeek /outapp/
-  # M58a: stamp the bundle version (install.sh logs it; `syspeek vers`
+  cp /w/crowsnest /outapp/
+  # M58a: stamp the bundle version (install.sh logs it; `crowsnest vers`
   # prints it) straight from the CMake project version. The sed
   # expression uses double quotes: the container script travels inside
   # an outer single-quoted docker bash -lc body and any apostrophe here
@@ -57,7 +57,7 @@ set -euo pipefail
   version="$(sed -n -e "s/^CMAKE_PROJECT_VERSION:STATIC=//p" /w/CMakeCache.txt 2>/dev/null || true)"
   [ -n "$version" ] || version="unknown"
   echo "$version" > /outapp/VERSION
-  QTL="$(dirname "$(ldd /w/syspeek | awk "/libQt6Core/{print \$3}")")"
+  QTL="$(dirname "$(ldd /w/crowsnest | awk "/libQt6Core/{print \$3}")")"
   cp -aL "$QTL"/libQt6*.so* /outapp/lib/
   for p in "$(dirname "$QTL")"/../plugins/platforms /usr/lib64/qt6/plugins/platforms; do
     [ -d "$p" ] && cp -a "$p"/libqoffscreen.so "$p"/libqxcb.so /outapp/plugins/platforms/ 2>/dev/null || true
@@ -66,7 +66,7 @@ set -euo pipefail
   # Bundle every non-core shared library (dereferencing symlinks) until closure.
   core="libc\.so|libm\.so|libpthread|libdl\.so|librt\.so|libgcc_s|libstdc\+\+|ld-linux|libresolv|libnsl"
   for _ in 1 2 3 4 5; do
-    for t in /outapp/syspeek /outapp/lib/*.so* /outapp/plugins/platforms/*.so; do
+    for t in /outapp/crowsnest /outapp/lib/*.so* /outapp/plugins/platforms/*.so; do
       ldd "$t" 2>/dev/null | awk "{print \$3}"
     done | grep "^/" | sort -u | grep -vE "$core" | while read -r l; do
       b="$(basename "$l")"; [ -e "/outapp/lib/$b" ] || cp -L "$l" "/outapp/lib/$b" 2>/dev/null || true
@@ -78,14 +78,14 @@ set -euo pipefail
     "HERE=\$(CDPATH= cd -- \"\$(dirname -- \"\$0\")\" && pwd -P)" \
     "export LD_LIBRARY_PATH=\"\$HERE/lib:\$LD_LIBRARY_PATH\"" \
     "export QT_PLUGIN_PATH=\"\$HERE/plugins\"" \
-    "exec \"\$HERE/syspeek\" \"\$@\"" > /outapp/run.sh
+    "exec \"\$HERE/crowsnest\" \"\$@\"" > /outapp/run.sh
   chmod +x /outapp/run.sh
   cp /src/README.md /outapp/README.md 2>/dev/null || true
 
   # Desktop focus bridges so install.sh can set them up automatically.
   mkdir -p /outapp/bridge/gnome /outapp/bridge/kwin
-  cp -r /src/gnome_extension/syspeek-focus@codeafridi /outapp/bridge/gnome/ 2>/dev/null || true
-  cp -r /src/cpp/kwin_script/syspeek-focus /outapp/bridge/kwin/ 2>/dev/null || true
+  cp -r /src/gnome_extension/crowsnest-focus@codeafridi /outapp/bridge/gnome/ 2>/dev/null || true
+  cp -r /src/cpp/kwin_script/crowsnest-focus /outapp/bridge/kwin/ 2>/dev/null || true
 
   echo ">> package ready ($(du -sh /outapp | cut -f1))"
 } >&2
@@ -94,4 +94,4 @@ tar czf - -C /outapp .
 ' > "$tarball"
 
 echo ">> done: $(du -h "$tarball" | cut -f1) -> $tarball" >&2
-echo ">> install:  mkdir -p ~/.local/opt/syspeek && tar xzf $tarball -C ~/.local/opt/syspeek && ~/.local/opt/syspeek/run.sh" >&2
+echo ">> install:  mkdir -p ~/.local/opt/crowsnest && tar xzf $tarball -C ~/.local/opt/crowsnest && ~/.local/opt/crowsnest/run.sh" >&2

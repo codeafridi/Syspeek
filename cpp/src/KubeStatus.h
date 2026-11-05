@@ -53,7 +53,7 @@ struct PodRightSizing {
 };
 
 // Multi-context support (M90): the kubeconfig is the authority on which
-// clusters a user has, so Syspeek reads it rather than inventing a list.
+// clusters a user has, so Crowsnest reads it rather than inventing a list.
 //
 // Grounding (shipped kubectl, strings kept /tmp/opencode/m8791/m90/
 // kubectl.strings): the kubeconfig JSON schema kubectl itself emits for
@@ -159,7 +159,7 @@ struct KubeSnapshot {
     QList<DeprecationFinding> deprecations;
     QList<KubeContext> contexts;
     QString currentContext;   // as the kubeconfig marks it
-    QString selectedContext;  // what Syspeek is actually querying
+    QString selectedContext;  // what Crowsnest is actually querying
     int totalPods = 0;
     int issueCount = 0;
     int eventCount = 0;

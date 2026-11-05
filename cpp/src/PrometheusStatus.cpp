@@ -107,15 +107,15 @@ QString prometheusFleetText(const FleetStatus &fleet) {
 
     QStringList lines;
     lines.append(QStringLiteral(
-        "# HELP syspeek_fleet_peers_total Machines in [fleet] peers=, this "
+        "# HELP crowsnest_fleet_peers_total Machines in [fleet] peers=, this "
         "one excluded."));
-    lines.append(QStringLiteral("# TYPE syspeek_fleet_peers_total gauge"));
-    lines.append(gaugeInt("syspeek_fleet_peers_total", peerTotal));
+    lines.append(QStringLiteral("# TYPE crowsnest_fleet_peers_total gauge"));
+    lines.append(gaugeInt("crowsnest_fleet_peers_total", peerTotal));
     lines.append(QStringLiteral(
-        "# HELP syspeek_fleet_peers_online Peers whose last poll answered "
+        "# HELP crowsnest_fleet_peers_online Peers whose last poll answered "
         "with a usable snapshot."));
-    lines.append(QStringLiteral("# TYPE syspeek_fleet_peers_online gauge"));
-    lines.append(gaugeInt("syspeek_fleet_peers_online",
+    lines.append(QStringLiteral("# TYPE crowsnest_fleet_peers_online gauge"));
+    lines.append(gaugeInt("crowsnest_fleet_peers_online",
                           fleetOnlineCount(fleet)));
 
     auto appendFamily = [&lines, &labels](const QString &name,
@@ -138,24 +138,24 @@ QString prometheusFleetText(const FleetStatus &fleet) {
         }
     };
 
-    appendFamily(QStringLiteral("syspeek_fleet_peer_online"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_online"),
                  QStringLiteral("Whether the last poll of this peer returned "
                                 "a usable snapshot (1) or not (0)."),
                  QStringLiteral("gauge"), online);
-    appendFamily(QStringLiteral("syspeek_fleet_peer_cpu_percent"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_cpu_percent"),
                  QStringLiteral("Host CPU busy percent as the peer reports "
                                 "it."),
                  QStringLiteral("gauge"), cpu);
-    appendFamily(QStringLiteral("syspeek_fleet_peer_mem_available_bytes"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_mem_available_bytes"),
                  QStringLiteral("Peer available memory."),
                  QStringLiteral("gauge"), mem);
-    appendFamily(QStringLiteral("syspeek_fleet_peer_load1"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_load1"),
                  QStringLiteral("Peer 1m load average."),
                  QStringLiteral("gauge"), load);
-    appendFamily(QStringLiteral("syspeek_fleet_peer_uptime_seconds"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_uptime_seconds"),
                  QStringLiteral("Peer host uptime since boot."),
                  QStringLiteral("gauge"), uptime);
-    appendFamily(QStringLiteral("syspeek_fleet_peer_age_seconds"),
+    appendFamily(QStringLiteral("crowsnest_fleet_peer_age_seconds"),
                  QStringLiteral("Seconds since this machine last heard from "
                                 "the peer."),
                  QStringLiteral("gauge"), age);
@@ -168,70 +168,70 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (s.hostAvailable) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_host_cpu_percent Host CPU busy percent."));
-        lines.append(QStringLiteral("# TYPE syspeek_host_cpu_percent gauge"));
-        lines.append(gauge("syspeek_host_cpu_percent", s.hostCpuPercent));
+            "# HELP crowsnest_host_cpu_percent Host CPU busy percent."));
+        lines.append(QStringLiteral("# TYPE crowsnest_host_cpu_percent gauge"));
+        lines.append(gauge("crowsnest_host_cpu_percent", s.hostCpuPercent));
         lines.append(QStringLiteral(
-            "# HELP syspeek_host_steal_percent Host CPU steal percent."));
-        lines.append(QStringLiteral("# TYPE syspeek_host_steal_percent gauge"));
+            "# HELP crowsnest_host_steal_percent Host CPU steal percent."));
+        lines.append(QStringLiteral("# TYPE crowsnest_host_steal_percent gauge"));
         if (s.hostStealPercent >= 0.0) {
             lines.append(
-                gauge("syspeek_host_steal_percent", s.hostStealPercent));
+                gauge("crowsnest_host_steal_percent", s.hostStealPercent));
         }
         lines.append(QStringLiteral(
-            "# HELP syspeek_host_mem_total_bytes Host physical memory size."));
-        lines.append(QStringLiteral("# TYPE syspeek_host_mem_total_bytes gauge"));
+            "# HELP crowsnest_host_mem_total_bytes Host physical memory size."));
+        lines.append(QStringLiteral("# TYPE crowsnest_host_mem_total_bytes gauge"));
         if (s.hostMemTotalKb > 0) {
-            lines.append(gaugeInt("syspeek_host_mem_total_bytes",
+            lines.append(gaugeInt("crowsnest_host_mem_total_bytes",
                                   static_cast<long long>(s.hostMemTotalKb)
                                       * 1024));
         }
         lines.append(QStringLiteral(
-            "# HELP syspeek_host_mem_available_bytes Host available memory."));
+            "# HELP crowsnest_host_mem_available_bytes Host available memory."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_host_mem_available_bytes gauge"));
+            QStringLiteral("# TYPE crowsnest_host_mem_available_bytes gauge"));
         if (s.hostMemTotalKb > 0) {
-            lines.append(gaugeInt("syspeek_host_mem_available_bytes",
+            lines.append(gaugeInt("crowsnest_host_mem_available_bytes",
                                   static_cast<long long>(s.hostMemAvailableKb)
                                       * 1024));
         }
         lines.append(QStringLiteral(
-            "# HELP syspeek_host_disk_free_bytes Host free disk space."));
-        lines.append(QStringLiteral("# TYPE syspeek_host_disk_free_bytes gauge"));
+            "# HELP crowsnest_host_disk_free_bytes Host free disk space."));
+        lines.append(QStringLiteral("# TYPE crowsnest_host_disk_free_bytes gauge"));
         if (s.hostDiskTotalBytes > 0) {
-            lines.append(gaugeInt("syspeek_host_disk_free_bytes",
+            lines.append(gaugeInt("crowsnest_host_disk_free_bytes",
                                   static_cast<long long>(s.hostDiskFreeBytes)));
         }
-        lines.append(QStringLiteral("# HELP syspeek_host_load1 Host 1m load."));
-        lines.append(QStringLiteral("# TYPE syspeek_host_load1 gauge"));
-        lines.append(gauge("syspeek_host_load1", s.hostLoad1));
+        lines.append(QStringLiteral("# HELP crowsnest_host_load1 Host 1m load."));
+        lines.append(QStringLiteral("# TYPE crowsnest_host_load1 gauge"));
+        lines.append(gauge("crowsnest_host_load1", s.hostLoad1));
         if (s.kernelLimits.available) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_kernel_fd_allocated Allocated file descriptors."));
+                "# HELP crowsnest_kernel_fd_allocated Allocated file descriptors."));
             lines.append(
-                QStringLiteral("# TYPE syspeek_kernel_fd_allocated gauge"));
-            lines.append(gaugeInt("syspeek_kernel_fd_allocated",
+                QStringLiteral("# TYPE crowsnest_kernel_fd_allocated gauge"));
+            lines.append(gaugeInt("crowsnest_kernel_fd_allocated",
                                   static_cast<long long>(
                                       s.kernelLimits.fdAllocated)));
             lines.append(QStringLiteral(
-                "# HELP syspeek_kernel_fd_max File descriptor limit."));
-            lines.append(QStringLiteral("# TYPE syspeek_kernel_fd_max gauge"));
-            lines.append(gaugeInt("syspeek_kernel_fd_max",
+                "# HELP crowsnest_kernel_fd_max File descriptor limit."));
+            lines.append(QStringLiteral("# TYPE crowsnest_kernel_fd_max gauge"));
+            lines.append(gaugeInt("crowsnest_kernel_fd_max",
                                   static_cast<long long>(
                                       s.kernelLimits.fdMax)));
             if (s.kernelLimits.runningProcs >= 0) {
                 lines.append(QStringLiteral(
-                    "# HELP syspeek_kernel_pids_running Runnable processes."));
+                    "# HELP crowsnest_kernel_pids_running Runnable processes."));
                 lines.append(
-                    QStringLiteral("# TYPE syspeek_kernel_pids_running gauge"));
-                lines.append(gaugeInt("syspeek_kernel_pids_running",
+                    QStringLiteral("# TYPE crowsnest_kernel_pids_running gauge"));
+                lines.append(gaugeInt("crowsnest_kernel_pids_running",
                                       s.kernelLimits.runningProcs));
                 lines.append(QStringLiteral(
-                    "# HELP syspeek_kernel_pids_blocked Uninterruptible "
+                    "# HELP crowsnest_kernel_pids_blocked Uninterruptible "
                     "processes."));
                 lines.append(
-                    QStringLiteral("# TYPE syspeek_kernel_pids_blocked gauge"));
-                lines.append(gaugeInt("syspeek_kernel_pids_blocked",
+                    QStringLiteral("# TYPE crowsnest_kernel_pids_blocked gauge"));
+                lines.append(gaugeInt("crowsnest_kernel_pids_blocked",
                                       s.kernelLimits.blockedProcs));
             }
         }
@@ -242,29 +242,29 @@ QString prometheusText(const DisplaySnapshot &s) {
             QStringLiteral("app=\"%1\",pid=\"%2\"")
                 .arg(escapeLabel(s.appName), escapeLabel(s.pid));
         lines.append(QStringLiteral(
-            "# HELP syspeek_app_cpu_percent Focused app CPU percent."));
-        lines.append(QStringLiteral("# TYPE syspeek_app_cpu_percent gauge"));
+            "# HELP crowsnest_app_cpu_percent Focused app CPU percent."));
+        lines.append(QStringLiteral("# TYPE crowsnest_app_cpu_percent gauge"));
         lines.append(
-            QStringLiteral("syspeek_app_cpu_percent{%1} %2")
+            QStringLiteral("crowsnest_app_cpu_percent{%1} %2")
                 .arg(labels, num(s.cpuPercent)));
         lines.append(QStringLiteral(
-            "# HELP syspeek_app_rss_bytes Focused app resident memory."));
-        lines.append(QStringLiteral("# TYPE syspeek_app_rss_bytes gauge"));
-        lines.append(QStringLiteral("syspeek_app_rss_bytes{%1} %2")
+            "# HELP crowsnest_app_rss_bytes Focused app resident memory."));
+        lines.append(QStringLiteral("# TYPE crowsnest_app_rss_bytes gauge"));
+        lines.append(QStringLiteral("crowsnest_app_rss_bytes{%1} %2")
                          .arg(labels)
                          .arg(static_cast<long long>(s.rssKb) * 1024));
         lines.append(QStringLiteral(
-            "# HELP syspeek_app_threads Focused app threads."));
-        lines.append(QStringLiteral("# TYPE syspeek_app_threads gauge"));
+            "# HELP crowsnest_app_threads Focused app threads."));
+        lines.append(QStringLiteral("# TYPE crowsnest_app_threads gauge"));
         int threads = 0;
         for (const ProcessRow &row : s.processes) {
             threads += row.threads;
         }
         lines.append(
-            QStringLiteral("syspeek_app_threads{%1} %2").arg(labels).arg(threads));
+            QStringLiteral("crowsnest_app_threads{%1} %2").arg(labels).arg(threads));
         lines.append(QStringLiteral(
-            "# HELP syspeek_app_fds Focused app open file descriptors."));
-        lines.append(QStringLiteral("# TYPE syspeek_app_fds gauge"));
+            "# HELP crowsnest_app_fds Focused app open file descriptors."));
+        lines.append(QStringLiteral("# TYPE crowsnest_app_fds gauge"));
         int fds = 0;
         bool fdsValid = false;
         for (const ProcessRow &row : s.processes) {
@@ -274,36 +274,36 @@ QString prometheusText(const DisplaySnapshot &s) {
             }
         }
         if (fdsValid) {
-            lines.append(QStringLiteral("syspeek_app_fds{%1} %2")
+            lines.append(QStringLiteral("crowsnest_app_fds{%1} %2")
                              .arg(labels)
                              .arg(fds));
         }
     }
 
     lines.append(
-        QStringLiteral("# HELP syspeek_tcp_sockets TCP sockets by state."));
-    lines.append(QStringLiteral("# TYPE syspeek_tcp_sockets gauge"));
+        QStringLiteral("# HELP crowsnest_tcp_sockets TCP sockets by state."));
+    lines.append(QStringLiteral("# TYPE crowsnest_tcp_sockets gauge"));
     for (const auto &pair : s.socketStateCounts) {
-        lines.append(labeled("syspeek_tcp_sockets", QStringLiteral("state"),
+        lines.append(labeled("crowsnest_tcp_sockets", QStringLiteral("state"),
                              pair.first, pair.second));
     }
 
     if (!s.processNetTalkers.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_process_net_bytes_per_second Per-process tcp throughput."));
+            "# HELP crowsnest_process_net_bytes_per_second Per-process tcp throughput."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_process_net_bytes_per_second gauge"));
+            "# TYPE crowsnest_process_net_bytes_per_second gauge"));
         for (const ProcessNetTalker &talker : s.processNetTalkers) {
             const QString labels =
                 QStringLiteral("process=\"%1\",pid=\"%2\"")
                     .arg(escapeLabel(talker.name))
                     .arg(talker.pid);
             lines.append(
-                QStringLiteral("syspeek_process_net_bytes_per_second{%1,"
+                QStringLiteral("crowsnest_process_net_bytes_per_second{%1,"
                                "direction=\"rx\"} %2")
                     .arg(labels, num(talker.rxPerSec)));
             lines.append(
-                QStringLiteral("syspeek_process_net_bytes_per_second{%1,"
+                QStringLiteral("crowsnest_process_net_bytes_per_second{%1,"
                                "direction=\"tx\"} %2")
                     .arg(labels, num(talker.txPerSec)));
         }
@@ -311,21 +311,21 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (!s.processDiskTop.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_process_disk_bytes_per_second Per-process block i/o "
+            "# HELP crowsnest_process_disk_bytes_per_second Per-process block i/o "
             "throughput."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_process_disk_bytes_per_second gauge"));
+            "# TYPE crowsnest_process_disk_bytes_per_second gauge"));
         for (const ProcessDiskConsumer &consumer : s.processDiskTop) {
             const QString labels =
                 QStringLiteral("process=\"%1\",pid=\"%2\"")
                     .arg(escapeLabel(consumer.name))
                     .arg(consumer.pid);
             lines.append(
-                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                QStringLiteral("crowsnest_process_disk_bytes_per_second{%1,"
                                "direction=\"read\"} %2")
                     .arg(labels, num(consumer.readPerSec)));
             lines.append(
-                QStringLiteral("syspeek_process_disk_bytes_per_second{%1,"
+                QStringLiteral("crowsnest_process_disk_bytes_per_second{%1,"
                                "direction=\"write\"} %2")
                     .arg(labels, num(consumer.writePerSec)));
         }
@@ -333,9 +333,9 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (s.gpu.ok) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_gpu_utilization_percent GPU utilization."));
+            "# HELP crowsnest_gpu_utilization_percent GPU utilization."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_gpu_utilization_percent gauge"));
+            "# TYPE crowsnest_gpu_utilization_percent gauge"));
         for (const GpuDevice &device : s.gpu.devices) {
             const QString labels =
                 QStringLiteral("device=\"%1\",vendor=\"%2\",name=\"%3\"")
@@ -344,44 +344,44 @@ QString prometheusText(const DisplaySnapshot &s) {
                     .arg(escapeLabel(device.name));
             if (device.utilPercent >= 0.0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_utilization_percent{%1} %2")
+                    QStringLiteral("crowsnest_gpu_utilization_percent{%1} %2")
                         .arg(labels, num(device.utilPercent)));
             }
             if (device.memUsed > 0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_memory_used_bytes{%1} %2")
+                    QStringLiteral("crowsnest_gpu_memory_used_bytes{%1} %2")
                         .arg(labels)
                         .arg(device.memUsed));
             }
             if (device.memTotal > 0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_memory_total_bytes{%1} %2")
+                    QStringLiteral("crowsnest_gpu_memory_total_bytes{%1} %2")
                         .arg(labels)
                         .arg(device.memTotal));
             }
             if (device.tempC >= 0.0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_temperature_celsius{%1} %2")
+                    QStringLiteral("crowsnest_gpu_temperature_celsius{%1} %2")
                         .arg(labels, num(device.tempC)));
             }
             if (device.powerW >= 0.0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_power_watts{%1} %2")
+                    QStringLiteral("crowsnest_gpu_power_watts{%1} %2")
                         .arg(labels, num(device.powerW)));
             }
             if (device.clockMhz > 0) {
                 lines.append(
-                    QStringLiteral("syspeek_gpu_clock_mhz{%1} %2")
+                    QStringLiteral("crowsnest_gpu_clock_mhz{%1} %2")
                         .arg(labels)
                         .arg(device.clockMhz));
             }
         }
         if (!s.gpu.processes.isEmpty()) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_gpu_process_busy_percent Per-process gpu "
+                "# HELP crowsnest_gpu_process_busy_percent Per-process gpu "
                 "engine utilization."));
             lines.append(QStringLiteral(
-                "# TYPE syspeek_gpu_process_busy_percent gauge"));
+                "# TYPE crowsnest_gpu_process_busy_percent gauge"));
             for (const GpuProcess &process : s.gpu.processes) {
                 const QString labels =
                     QStringLiteral("process=\"%1\",pid=\"%2\"")
@@ -390,13 +390,13 @@ QString prometheusText(const DisplaySnapshot &s) {
                 if (process.busyPercent >= 0.0) {
                     lines.append(
                         QStringLiteral(
-                            "syspeek_gpu_process_busy_percent{%1} %2")
+                            "crowsnest_gpu_process_busy_percent{%1} %2")
                             .arg(labels, num(process.busyPercent)));
                 }
                 if (process.memBytes > 0) {
                     lines.append(
                         QStringLiteral(
-                            "syspeek_gpu_process_memory_bytes{%1} %2")
+                            "crowsnest_gpu_process_memory_bytes{%1} %2")
                             .arg(labels)
                             .arg(process.memBytes));
                 }
@@ -406,19 +406,19 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (s.sensors.available && !s.sensors.chips.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_sensor_celsius hwmon temperature reading."));
-        lines.append(QStringLiteral("# TYPE syspeek_sensor_celsius gauge"));
+            "# HELP crowsnest_sensor_celsius hwmon temperature reading."));
+        lines.append(QStringLiteral("# TYPE crowsnest_sensor_celsius gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_sensor_fan_rpm hwmon fan speed."));
-        lines.append(QStringLiteral("# TYPE syspeek_sensor_fan_rpm gauge"));
+            "# HELP crowsnest_sensor_fan_rpm hwmon fan speed."));
+        lines.append(QStringLiteral("# TYPE crowsnest_sensor_fan_rpm gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_sensor_power_watts hwmon power reading."));
-        lines.append(QStringLiteral("# TYPE syspeek_sensor_power_watts gauge"));
+            "# HELP crowsnest_sensor_power_watts hwmon power reading."));
+        lines.append(QStringLiteral("# TYPE crowsnest_sensor_power_watts gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_sensor_limit_celsius Configured critical "
+            "# HELP crowsnest_sensor_limit_celsius Configured critical "
             "temperature for the sensor."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_sensor_limit_celsius gauge"));
+            "# TYPE crowsnest_sensor_limit_celsius gauge"));
         for (const SensorChip &chip : s.sensors.chips) {
             for (const SensorReading &reading : chip.readings) {
                 const QString labels =
@@ -428,21 +428,21 @@ QString prometheusText(const DisplaySnapshot &s) {
                              sensorKindName(reading.kind));
                 if (reading.kind == SensorKind::Temperature) {
                     lines.append(
-                        QStringLiteral("syspeek_sensor_celsius{%1} %2")
+                        QStringLiteral("crowsnest_sensor_celsius{%1} %2")
                             .arg(labels, num(reading.value)));
                     if (reading.hasCrit) {
                         lines.append(
                             QStringLiteral(
-                                "syspeek_sensor_limit_celsius{%1} %2")
+                                "crowsnest_sensor_limit_celsius{%1} %2")
                                 .arg(labels, num(reading.crit)));
                     }
                 } else if (reading.kind == SensorKind::Fan) {
                     lines.append(
-                        QStringLiteral("syspeek_sensor_fan_rpm{%1} %2")
+                        QStringLiteral("crowsnest_sensor_fan_rpm{%1} %2")
                             .arg(labels, num(reading.value)));
                 } else if (reading.kind == SensorKind::Power) {
                     lines.append(
-                        QStringLiteral("syspeek_sensor_power_watts{%1} %2")
+                        QStringLiteral("crowsnest_sensor_power_watts{%1} %2")
                             .arg(labels, num(reading.value)));
                 }
             }
@@ -451,45 +451,45 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (!s.sensors.batteries.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_battery_charge_percent Battery charge."));
+            "# HELP crowsnest_battery_charge_percent Battery charge."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_battery_charge_percent gauge"));
+            "# TYPE crowsnest_battery_charge_percent gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_battery_energy_watt_hours Battery energy "
+            "# HELP crowsnest_battery_energy_watt_hours Battery energy "
             "remaining and full capacity."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_battery_energy_watt_hours gauge"));
+            "# TYPE crowsnest_battery_energy_watt_hours gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_battery_power_watts Battery charge/discharge "
+            "# HELP crowsnest_battery_power_watts Battery charge/discharge "
             "power."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_battery_power_watts gauge"));
+            "# TYPE crowsnest_battery_power_watts gauge"));
         for (const BatteryReading &battery : s.sensors.batteries) {
             const QString labels = QStringLiteral("battery=\"%1\"")
                                        .arg(escapeLabel(battery.name));
             if (battery.capacityPercent >= 0) {
                 lines.append(
-                    QStringLiteral("syspeek_battery_charge_percent{%1} %2")
+                    QStringLiteral("crowsnest_battery_charge_percent{%1} %2")
                         .arg(labels)
                         .arg(battery.capacityPercent));
             }
             if (battery.energyNowWh >= 0.0) {
                 lines.append(
                     QStringLiteral(
-                        "syspeek_battery_energy_watt_hours{%1,state=\"now\"} "
+                        "crowsnest_battery_energy_watt_hours{%1,state=\"now\"} "
                         "%2")
                         .arg(labels, num(battery.energyNowWh)));
             }
             if (battery.energyFullWh >= 0.0) {
                 lines.append(
                     QStringLiteral(
-                        "syspeek_battery_energy_watt_hours{%1,state=\"full\"}"
+                        "crowsnest_battery_energy_watt_hours{%1,state=\"full\"}"
                         " %2")
                         .arg(labels, num(battery.energyFullWh)));
             }
             if (battery.powerW >= 0.0) {
                 lines.append(
-                    QStringLiteral("syspeek_battery_power_watts{%1} %2")
+                    QStringLiteral("crowsnest_battery_power_watts{%1} %2")
                         .arg(labels, num(battery.powerW)));
             }
         }
@@ -497,12 +497,12 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (!s.sensors.adapters.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_ac_online AC adapter online state."));
-        lines.append(QStringLiteral("# TYPE syspeek_ac_online gauge"));
+            "# HELP crowsnest_ac_online AC adapter online state."));
+        lines.append(QStringLiteral("# TYPE crowsnest_ac_online gauge"));
         for (const AdapterReading &adapter : s.sensors.adapters) {
             lines.append(
                 QStringLiteral(
-                    "syspeek_ac_online{adapter=\"%1\",online=\"%2\"} %3")
+                    "crowsnest_ac_online{adapter=\"%1\",online=\"%2\"} %3")
                     .arg(escapeLabel(adapter.name),
                          adapter.online ? QStringLiteral("true")
                                         : QStringLiteral("false"))
@@ -512,30 +512,30 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (!s.interfaces.isEmpty()) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_net_rx_bytes_total Network receive bytes."));
-        lines.append(QStringLiteral("# TYPE syspeek_net_rx_bytes_total counter"));
+            "# HELP crowsnest_net_rx_bytes_total Network receive bytes."));
+        lines.append(QStringLiteral("# TYPE crowsnest_net_rx_bytes_total counter"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_net_tx_bytes_total Network transmit bytes."));
-        lines.append(QStringLiteral("# TYPE syspeek_net_tx_bytes_total counter"));
+            "# HELP crowsnest_net_tx_bytes_total Network transmit bytes."));
+        lines.append(QStringLiteral("# TYPE crowsnest_net_tx_bytes_total counter"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_net_rx_bytes_per_second Network receive rate."));
+            "# HELP crowsnest_net_rx_bytes_per_second Network receive rate."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_net_rx_bytes_per_second gauge"));
+            QStringLiteral("# TYPE crowsnest_net_rx_bytes_per_second gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_net_tx_bytes_per_second Network transmit rate."));
+            "# HELP crowsnest_net_tx_bytes_per_second Network transmit rate."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_net_tx_bytes_per_second gauge"));
+            QStringLiteral("# TYPE crowsnest_net_tx_bytes_per_second gauge"));
         for (const InterfaceRow &iface : s.interfaces) {
-            lines.append(labeled("syspeek_net_rx_bytes_total",
+            lines.append(labeled("crowsnest_net_rx_bytes_total",
                                  QStringLiteral("device"), iface.name,
                                  static_cast<double>(iface.rxBytes)));
-            lines.append(labeled("syspeek_net_tx_bytes_total",
+            lines.append(labeled("crowsnest_net_tx_bytes_total",
                                  QStringLiteral("device"), iface.name,
                                  static_cast<double>(iface.txBytes)));
-            lines.append(labeled("syspeek_net_rx_bytes_per_second",
+            lines.append(labeled("crowsnest_net_rx_bytes_per_second",
                                  QStringLiteral("device"), iface.name,
                                  iface.rxPerSec));
-            lines.append(labeled("syspeek_net_tx_bytes_per_second",
+            lines.append(labeled("crowsnest_net_tx_bytes_per_second",
                                  QStringLiteral("device"), iface.name,
                                  iface.txPerSec));
         }
@@ -543,30 +543,30 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (s.disksAvailable && !s.disksWarming) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_disk_read_bytes_per_second Disk read rate."));
+            "# HELP crowsnest_disk_read_bytes_per_second Disk read rate."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_disk_read_bytes_per_second gauge"));
+            "# TYPE crowsnest_disk_read_bytes_per_second gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_disk_write_bytes_per_second Disk write rate."));
+            "# HELP crowsnest_disk_write_bytes_per_second Disk write rate."));
         lines.append(QStringLiteral(
-            "# TYPE syspeek_disk_write_bytes_per_second gauge"));
+            "# TYPE crowsnest_disk_write_bytes_per_second gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_disk_io_util_percent Disk busy percent."));
-        lines.append(QStringLiteral("# TYPE syspeek_disk_io_util_percent gauge"));
+            "# HELP crowsnest_disk_io_util_percent Disk busy percent."));
+        lines.append(QStringLiteral("# TYPE crowsnest_disk_io_util_percent gauge"));
         lines.append(QStringLiteral(
-            "# HELP syspeek_disk_await_seconds Average I/O wait per op."));
-        lines.append(QStringLiteral("# TYPE syspeek_disk_await_seconds gauge"));
+            "# HELP crowsnest_disk_await_seconds Average I/O wait per op."));
+        lines.append(QStringLiteral("# TYPE crowsnest_disk_await_seconds gauge"));
         for (const DiskRow &disk : s.disks) {
-            lines.append(labeled("syspeek_disk_read_bytes_per_second",
+            lines.append(labeled("crowsnest_disk_read_bytes_per_second",
                                  QStringLiteral("device"), disk.name,
                                  disk.readKbPerSec * 1024.0));
-            lines.append(labeled("syspeek_disk_write_bytes_per_second",
+            lines.append(labeled("crowsnest_disk_write_bytes_per_second",
                                  QStringLiteral("device"), disk.name,
                                  disk.writeKbPerSec * 1024.0));
-            lines.append(labeled("syspeek_disk_io_util_percent",
+            lines.append(labeled("crowsnest_disk_io_util_percent",
                                  QStringLiteral("device"), disk.name,
                                  disk.utilPercent));
-            lines.append(labeled("syspeek_disk_await_seconds",
+            lines.append(labeled("crowsnest_disk_await_seconds",
                                  QStringLiteral("device"), disk.name,
                                  disk.readAwaitMs / 1000.0));
         }
@@ -574,85 +574,85 @@ QString prometheusText(const DisplaySnapshot &s) {
 
     if (s.cgroupAvailable) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_cgroup_mem_usage_bytes Focused app cgroup memory."));
-        lines.append(QStringLiteral("# TYPE syspeek_cgroup_mem_usage_bytes gauge"));
-        lines.append(gaugeInt("syspeek_cgroup_mem_usage_bytes",
+            "# HELP crowsnest_cgroup_mem_usage_bytes Focused app cgroup memory."));
+        lines.append(QStringLiteral("# TYPE crowsnest_cgroup_mem_usage_bytes gauge"));
+        lines.append(gaugeInt("crowsnest_cgroup_mem_usage_bytes",
                               static_cast<long long>(s.cgroupMemUsage)));
         if (s.cgroupMemLimit >= 0) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cgroup_mem_limit_bytes Focused app cgroup "
+                "# HELP crowsnest_cgroup_mem_limit_bytes Focused app cgroup "
                 "memory limit."));
             lines.append(QStringLiteral(
-                "# TYPE syspeek_cgroup_mem_limit_bytes gauge"));
-            lines.append(gaugeInt("syspeek_cgroup_mem_limit_bytes",
+                "# TYPE crowsnest_cgroup_mem_limit_bytes gauge"));
+            lines.append(gaugeInt("crowsnest_cgroup_mem_limit_bytes",
                                   s.cgroupMemLimit));
         }
         if (s.cgroupHasMemPeak) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cgroup_mem_peak_bytes Focused app cgroup peak "
+                "# HELP crowsnest_cgroup_mem_peak_bytes Focused app cgroup peak "
                 "memory."));
             lines.append(QStringLiteral(
-                "# TYPE syspeek_cgroup_mem_peak_bytes gauge"));
-            lines.append(gaugeInt("syspeek_cgroup_mem_peak_bytes",
+                "# TYPE crowsnest_cgroup_mem_peak_bytes gauge"));
+            lines.append(gaugeInt("crowsnest_cgroup_mem_peak_bytes",
                                   static_cast<long long>(s.cgroupMemPeakBytes)));
         }
         lines.append(QStringLiteral(
-            "# HELP syspeek_cgroup_oom_events_total cgroup v2 oom events."));
+            "# HELP crowsnest_cgroup_oom_events_total cgroup v2 oom events."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_cgroup_oom_events_total counter"));
-        lines.append(gaugeInt("syspeek_cgroup_oom_events_total",
+            QStringLiteral("# TYPE crowsnest_cgroup_oom_events_total counter"));
+        lines.append(gaugeInt("crowsnest_cgroup_oom_events_total",
                               static_cast<long long>(s.cgroupOomEvents)));
         lines.append(QStringLiteral(
-            "# HELP syspeek_cgroup_oom_kills_total cgroup v2 oom kills."));
+            "# HELP crowsnest_cgroup_oom_kills_total cgroup v2 oom kills."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_cgroup_oom_kills_total counter"));
-        lines.append(gaugeInt("syspeek_cgroup_oom_kills_total",
+            QStringLiteral("# TYPE crowsnest_cgroup_oom_kills_total counter"));
+        lines.append(gaugeInt("crowsnest_cgroup_oom_kills_total",
                               static_cast<long long>(s.cgroupOomKills)));
         if (s.cgroupPidsCurrent >= 0) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cgroup_pids Focused app cgroup task count."));
-            lines.append(QStringLiteral("# TYPE syspeek_cgroup_pids gauge"));
-            lines.append(gaugeInt("syspeek_cgroup_pids", s.cgroupPidsCurrent));
+                "# HELP crowsnest_cgroup_pids Focused app cgroup task count."));
+            lines.append(QStringLiteral("# TYPE crowsnest_cgroup_pids gauge"));
+            lines.append(gaugeInt("crowsnest_cgroup_pids", s.cgroupPidsCurrent));
         }
     }
 
     // M85: what the provider billed this month. Cloud data
     // lags, so the gauges are point-in-time snapshots of the last query, not
-    // an accounting ledger; the series are Syspeek-own because the provider
+    // an accounting ledger; the series are Crowsnest-own because the provider
     // has no metric for "month to date at this moment".
     const CloudSpendStatus &spend = s.cloud.spend;
     if (spend.available && spend.monthToDateUsd >= 0.0) {
         const QString provider = cloudProviderName(spend.provider);
         lines.append(QStringLiteral(
-            "# HELP syspeek_cloud_spend_month_usd Billed cost this month, as "
+            "# HELP crowsnest_cloud_spend_month_usd Billed cost this month, as "
             "reported by the provider's cost API."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_cloud_spend_month_usd gauge"));
-        lines.append(labeled("syspeek_cloud_spend_month_usd", QStringLiteral("provider"),
+            QStringLiteral("# TYPE crowsnest_cloud_spend_month_usd gauge"));
+        lines.append(labeled("crowsnest_cloud_spend_month_usd", QStringLiteral("provider"),
                              provider, spend.monthToDateUsd));
         if (spend.forecastUsd >= 0.0) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cloud_spend_forecast_usd Month-end projection: "
+                "# HELP crowsnest_cloud_spend_forecast_usd Month-end projection: "
                 "billed so far plus the provider's forecast."));
             lines.append(QStringLiteral(
-                "# TYPE syspeek_cloud_spend_forecast_usd gauge"));
-            lines.append(labeled("syspeek_cloud_spend_forecast_usd",
+                "# TYPE crowsnest_cloud_spend_forecast_usd gauge"));
+            lines.append(labeled("crowsnest_cloud_spend_forecast_usd",
                                  QStringLiteral("provider"), provider,
                                  spend.forecastUsd));
         }
         if (!spend.services.isEmpty()) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cloud_spend_service_usd Billed cost this month "
+                "# HELP crowsnest_cloud_spend_service_usd Billed cost this month "
                 "per provider service."));
             lines.append(QStringLiteral(
-                "# TYPE syspeek_cloud_spend_service_usd gauge"));
+                "# TYPE crowsnest_cloud_spend_service_usd gauge"));
             for (const CloudSpendService &service : spend.services) {
                 if (service.usd < 0.0) {
                     continue;
                 }
                 lines.append(
                     QStringLiteral(
-                        "syspeek_cloud_spend_service_usd{provider=\"%1\","
+                        "crowsnest_cloud_spend_service_usd{provider=\"%1\","
                         "service=\"%2\"} %3")
                         .arg(escapeLabel(provider), escapeLabel(service.name),
                              num(service.usd)));
@@ -664,28 +664,28 @@ QString prometheusText(const DisplaySnapshot &s) {
     // accumulation the console owns, so -1 means "not reported yet").
     if (s.cloud.burn.valid) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_cloud_burn_usd_hour Current account spend per hour "
+            "# HELP crowsnest_cloud_burn_usd_hour Current account spend per hour "
             "against the trailing baseline."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_cloud_burn_usd_hour gauge"));
-        lines.append(gauge("syspeek_cloud_burn_usd_hour",
+            QStringLiteral("# TYPE crowsnest_cloud_burn_usd_hour gauge"));
+        lines.append(gauge("crowsnest_cloud_burn_usd_hour",
                            s.cloud.burn.currentPerHour));
         if (s.cloud.burn.ratio >= 0.0) {
             lines.append(QStringLiteral(
-                "# HELP syspeek_cloud_burn_ratio Current spend over the "
+                "# HELP crowsnest_cloud_burn_ratio Current spend over the "
                 "trailing daily average."));
             lines.append(
-                QStringLiteral("# TYPE syspeek_cloud_burn_ratio gauge"));
-            lines.append(gauge("syspeek_cloud_burn_ratio", s.cloud.burn.ratio));
+                QStringLiteral("# TYPE crowsnest_cloud_burn_ratio gauge"));
+            lines.append(gauge("crowsnest_cloud_burn_ratio", s.cloud.burn.ratio));
         }
     }
     if (s.idleContainers >= 0) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_idle_containers Containers below the idle limits "
+            "# HELP crowsnest_idle_containers Containers below the idle limits "
             "long enough to stop."));
-        lines.append(QStringLiteral("# TYPE syspeek_idle_containers gauge"));
+        lines.append(QStringLiteral("# TYPE crowsnest_idle_containers gauge"));
         lines.append(
-            gaugeInt("syspeek_idle_containers", s.idleContainers));
+            gaugeInt("crowsnest_idle_containers", s.idleContainers));
     }
 
     // M87: correlation state from the console. Emitted only once the HUD has
@@ -693,27 +693,27 @@ QString prometheusText(const DisplaySnapshot &s) {
     // fabricated zero incidents.
     if (s.alerts.pushed) {
         lines.append(QStringLiteral(
-            "# HELP syspeek_incidents_open Open correlated incidents."));
-        lines.append(QStringLiteral("# TYPE syspeek_incidents_open gauge"));
-        lines.append(gaugeInt("syspeek_incidents_open", s.alerts.openIncidents));
+            "# HELP crowsnest_incidents_open Open correlated incidents."));
+        lines.append(QStringLiteral("# TYPE crowsnest_incidents_open gauge"));
+        lines.append(gaugeInt("crowsnest_incidents_open", s.alerts.openIncidents));
         lines.append(QStringLiteral(
-            "# HELP syspeek_incidents_flapping Open incidents with a flapping "
+            "# HELP crowsnest_incidents_flapping Open incidents with a flapping "
             "member rule."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_incidents_flapping gauge"));
+            QStringLiteral("# TYPE crowsnest_incidents_flapping gauge"));
         lines.append(
-            gaugeInt("syspeek_incidents_flapping", s.alerts.flappingIncidents));
+            gaugeInt("crowsnest_incidents_flapping", s.alerts.flappingIncidents));
         lines.append(QStringLiteral(
-            "# HELP syspeek_alerts_flapping  Monitors whose rule is past the "
+            "# HELP crowsnest_alerts_flapping  Monitors whose rule is past the "
             "flap threshold; their outbound notifications are held."));
-        lines.append(QStringLiteral("# TYPE syspeek_alerts_flapping gauge"));
+        lines.append(QStringLiteral("# TYPE crowsnest_alerts_flapping gauge"));
         lines.append(
-            gaugeInt("syspeek_alerts_flapping", s.alerts.flappingRules));
+            gaugeInt("crowsnest_alerts_flapping", s.alerts.flappingRules));
         lines.append(QStringLiteral(
-            "# HELP syspeek_incidents_unowned Open incidents with no owner."));
+            "# HELP crowsnest_incidents_unowned Open incidents with no owner."));
         lines.append(
-            QStringLiteral("# TYPE syspeek_incidents_unowned gauge"));
-        lines.append(gaugeInt("syspeek_incidents_unowned", s.alerts.unownedOpen));
+            QStringLiteral("# TYPE crowsnest_incidents_unowned gauge"));
+        lines.append(gaugeInt("crowsnest_incidents_unowned", s.alerts.unownedOpen));
     }
 
     return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');

@@ -1,0 +1,41 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Crowsnest MSI: single-cab per-machine installer of the windeployqt
+       stage (build_msi.ps1 generates the payload fragment). Unsigned (no
+       Apple Developer/Windows Authenticode cert yet): SmartScreen
+       first-run is documented in docs/windows.md. -->
+  <Package
+      Name="Crowsnest"
+      Manufacturer="Crowsnest project"
+      Version="$(var.Version)"
+      Language="1033"
+      UpgradeCode="9C7C4470-8E27-4BDB-98C9-3774BF58B4F9"
+      InstallerVersion="500">
+    <SummaryInformation Description="Crowsnest local system HUD" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Crowsnest is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPPRODUCTICON" Value="CrowsnestIco" />
+    <Icon Id="CrowsnestIco" SourceFile="crowsnest.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Crowsnest" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="CrowsnestProgramMenu" Name="Crowsnest" />
+    </StandardDirectory>
+
+    <Component Id="Shortcuts" Directory="CrowsnestProgramMenu" Bitness="always64">
+      <Shortcut Id="CrowsnestStartMenuShortcut" Name="Crowsnest"
+                Description="Crowsnest local system HUD"
+                Target="[INSTALLFOLDER]crowsnest.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveCrowsnestProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKMU" Key="Software\Crowsnest" Name="installed"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="Crowsnest" Level="1">
+      <ComponentGroupRef Id="PayloadComponents" />
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+  </Package>
+</Wix>

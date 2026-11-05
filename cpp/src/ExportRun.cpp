@@ -153,7 +153,7 @@ int exportRun(int argc, char **argv) {
     ExportMeta meta;
     meta.hostname = QSysInfo::machineHostName();
     meta.platform = platformName();
-    meta.version = QString::fromLatin1(SYSPEEK_APP_VERSION);
+    meta.version = QString::fromLatin1(CROWSNEST_APP_VERSION);
     meta.intervalMs = intervalMs;
 
     const QString body = exportRows(rows, meta, args.format);

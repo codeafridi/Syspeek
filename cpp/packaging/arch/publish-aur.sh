@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# publish-aur.sh — push one of the AUR packages (syspeek / syspeek-bin).
+# publish-aur.sh — push one of the AUR packages (crowsnest / crowsnest-bin).
 #
-# Usage: bash cpp/packaging/arch/publish-aur.sh <syspeek|syspeek-bin>
+# Usage: bash cpp/packaging/arch/publish-aur.sh <crowsnest|crowsnest-bin>
 #
 # Requires once: an AUR account, an SSH key registered on aur.archlinux.org,
 # and `base-devel` (for updpkgsums/makepkg --printsrcinfo).
@@ -11,15 +11,15 @@ set -euo pipefail
 
 pkg="${1:-}"
 case "$pkg" in
-  syspeek|syspeek-bin) ;;
-  *) echo "usage: $0 <syspeek|syspeek-bin>" >&2; exit 2 ;;
+  crowsnest|crowsnest-bin) ;;
+  *) echo "usage: $0 <crowsnest|crowsnest-bin>" >&2; exit 2 ;;
 esac
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$pkg" = "syspeek" ]; then
+if [ "$pkg" = "crowsnest" ]; then
   src="$here/PKGBUILD"
 else
-  src="$here/syspeek-bin/PKGBUILD"
+  src="$here/crowsnest-bin/PKGBUILD"
 fi
 
 tmp="$(mktemp -d)"

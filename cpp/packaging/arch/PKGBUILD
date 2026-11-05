@@ -1,26 +1,28 @@
-# Maintainer: Syspeek <noreply@example.com>
-# Source build for AUR (package name: syspeek).
-# Publish: bash cpp/packaging/arch/publish-aur.sh syspeek
-pkgname=syspeek
+# Maintainer: Crowsnest <noreply@example.com>
+# Source build for AUR (package name: crowsnest).
+# Publish: bash cpp/packaging/arch/publish-aur.sh crowsnest
+pkgname=crowsnest
 pkgver=0.6.0
 pkgrel=1
 pkgdesc="Compact always-on-top HUD for focused-process and infra status"
 arch=('x86_64')
-url="https://github.com/codeafridi/Syspeek"
+url="https://github.com/codeafridi/Crowsnest"
 license=('MIT')
 depends=('qt6-base' 'hicolor-icon-theme')
 optdepends=('xdotool: focused-window detection on X11/XWayland sessions'
             'docker: Docker container health badges'
             'kubectl: Kubernetes workload health badges')
 makedepends=('cmake' 'gcc')
-# GitHub archive extracts to Syspeek-$pkgver/ (capital S).
-source=("$pkgname-$pkgver.tar.gz::https://github.com/codeafridi/Syspeek/archive/refs/tags/v$pkgver.tar.gz")
+conflicts=('syspeek')
+replaces=('syspeek')
+# GitHub archive extracts to Crowsnest-$pkgver/ (capital S).
+source=("$pkgname-$pkgver.tar.gz::https://github.com/codeafridi/Crowsnest/archive/refs/tags/v$pkgver.tar.gz")
 # Refreshed by the release workflow (publish .SRCINFO alongside). To refresh
 # locally on Arch: `updpkgsums && makepkg --printsrcinfo > .SRCINFO`.
 sha256sums=('9f22f5b518cbb447712e08064561259725634899a47573731899e753a9aea690')
 
 build() {
-    cmake -S "Syspeek-$pkgver/cpp" -B build -DCMAKE_BUILD_TYPE=Release
+    cmake -S "Crowsnest-$pkgver/cpp" -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j"$(nproc)"
 }
 
@@ -29,29 +31,29 @@ check() {
 }
 
 package() {
-    install -Dm0755 build/syspeek \
-        "$pkgdir/usr/bin/syspeek"
-    sed 's|@BINARY@|/usr/bin/syspeek|g' \
-        "Syspeek-$pkgver/cpp/packaging/syspeek.service.in" \
-        > syspeek.service
-    install -Dm0644 syspeek.service \
-        "$pkgdir/usr/lib/systemd/user/syspeek.service"
-    cat > syspeek.desktop <<'EOF'
+    install -Dm0755 build/crowsnest \
+        "$pkgdir/usr/bin/crowsnest"
+    sed 's|@BINARY@|/usr/bin/crowsnest|g' \
+        "Crowsnest-$pkgver/cpp/packaging/crowsnest.service.in" \
+        > crowsnest.service
+    install -Dm0644 crowsnest.service \
+        "$pkgdir/usr/lib/systemd/user/crowsnest.service"
+    cat > crowsnest.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
-Name=Syspeek
+Name=Crowsnest
 Comment=Compact on-screen focused-process monitor
-Exec=/usr/bin/syspeek
-Icon=syspeek
+Exec=/usr/bin/crowsnest
+Icon=crowsnest
 Terminal=false
 Categories=Utility;System;Monitor;
 EOF
-    # Validates on Arch with: desktop-file-validate syspeek.desktop
-    install -Dm0644 syspeek.desktop \
-        "$pkgdir/usr/share/applications/syspeek.desktop"
-    install -Dm0644 "Syspeek-$pkgver/cpp/packaging/icons/syspeek.svg" \
-        "$pkgdir/usr/share/icons/hicolor/scalable/apps/syspeek.svg"
-    install -Dm0644 "Syspeek-$pkgver/LICENSE" \
+    # Validates on Arch with: desktop-file-validate crowsnest.desktop
+    install -Dm0644 crowsnest.desktop \
+        "$pkgdir/usr/share/applications/crowsnest.desktop"
+    install -Dm0644 "Crowsnest-$pkgver/cpp/packaging/icons/crowsnest.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/crowsnest.svg"
+    install -Dm0644 "Crowsnest-$pkgver/LICENSE" \
         "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 

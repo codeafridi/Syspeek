@@ -1,16 +1,16 @@
 <services>
   <!-- OBS: fetches this repo at v0.6.0, extracts the .spec, and downloads
-       the matching tag tarball. Setup: create package `syspeek`, upload
-       _service + syspeek.spec (from cpp/packaging/rpm/), then
+       the matching tag tarball. Setup: create package `crowsnest`, upload
+       _service + crowsnest.spec (from cpp/packaging/rpm/), then
        `osc service runall`. -->
   <service name="tar_scm">
-    <param name="url">https://github.com/codeafridi/Syspeek.git</param>
+    <param name="url">https://github.com/codeafridi/Crowsnest.git</param>
     <param name="scm">git</param>
     <param name="revision">v0.6.0</param>
     <param name="versionformat">@PARENT_TAG@</param>
     <param name="versionrewrite-pattern">v(.*)</param>
-    <param name="extract">cpp/packaging/rpm/syspeek.spec,cpp/packaging/obs/syspeek.spec</param>
-    <param name="filename">syspeek</param>
+    <param name="extract">cpp/packaging/rpm/crowsnest.spec,cpp/packaging/obs/crowsnest.spec</param>
+    <param name="filename">crowsnest</param>
   </service>
   <service name="download_files"/>
   <service name="set_version"/>

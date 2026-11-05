@@ -1,7 +1,0 @@
-# .install file for the PPA/debian build. Paths are relative to the install
-# staging area created by dh_auto_install; cpp/build/syspeek is the cmake
-# output, the rest are generated from cpp/packaging templates by debian/rules.
-cpp/build/syspeek usr/bin/
-debian/syspeek.service usr/lib/systemd/user/
-debian/syspeek.desktop usr/share/applications/
-cpp/packaging/icons/syspeek.svg usr/share/icons/hicolor/scalable/apps/

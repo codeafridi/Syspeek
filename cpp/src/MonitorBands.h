@@ -20,7 +20,7 @@
 //   export enum GraphThresholdsStyleMode { Area = 'area', Dashed = 'dashed',
 //     DashedAndArea = 'dashed+area', Line = 'line', LineAndArea = 'line+area',
 //     Off = 'off', Series = 'series' }
-// Syspeek draws the "line+area" style in absolute mode: a dashed line at the
+// Crowsnest draws the "line+area" style in absolute mode: a dashed line at the
 // monitor's threshold value, a faint fill on the breaching side, and the
 // Grafana state word next to it. The bands come from the SAME editable
 // monitors the alert engine evaluates (M66), so editing a threshold moves the

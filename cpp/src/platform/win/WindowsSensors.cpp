@@ -11,11 +11,11 @@
 
 #if defined(__has_include)
 #if __has_include(<poclass.h>)
-#define SYSPEEK_HAVE_POCLASS 1
+#define CROWSNEST_HAVE_POCLASS 1
 #endif
 #endif
 
-#ifdef SYSPEEK_HAVE_POCLASS
+#ifdef CROWSNEST_HAVE_POCLASS
 #include <initguid.h>
 #include <poclass.h>
 #else

@@ -11,7 +11,7 @@
 
 class QNetworkAccessManager;
 
-// Alert delivery to a user-configured HTTP endpoint. Off by default: Syspeek
+// Alert delivery to a user-configured HTTP endpoint. Off by default: Crowsnest
 // never sends data anywhere unless the user configures a URL.
 //
 // Payload shapes are grounded on the shipped Prometheus Alertmanager 0.34.1

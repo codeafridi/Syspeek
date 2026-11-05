@@ -30,7 +30,7 @@ FocusSample FocusSampler::sample() const {
     const int self = static_cast<int>(::getpid());
 #endif
 
-    // Never report Syspeek's own overlay as the focused app. Clicking the
+    // Never report Crowsnest's own overlay as the focused app. Clicking the
     // overlay focuses it on some compositors; fall back to the last real app.
     if (pid == self) {
         if (m_lastIdentity.isValid()) {

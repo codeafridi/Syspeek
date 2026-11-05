@@ -1,6 +1,6 @@
-# Syspeek on macOS
+# Crowsnest on macOS
 
-Syspeek is a cross-platform HUD: the same panels, alerting and tooling
+Crowsnest is a cross-platform HUD: the same panels, alerting and tooling
 as the Linux build, with native macOS collectors behind the same
 `SystemBackend` seam.
 
@@ -9,31 +9,31 @@ as the Linux build, with native macOS collectors behind the same
 **One line (scripted, does steps 1-4 for you):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh
 ```
 
-It downloads the latest DMG, copies `Syspeek.app` into `/Applications`
+It downloads the latest DMG, copies `Crowsnest.app` into `/Applications`
 (falls back to `~/Applications` when not an admin), installs the
-LaunchAgent autostart, adds the `syspeek` command in `/usr/local/bin`
+LaunchAgent autostart, adds the `crowsnest` command in `/usr/local/bin`
 and clears the quarantine attribute (`curl` never applies it). It may
 prompt for the administrator password for `/Applications`; decline with
 Ctrl-C and install manually (steps 1-4) if you prefer.
 
 **Manual:**
 
-1. Download `Syspeek-<version>-macos.dmg` from
-   [releases](https://github.com/codeafridi/Syspeek/releases/latest).
-2. Open the DMG and drag **Syspeek.app** into **Applications**.
+1. Download `Crowsnest-<version>-macos.dmg` from
+   [releases](https://github.com/codeafridi/Crowsnest/releases/latest).
+2. Open the DMG and drag **Crowsnest.app** into **Applications**.
 3. First run (build is unsigned, Gatekeeper blocks it once):
-   - right-click `Syspeek.app` -> **Open** -> **Open**, or
-   - `xattr -d com.apple.quarantine /Applications/Syspeek.app`
+   - right-click `Crowsnest.app` -> **Open** -> **Open**, or
+   - `xattr -d com.apple.quarantine /Applications/Crowsnest.app`
 4. Optional service management: the scripted install above also deploys
-   the `syspeek` verb manager (start|stop|update|...); for the manual
+   the `crowsnest` verb manager (start|stop|update|...); for the manual
    flow, copy `cpp/packaging/install_macos.sh` from the repo and run it
    the same way.
 
 The app is a `LSUIElement` overlay: no Dock icon, no menu bar entry.
-Quit with `syspeek.sh stop` (below) or `pkill syspeek`; login autostart
+Quit with `crowsnest.sh stop` (below) or `pkill crowsnest`; login autostart
 is managed via launchd, so a plain quit is restarted on next login
 unless you disable the agent first.
 
@@ -44,16 +44,16 @@ unless you disable the agent first.
 ```
 bash cpp/packaging/install_macos.sh path    # print the managed binary path
 bash cpp/packaging/install_macos.sh run     # foreground run (no LaunchAgent)
-bash cpp/packaging/install_macos.sh enable  # install ~/Library/LaunchAgents/dev.syspeek.hud.plist
+bash cpp/packaging/install_macos.sh enable  # install ~/Library/LaunchAgents/dev.crowsnest.hud.plist
 bash cpp/packaging/install_macos.sh start   # load + start
 bash cpp/packaging/install_macos.sh status
-bash cpp/packaging/install_macos.sh logs    # tail ~/Library/Logs/Syspeek/syspeek.log
+bash cpp/packaging/install_macos.sh logs    # tail ~/Library/Logs/Crowsnest/crowsnest.log
 bash cpp/packaging/install_macos.sh stop|restart|disable|uninstall
 ```
 
-Logs: `~/Library/Logs/Syspeek/`.
-Config: `~/Library/Application Support/Syspeek/config.conf`.
-LaunchAgent: `~/Library/LaunchAgents/dev.syspeek.hud.plist`
+Logs: `~/Library/Logs/Crowsnest/`.
+Config: `~/Library/Application Support/Crowsnest/config.conf`.
+LaunchAgent: `~/Library/LaunchAgents/dev.crowsnest.hud.plist`
 (`RunAtLoad` + `KeepAlive`).
 
 ## Permissions
@@ -64,11 +64,11 @@ the HUD does not read window titles.
 
 ## What runs on macOS
 
-Diagnostics: `syspeek --dump` (headless JSON snapshot, used by CI),
-`syspeek --probe[=ticks]` (live pipeline diagnostic - one machine-parseable
+Diagnostics: `crowsnest --dump` (headless JSON snapshot, used by CI),
+`crowsnest --probe[=ticks]` (live pipeline diagnostic - one machine-parseable
 line per tick: focus provider name, per-app cpu/mem, host cpu/mem/disks),
-and `syspeek logs` (tails the universal hud.log under
-`~/Library/Caches/dev.syspeek/syspeek/hud.log`). If the HUD ever shows a
+and `crowsnest logs` (tails the universal hud.log under
+`~/Library/Caches/dev.crowsnest/crowsnest/hud.log`). If the HUD ever shows a
 status you cannot explain, run `--probe` and attach the output with the
 log tail.
 
@@ -92,10 +92,10 @@ log tail.
 
 ```
 bash cpp/packaging/build_macos.sh
-# -> cpp/build/packaging/Syspeek-<version>-macos.dmg
+# -> cpp/build/packaging/Crowsnest-<version>-macos.dmg
 ```
 
-Universal `arm64;x86_64` by default (`SYSPEEK_ARCHS` overrides), requires
+Universal `arm64;x86_64` by default (`CROWSNEST_ARCHS` overrides), requires
 Qt 6.8+ (`QT_ROOT_DIR` or `macdeployqt` in PATH) and Xcode CLT.
 Notarization is pending (no Apple Developer account yet); the DMG is
 signed-free until then.

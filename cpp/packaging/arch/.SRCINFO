@@ -1,18 +1,20 @@
-pkgbase = syspeek
+pkgbase = crowsnest
 	pkgdesc = Compact always-on-top HUD for focused-process and infra status
 	pkgver = 0.6.0
 	pkgrel = 1
-	url = https://github.com/codeafridi/Syspeek
+	url = https://github.com/codeafridi/Crowsnest
 	arch = x86_64
 	license = MIT
 	makedepends = cmake
 	makedepends = gcc
+	conflicts = syspeek
+	replaces = syspeek
 	depends = qt6-base
 	depends = hicolor-icon-theme
 	optdepends = xdotool: focused-window detection on X11/XWayland sessions
 	optdepends = docker: Docker container health badges
 	optdepends = kubectl: Kubernetes workload health badges
-	source = syspeek-0.6.0.tar.gz::https://github.com/codeafridi/Syspeek/archive/refs/tags/v0.6.0.tar.gz
+	source = crowsnest-0.6.0.tar.gz::https://github.com/codeafridi/Crowsnest/archive/refs/tags/v0.6.0.tar.gz
 	sha256sums = 9f22f5b518cbb447712e08064561259725634899a47573731899e753a9aea690
 
-pkgname = syspeek
+pkgname = crowsnest

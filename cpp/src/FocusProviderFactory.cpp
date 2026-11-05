@@ -126,7 +126,7 @@ std::unique_ptr<FocusedWindowProvider> createFocusProvider(const Config &config)
         // is not installed. Without X11 headers at build time the
         // honest fallback is the null provider (focus unavailable ->
         // host cards still fill, per-app card shows no-focus).
-#if defined(SYSPEEK_X11)
+#if defined(CROWSNEST_X11)
         return std::make_unique<CachingFocusProvider>(
             std::make_unique<X11FocusProvider>(), ttl);
 #else

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
 Stages the Windows release payload (windeployqt), generates the WiX
-payload fragment, and builds the Syspeek MSI with the WiX .NET tool.
+payload fragment, and builds the Crowsnest MSI with the WiX .NET tool.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File cpp/packaging/windows/build_msi.ps1 -Version 0.8.0
@@ -17,9 +17,9 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $cppBuild = Join-Path $repoRoot "cpp/build"
-$exe = Join-Path $cppBuild "Release/syspeek.exe"
+$exe = Join-Path $cppBuild "Release/crowsnest.exe"
 if (-not (Test-Path $exe)) {
-    throw "syspeek.exe not found: build Release first ($exe)"
+    throw "crowsnest.exe not found: build Release first ($exe)"
 }
 
 $stage = Join-Path $cppBuild "packaging/windows-stage"
@@ -27,7 +27,7 @@ if (Test-Path $stage) {
     Remove-Item -Recurse -Force $stage
 }
 New-Item -ItemType Directory -Force $stage | Out-Null
-$stagedExe = Join-Path $stage "syspeek.exe"
+$stagedExe = Join-Path $stage "crowsnest.exe"
 Copy-Item $exe $stagedExe
 
 # Assemble the Qt runtime next to the staged exe (Core/Gui/Widgets/
@@ -63,7 +63,7 @@ function Get-ComponentIds([string] $relativePath) {
 
 $directoryIds = @{"." = "INSTALLFOLDER" }
 $directoryXml = New-Object System.Text.StringBuilder
-# INSTALLFOLDER itself is authored in Syspeek.wxs; the payload fragment
+# INSTALLFOLDER itself is authored in Crowsnest.wxs; the payload fragment
 # only appends plugin subdirectories via DirectoryRef (a link, not a
 # redefinition - duplicate symbols collide otherwise).
 [void]$directoryXml.AppendLine('    <DirectoryRef Id="INSTALLFOLDER">')
@@ -130,19 +130,19 @@ wix --version
 
 $outDir = Join-Path $cppBuild "packaging"
 New-Item -ItemType Directory -Force $outDir | Out-Null
-$msiOut = Join-Path $outDir "Syspeek-$Version-windows.msi"
+$msiOut = Join-Path $outDir "Crowsnest-$Version-windows.msi"
 wix build -arch x64 -d Version=$Version -b $stage -b $PSScriptRoot -o $msiOut `
-    (Join-Path $PSScriptRoot "Syspeek.wxs") $payloadPath
+    (Join-Path $PSScriptRoot "Crowsnest.wxs") $payloadPath
 
 $hash = (Get-FileHash -Algorithm SHA256 $msiOut).Hash.ToLower()
-"$hash  Syspeek-$Version-windows.msi" |
-    Out-File -Encoding ascii (Join-Path $outDir "Syspeek-$Version-windows.msi.sha256")
+"$hash  Crowsnest-$Version-windows.msi" |
+    Out-File -Encoding ascii (Join-Path $outDir "Crowsnest-$Version-windows.msi.sha256")
 Write-Host "msi ok: $msiOut ($hash)"
 
 # Portable zip (Scoop-friendly; runs from any directory, no install).
-$zipOut = Join-Path $outDir "Syspeek-$Version-windows-portable.zip"
+$zipOut = Join-Path $outDir "Crowsnest-$Version-windows-portable.zip"
 Compress-Archive -Path "$stage/*" -DestinationPath $zipOut -Force
 $zipHash = (Get-FileHash -Algorithm SHA256 $zipOut).Hash.ToLower()
-"$zipHash  Syspeek-$Version-windows-portable.zip" |
-    Out-File -Encoding ascii (Join-Path $outDir "Syspeek-$Version-windows-portable.zip.sha256")
+"$zipHash  Crowsnest-$Version-windows-portable.zip" |
+    Out-File -Encoding ascii (Join-Path $outDir "Crowsnest-$Version-windows-portable.zip.sha256")
 Write-Host "portable ok: $zipOut ($zipHash)"

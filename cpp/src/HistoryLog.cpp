@@ -449,7 +449,7 @@ QString historyDefaultPath() {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (base.isEmpty()) {
-        base = QDir::tempPath() + QStringLiteral("/syspeek");
+        base = QDir::tempPath() + QStringLiteral("/crowsnest");
     }
     return base + QStringLiteral("/history.ring");
 }

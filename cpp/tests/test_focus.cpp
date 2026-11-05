@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
     check(fileProvider.focusedPid() == self, "pid-file provider resolves live pid");
 
     GnomePidFileProvider missingProvider(
-        QStringLiteral("/nonexistent/syspeek-active-pid"));
+        QStringLiteral("/nonexistent/crowsnest-active-pid"));
     check(missingProvider.focusedPid() == -1, "missing pid file -> -1");
 
     GnomePidFileProvider emptyPathProvider{QString()};
@@ -114,7 +114,7 @@ int main(int argc, char *argv[]) {
     FakeProvider selfProvider(self);
     FocusSampler selfSampler(&selfProvider);
     check(!selfSampler.sample().available,
-          "sampler ignores Syspeek's own pid (no prior app)");
+          "sampler ignores Crowsnest's own pid (no prior app)");
 
     FakeProvider fallbackProvider(live);
     FocusSampler fallbackSampler(&fallbackProvider);

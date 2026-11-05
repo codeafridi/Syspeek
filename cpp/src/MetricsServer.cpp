@@ -35,7 +35,7 @@ void denyUnauthorized(QTcpSocket *socket) {
     const QByteArray body =
         QByteArrayLiteral("401 unauthorized - send Authorization: Bearer <token>\n");
     const QByteArray response = QByteArrayLiteral("HTTP/1.1 401 Unauthorized\r\n")
-        + QByteArrayLiteral("WWW-Authenticate: Bearer realm=\"syspeek\"\r\n")
+        + QByteArrayLiteral("WWW-Authenticate: Bearer realm=\"crowsnest\"\r\n")
         + QByteArrayLiteral("Content-Type: text/plain\r\nContent-Length: ")
         + QByteArray::number(body.size())
         + QByteArrayLiteral("\r\nConnection: close\r\n\r\n") + body;

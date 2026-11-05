@@ -59,15 +59,15 @@ WebhookEvent eventFor(const Alert &alert, const QString &status,
 // under one key carries it, a mixed batch falls back to the receiver name.
 QString batchGroupKey(const QList<WebhookEvent> &events) {
     if (events.isEmpty()) {
-        return QStringLiteral("syspeek");
+        return QStringLiteral("crowsnest");
     }
     const QString group = events.first().group.trimmed();
     if (group.isEmpty()) {
-        return QStringLiteral("syspeek");
+        return QStringLiteral("crowsnest");
     }
     for (const WebhookEvent &event : events) {
         if (event.group != events.first().group) {
-            return QStringLiteral("syspeek");
+            return QStringLiteral("crowsnest");
         }
     }
     return group;
@@ -84,7 +84,7 @@ QByteArray alertmanagerWebhookPayload(const QList<WebhookEvent> &events) {
             {QStringLiteral("group"), event.group},
             {QStringLiteral("owner"),
              event.owner.isEmpty() ? QStringLiteral("unowned") : event.owner},
-            {QStringLiteral("source"), QStringLiteral("syspeek")}};
+            {QStringLiteral("source"), QStringLiteral("crowsnest")}};
         QJsonObject annotations{
             {QStringLiteral("summary"), event.title},
             {QStringLiteral("description"), event.detail}};
@@ -103,7 +103,7 @@ QByteArray alertmanagerWebhookPayload(const QList<WebhookEvent> &events) {
     QJsonObject groupLabels;
     groupLabels.insert(QStringLiteral("group"), groupKey);
     QJsonObject commonLabels{
-        {QStringLiteral("source"), QStringLiteral("syspeek")}};
+        {QStringLiteral("source"), QStringLiteral("crowsnest")}};
     bool sameOwner = !events.isEmpty();
     for (const WebhookEvent &event : events) {
         if (event.owner != events.first().owner) {
@@ -121,7 +121,7 @@ QByteArray alertmanagerWebhookPayload(const QList<WebhookEvent> &events) {
         {QStringLiteral("version"), QStringLiteral("4")},
         {QStringLiteral("groupKey"), groupKey},
         {QStringLiteral("truncatedAlerts"), 0},
-        {QStringLiteral("receiver"), QStringLiteral("syspeek")},
+        {QStringLiteral("receiver"), QStringLiteral("crowsnest")},
         {QStringLiteral("status"),
          events.isEmpty() ? QString()
                           : events.first().status},
@@ -139,9 +139,9 @@ QByteArray slackWebhookPayload(const QList<WebhookEvent> &events) {
                                  == QLatin1String("resolved");
     const QString text =
         resolved
-            ? QStringLiteral(":white_check_mark: Syspeek resolved %1 alert(s)")
+            ? QStringLiteral(":white_check_mark: Crowsnest resolved %1 alert(s)")
                   .arg(events.size())
-            : QStringLiteral(":rotating_light: Syspeek firing %1 alert(s)")
+            : QStringLiteral(":rotating_light: Crowsnest firing %1 alert(s)")
                   .arg(events.size());
 
     QJsonArray attachments;

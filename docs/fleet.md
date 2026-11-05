@@ -1,6 +1,6 @@
 # Fleet
 
-A Syspeek install watches one machine. Listing other machines in `[fleet]
+A Crowsnest install watches one machine. Listing other machines in `[fleet]
 peers=` makes this console show what they are doing too — how many answered,
 which one is hottest, which one is closest to running out of memory, which ones
 are gone.
@@ -24,7 +24,7 @@ server.
 On a box with no desktop session:
 
 ```sh
-syspeek serve
+crowsnest serve
 ```
 
 It runs the same sampler the HUD runs under a plain `QCoreApplication`, prints
@@ -121,7 +121,7 @@ rather than `0`, so a missing number never reads as a real one.
 
 `schema` is an integer that changes only when a field changes meaning. A reader
 refuses a peer whose schema is greater than its own and states the fix ("update
-Syspeek here to see it") instead of half-parsing a payload it does not
+Crowsnest here to see it") instead of half-parsing a payload it does not
 understand. Adding fields does not bump it; changing units or reusing a name
 does.
 
@@ -146,14 +146,14 @@ does.
 `/metrics` gains, once the first poll has completed:
 
 ```
-syspeek_fleet_peers_total 4
-syspeek_fleet_peers_online 3
-syspeek_fleet_peer_online{peer="db"} 1
-syspeek_fleet_peer_cpu_percent{peer="db"} 12.000
-syspeek_fleet_peer_mem_available_bytes{peer="db"} 5242880
-syspeek_fleet_peer_load1{peer="db"} 0.820
-syspeek_fleet_peer_uptime_seconds{peer="db"} 697637
-syspeek_fleet_peer_age_seconds{peer="db"} 3
+crowsnest_fleet_peers_total 4
+crowsnest_fleet_peers_online 3
+crowsnest_fleet_peer_online{peer="db"} 1
+crowsnest_fleet_peer_cpu_percent{peer="db"} 12.000
+crowsnest_fleet_peer_mem_available_bytes{peer="db"} 5242880
+crowsnest_fleet_peer_load1{peer="db"} 0.820
+crowsnest_fleet_peer_uptime_seconds{peer="db"} 697637
+crowsnest_fleet_peer_age_seconds{peer="db"} 3
 ```
 
 They are absent before the first poll — a scrape against a freshly started HUD
@@ -166,7 +166,7 @@ must not read `0 peers` as if the fleet were empty.
 | row says `401 unauthorized` | token differs between the two machines; set the same `[metrics] token` (or `[fleet] token`) on both |
 | row says `Connection refused` | peer is not running, or `[metrics] enabled`/`[fleet] share` is off there |
 | row says `404 … [fleet] share=false` | the peer serves Prometheus but refuses peers; set `share = true` |
-| row says `refused: schema 2 is newer` | update Syspeek on this machine |
+| row says `refused: schema 2 is newer` | update Crowsnest on this machine |
 | every row is `down` from another host but fine locally | `bind` is still `127.0.0.1` on the peer |
 | `serve: nothing to serve` | both `[metrics] enabled` and `[fleet] share` are off |
 

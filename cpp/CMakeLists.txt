@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(syspeek
+project(crowsnest
     VERSION 0.11.2
-    DESCRIPTION "Syspeek HUD (Qt 6 Widgets)"
+    DESCRIPTION "Crowsnest HUD (Qt 6 Widgets)"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -22,7 +22,7 @@ if(UNIX AND NOT APPLE)
     find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
 
-add_library(syspeek_core STATIC
+add_library(crowsnest_core STATIC
     src/HudWindow.cpp
     src/HudWindow.h
     src/DashboardPanel.cpp
@@ -244,7 +244,7 @@ add_library(syspeek_core STATIC
     src/platform/null/NullBackend.h)
 
 if(UNIX AND NOT APPLE)
-    target_sources(syspeek_core PRIVATE
+    target_sources(crowsnest_core PRIVATE
         src/platform/linux/LinuxBackend.cpp
         src/platform/linux/LinuxBackend.h
         src/platform/linux/LinuxGpu.cpp
@@ -255,7 +255,7 @@ elseif(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
-    target_sources(syspeek_core PRIVATE
+    target_sources(crowsnest_core PRIVATE
         src/platform/mac/MacBackend.cpp
         src/platform/mac/MacBackend.h
         src/platform/mac/MacGpu.cpp
@@ -272,7 +272,7 @@ elseif(APPLE)
         src/platform/mac/MacFimStream.h)
 elseif(WIN32)
     find_package(Qt6 QUIET COMPONENTS DBus)
-    target_sources(syspeek_core PRIVATE
+    target_sources(crowsnest_core PRIVATE
         src/platform/win/WindowsBackend.cpp
         src/platform/win/WindowsBackend.h
         src/platform/win/WindowsSensors.cpp
@@ -282,58 +282,58 @@ elseif(WIN32)
         src/platform/win/WinLogSource.cpp
         src/platform/win/WinLogSource.h)
     if(TARGET Qt6::DBus)
-        target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+        target_link_libraries(crowsnest_core PUBLIC Qt6::DBus)
     endif()
-    target_link_libraries(syspeek_core PUBLIC
+    target_link_libraries(crowsnest_core PUBLIC
         iphlpapi ws2_32 psapi user32 advapi32 pdh wevtapi setupapi)
-    target_compile_definitions(syspeek_core PUBLIC
+    target_compile_definitions(crowsnest_core PUBLIC
         WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_WARNINGS)
 endif()
 
-target_include_directories(syspeek_core PUBLIC src)
-target_compile_definitions(syspeek_core PUBLIC
-    "SYSPEEK_APP_VERSION=\"${PROJECT_VERSION}\""
-    "SYSPEEK_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
-target_link_libraries(syspeek_core PUBLIC Qt6::Widgets Qt6::Network)
+target_include_directories(crowsnest_core PUBLIC src)
+target_compile_definitions(crowsnest_core PUBLIC
+    "CROWSNEST_APP_VERSION=\"${PROJECT_VERSION}\""
+    "CROWSNEST_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
+target_link_libraries(crowsnest_core PUBLIC Qt6::Widgets Qt6::Network)
 if(APPLE)
-    target_link_libraries(syspeek_core PUBLIC
+    target_link_libraries(crowsnest_core PUBLIC
         "-framework Cocoa" "-framework CoreFoundation" "-framework IOKit"
         "-framework OSLog" "-framework CoreServices")
-    target_compile_options(syspeek_core PUBLIC $<$<COMPILE_LANGUAGE:OBJCXX>:-Wno-deprecated-declarations>)
+    target_compile_options(crowsnest_core PUBLIC $<$<COMPILE_LANGUAGE:OBJCXX>:-Wno-deprecated-declarations>)
 elseif(UNIX)
-    target_link_libraries(syspeek_core PUBLIC Qt6::DBus)
+    target_link_libraries(crowsnest_core PUBLIC Qt6::DBus)
     find_package(X11 QUIET)
     if(X11_FOUND)
-        target_link_libraries(syspeek_core PUBLIC X11::X11)
-        target_compile_definitions(syspeek_core PUBLIC SYSPEEK_X11=1)
+        target_link_libraries(crowsnest_core PUBLIC X11::X11)
+        target_compile_definitions(crowsnest_core PUBLIC CROWSNEST_X11=1)
     else()
         message(WARNING
             "X11 dev headers not found; native X11 focus provider disabled")
     endif()
 endif()
-target_compile_options(syspeek_core PRIVATE
+target_compile_options(crowsnest_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>)
 
-add_executable(syspeek src/main.cpp)
-target_link_libraries(syspeek PRIVATE syspeek_core)
+add_executable(crowsnest src/main.cpp)
+target_link_libraries(crowsnest PRIVATE crowsnest_core)
 if(WIN32)
-    target_sources(syspeek PRIVATE
-        packaging/windows/syspeek.rc)
+    target_sources(crowsnest PRIVATE
+        packaging/windows/crowsnest.rc)
     # GUI subsystem: launching the HUD must never host it in a console
     # window (shipped GUI tools are subsystem 2 - e.g. Everything.exe;
     # console attachment for verb output is opt-in, see main.cpp).
-    set_target_properties(syspeek PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(crowsnest PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
 if(APPLE)
-    set_target_properties(syspeek PROPERTIES
+    set_target_properties(crowsnest PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_BUNDLE_NAME "Syspeek"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.syspeek.hud"
-        MACOSX_BUNDLE_EXECUTABLE_NAME "syspeek"
-        MACOSX_BUNDLE_INFO_STRING "Syspeek ${PROJECT_VERSION} - local system HUD"
-        MACOSX_BUNDLE_LONG_VERSION_STRING "syspeek ${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_NAME "Crowsnest"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.crowsnest.hud"
+        MACOSX_BUNDLE_EXECUTABLE_NAME "crowsnest"
+        MACOSX_BUNDLE_INFO_STRING "Crowsnest ${PROJECT_VERSION} - local system HUD"
+        MACOSX_BUNDLE_LONG_VERSION_STRING "crowsnest ${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_INFO_PLIST
@@ -342,65 +342,65 @@ endif()
 
 enable_testing()
 
-add_executable(syspeek_tests tests/test_hud_buttons.cpp)
-target_link_libraries(syspeek_tests PRIVATE syspeek_core)
+add_executable(crowsnest_tests tests/test_hud_buttons.cpp)
+target_link_libraries(crowsnest_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_focus_tests tests/test_focus.cpp)
-target_link_libraries(syspeek_focus_tests PRIVATE syspeek_core)
+add_executable(crowsnest_focus_tests tests/test_focus.cpp)
+target_link_libraries(crowsnest_focus_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_cpu_tests tests/test_cpu.cpp)
-target_link_libraries(syspeek_cpu_tests PRIVATE syspeek_core)
+add_executable(crowsnest_cpu_tests tests/test_cpu.cpp)
+target_link_libraries(crowsnest_cpu_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_memory_tests tests/test_memory.cpp)
-target_link_libraries(syspeek_memory_tests PRIVATE syspeek_core)
+add_executable(crowsnest_memory_tests tests/test_memory.cpp)
+target_link_libraries(crowsnest_memory_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_group_tests tests/test_group.cpp)
-target_link_libraries(syspeek_group_tests PRIVATE syspeek_core)
+add_executable(crowsnest_group_tests tests/test_group.cpp)
+target_link_libraries(crowsnest_group_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_sampler_tests tests/test_sampler.cpp)
-target_link_libraries(syspeek_sampler_tests PRIVATE syspeek_core)
+add_executable(crowsnest_sampler_tests tests/test_sampler.cpp)
+target_link_libraries(crowsnest_sampler_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_health_tests tests/test_health.cpp)
-target_link_libraries(syspeek_health_tests PRIVATE syspeek_core)
+add_executable(crowsnest_health_tests tests/test_health.cpp)
+target_link_libraries(crowsnest_health_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_provider_tests tests/test_providers.cpp)
-target_link_libraries(syspeek_provider_tests PRIVATE syspeek_core)
+add_executable(crowsnest_provider_tests tests/test_providers.cpp)
+target_link_libraries(crowsnest_provider_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_docker_tests tests/test_docker.cpp)
-target_link_libraries(syspeek_docker_tests PRIVATE syspeek_core)
+add_executable(crowsnest_docker_tests tests/test_docker.cpp)
+target_link_libraries(crowsnest_docker_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_config_tests tests/test_config.cpp)
-target_link_libraries(syspeek_config_tests PRIVATE syspeek_core)
+add_executable(crowsnest_config_tests tests/test_config.cpp)
+target_link_libraries(crowsnest_config_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_kube_tests tests/test_kube.cpp)
-target_link_libraries(syspeek_kube_tests PRIVATE syspeek_core)
+add_executable(crowsnest_kube_tests tests/test_kube.cpp)
+target_link_libraries(crowsnest_kube_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_adapter_tests tests/test_adapters.cpp)
-target_link_libraries(syspeek_adapter_tests PRIVATE syspeek_core)
+add_executable(crowsnest_adapter_tests tests/test_adapters.cpp)
+target_link_libraries(crowsnest_adapter_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_metrics_tests tests/test_metrics.cpp)
-target_link_libraries(syspeek_metrics_tests PRIVATE syspeek_core)
+add_executable(crowsnest_metrics_tests tests/test_metrics.cpp)
+target_link_libraries(crowsnest_metrics_tests PRIVATE crowsnest_core)
 
-add_executable(syspeek_screenshot EXCLUDE_FROM_ALL tools/screenshot.cpp)
-target_link_libraries(syspeek_screenshot PRIVATE syspeek_core)
+add_executable(crowsnest_screenshot EXCLUDE_FROM_ALL tools/screenshot.cpp)
+target_link_libraries(crowsnest_screenshot PRIVATE crowsnest_core)
 
-add_executable(syspeek_backend_tests tests/test_backend.cpp)
-target_link_libraries(syspeek_backend_tests PRIVATE syspeek_core)
+add_executable(crowsnest_backend_tests tests/test_backend.cpp)
+target_link_libraries(crowsnest_backend_tests PRIVATE crowsnest_core)
 
-add_test(NAME hud_buttons COMMAND syspeek_tests)
-add_test(NAME focus COMMAND syspeek_focus_tests)
-add_test(NAME cpu COMMAND syspeek_cpu_tests)
-add_test(NAME memory COMMAND syspeek_memory_tests)
-add_test(NAME group COMMAND syspeek_group_tests)
-add_test(NAME sampler COMMAND syspeek_sampler_tests)
-add_test(NAME health COMMAND syspeek_health_tests)
-add_test(NAME providers COMMAND syspeek_provider_tests)
-add_test(NAME docker COMMAND syspeek_docker_tests)
-add_test(NAME config COMMAND syspeek_config_tests)
-add_test(NAME kube COMMAND syspeek_kube_tests)
-add_test(NAME adapters COMMAND syspeek_adapter_tests)
-add_test(NAME metrics COMMAND syspeek_metrics_tests)
-add_test(NAME backend COMMAND syspeek_backend_tests)
+add_test(NAME hud_buttons COMMAND crowsnest_tests)
+add_test(NAME focus COMMAND crowsnest_focus_tests)
+add_test(NAME cpu COMMAND crowsnest_cpu_tests)
+add_test(NAME memory COMMAND crowsnest_memory_tests)
+add_test(NAME group COMMAND crowsnest_group_tests)
+add_test(NAME sampler COMMAND crowsnest_sampler_tests)
+add_test(NAME health COMMAND crowsnest_health_tests)
+add_test(NAME providers COMMAND crowsnest_provider_tests)
+add_test(NAME docker COMMAND crowsnest_docker_tests)
+add_test(NAME config COMMAND crowsnest_config_tests)
+add_test(NAME kube COMMAND crowsnest_kube_tests)
+add_test(NAME adapters COMMAND crowsnest_adapter_tests)
+add_test(NAME metrics COMMAND crowsnest_metrics_tests)
+add_test(NAME backend COMMAND crowsnest_backend_tests)
 
 set_tests_properties(hud_buttons focus cpu memory group sampler health providers docker config kube adapters metrics backend PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

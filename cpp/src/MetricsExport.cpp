@@ -225,7 +225,7 @@ QString exportJson(const QList<ExportRow> &rows, const ExportMeta &meta) {
         {QStringLiteral("hostname"), meta.hostname},
         {QStringLiteral("intervalMs"), meta.intervalMs},
         {QStringLiteral("samples"), samples}};
-    QJsonObject root{{QStringLiteral("syspeek"), body}};
+    QJsonObject root{{QStringLiteral("crowsnest"), body}};
     return QString::fromUtf8(
         QJsonDocument(root).toJson(QJsonDocument::Indented));
 }

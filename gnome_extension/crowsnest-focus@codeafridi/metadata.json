@@ -1,0 +1,6 @@
+{
+  "uuid": "crowsnest-focus@codeafridi",
+  "name": "Crowsnest Focus Bridge",
+  "description": "Shares the focused window PID with the local Crowsnest application.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"]
+}

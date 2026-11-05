@@ -231,7 +231,7 @@ int cloudPriceRun(int argc, char **argv) {
     QScopedPointer<QCoreApplication> app;
     if (QCoreApplication::instance() == nullptr) {
         int fakeArgc = 1;
-        char fakeName[] = "syspeek";
+        char fakeName[] = "crowsnest";
         char *fakeArgv[] = {fakeName, nullptr};
         app.reset(new QCoreApplication(fakeArgc, fakeArgv));
     }
@@ -254,7 +254,7 @@ int cloudPriceRun(int argc, char **argv) {
         const CloudProbeResult probe = probeCloudIdentity(options);
         if (probe.identity.provider == CloudProvider::None) {
             std::fprintf(stderr,
-                         "syspeek: --cloud-prices needs an AWS instance type\n"
+                         "crowsnest: --cloud-prices needs an AWS instance type\n"
                          "  %s\n"
                          "  pass --cloud-prices=<type> --region=<region> "
                          "when IMDS is not reachable\n",
@@ -265,7 +265,7 @@ int cloudPriceRun(int argc, char **argv) {
         }
         if (probe.identity.provider != CloudProvider::Aws) {
             std::fprintf(stderr,
-                         "syspeek: --cloud-prices imports AWS on-demand list "
+                         "crowsnest: --cloud-prices imports AWS on-demand list "
                          "prices only; this host reports %s\n"
                          "  write the rate by hand instead: %s = <usd per hour>\n",
                          qUtf8Printable(cloudProviderLabel(probe.identity.provider)),
@@ -281,7 +281,7 @@ int cloudPriceRun(int argc, char **argv) {
         }
     }
     if (instanceType.isEmpty()) {
-        std::fprintf(stderr, "syspeek: --cloud-prices needs an instance type\n");
+        std::fprintf(stderr, "crowsnest: --cloud-prices needs an instance type\n");
         return 1;
     }
     if (region.isEmpty()) {
@@ -291,7 +291,7 @@ int cloudPriceRun(int argc, char **argv) {
     const QString aws = QStandardPaths::findExecutable(QStringLiteral("aws"));
     if (aws.isEmpty()) {
         std::fprintf(stderr,
-                     "syspeek: the `aws` CLI is not on PATH - install it "
+                     "crowsnest: the `aws` CLI is not on PATH - install it "
                      "(https://docs.aws.amazon.com/cli/) and run again, or add "
                      "the rate by hand:\n  aws/%s = <usd per hour>\n",
                      qUtf8Printable(instanceType));
@@ -307,20 +307,20 @@ int cloudPriceRun(int argc, char **argv) {
     process.setProcessChannelMode(QProcess::SeparateChannels);
     process.start();
     if (!process.waitForStarted(5000)) {
-        std::fprintf(stderr, "syspeek: could not start the aws CLI (%s)\n",
+        std::fprintf(stderr, "crowsnest: could not start the aws CLI (%s)\n",
                      qUtf8Printable(process.errorString()));
         return 1;
     }
     if (!process.waitForFinished(60000)) {
         process.kill();
         process.waitForFinished(2000);
-        std::fprintf(stderr, "syspeek: aws pricing did not answer in 60s\n");
+        std::fprintf(stderr, "crowsnest: aws pricing did not answer in 60s\n");
         return 1;
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         const QString stderrText =
             QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
-        std::fprintf(stderr, "syspeek: aws pricing failed (exit %d)\n  %s\n",
+        std::fprintf(stderr, "crowsnest: aws pricing failed (exit %d)\n  %s\n",
                      process.exitCode(),
                      qUtf8Printable(stderrText.isEmpty()
                                         ? QStringLiteral("no error output")
@@ -332,7 +332,7 @@ int cloudPriceRun(int argc, char **argv) {
     const double rate = parseAwsPricingProducts(process.readAllStandardOutput(),
                                                 &parseError);
     if (rate < 0.0) {
-        std::fprintf(stderr, "syspeek: %s\n", qUtf8Printable(parseError));
+        std::fprintf(stderr, "crowsnest: %s\n", qUtf8Printable(parseError));
         return 1;
     }
 
@@ -340,7 +340,7 @@ int cloudPriceRun(int argc, char **argv) {
     QFile existing(ratesPath);
     if (existing.exists()) {
         if (!existing.open(QIODevice::ReadOnly)) {
-            std::fprintf(stderr, "syspeek: cannot read %s (%s)\n",
+            std::fprintf(stderr, "crowsnest: cannot read %s (%s)\n",
                          qUtf8Printable(ratesPath),
                          qUtf8Printable(existing.errorString()));
             return 1;
@@ -372,7 +372,7 @@ int cloudPriceRun(int argc, char **argv) {
     }
     QFile out(ratesPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        std::fprintf(stderr, "syspeek: cannot write %s (%s)\n",
+        std::fprintf(stderr, "crowsnest: cannot write %s (%s)\n",
                      qUtf8Printable(ratesPath),
                      qUtf8Printable(out.errorString()));
         return 1;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the Syspeek .deb inside a clean distribution container.
+# Build the Crowsnest .deb inside a clean distribution container.
 #
 # The package links the DISTRIBUTION's Qt6 (build_deb.sh does not bundle it),
 # so this script runs inside the oldest Ubuntu release the .deb targets and
@@ -42,8 +42,8 @@ cmake --build /work/cpp/build -j"$(nproc)"
 QT_QPA_PLATFORM=offscreen ctest --test-dir /work/cpp/build --output-on-failure
 
 # os-release sets VERSION to the distribution release name; the
-# package version is Syspeek's own.
-VERSION="${SYSPEEK_DEB_VERSION:-0.0.0}" \
+# package version is Crowsnest's own.
+VERSION="${CROWSNEST_DEB_VERSION:-0.0.0}" \
   bash /work/cpp/packaging/build_deb.sh
 mkdir -p /out
 cp /work/cpp/build/packaging/*.deb /out/

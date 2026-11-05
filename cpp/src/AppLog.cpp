@@ -16,7 +16,7 @@ QString cacheDirectory() {
     QString location = QStandardPaths::writableLocation(
         QStandardPaths::CacheLocation);
     if (location.isEmpty()) {
-        location = QStringLiteral("./syspeek-cache");
+        location = QStringLiteral("./crowsnest-cache");
     }
     QDir dir;
     if (!dir.mkpath(location)) {
@@ -77,7 +77,7 @@ void installAppMessageLogger() {
     if (file.open(QIODevice::Append | QIODevice::Text)) {
         rotateIfNeeded(file);
         const QString line = QStringLiteral(
-            "%1 === syspeek boot pid=%2 ===\n")
+            "%1 === crowsnest boot pid=%2 ===\n")
             .arg(QDateTime::currentDateTime().toString(
                 QStringLiteral("yyyy-MM-dd hh:mm:ss")))
             .arg(QCoreApplication::applicationPid());

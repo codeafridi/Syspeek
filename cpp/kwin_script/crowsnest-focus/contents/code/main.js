@@ -1,6 +1,6 @@
 function publish(pid) {
-    callDBus("org.syspeek.Focus", "/Focus",
-             "org.syspeek.Focus", "setFocusedPid",
+    callDBus("org.crowsnest.Focus", "/Focus",
+             "org.crowsnest.Focus", "setFocusedPid",
              (pid > 0 ? pid : 0));
 }
 

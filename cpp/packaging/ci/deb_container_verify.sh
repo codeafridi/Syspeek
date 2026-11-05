@@ -20,9 +20,9 @@ echo "install container: ${PRETTY_NAME}"
 apt-get update -qq
 apt-get install -y -qq /pkg/*.deb python3 >/dev/null
 
-echo "installed: $(dpkg-query -W -f='${Version}' syspeek)"
+echo "installed: $(dpkg-query -W -f='${Version}' crowsnest)"
 
-missing="$(ldd /usr/bin/syspeek | grep 'not found' || true)"
+missing="$(ldd /usr/bin/crowsnest | grep 'not found' || true)"
 if [ -n "$missing" ]; then
   echo "missing shared objects:"
   echo "$missing"
@@ -30,8 +30,8 @@ if [ -n "$missing" ]; then
 fi
 echo "shared objects: all resolved"
 
-/usr/bin/syspeek --dump > /tmp/syspeek-dump.json
-python3 - /tmp/syspeek-dump.json <<'PY'
+/usr/bin/crowsnest --dump > /tmp/crowsnest-dump.json
+python3 - /tmp/crowsnest-dump.json <<'PY'
 import json
 import sys
 
@@ -46,8 +46,8 @@ print("clean-room dump ok:", dump["platform"], dump["host"]["cores"],
       "cores,", dump["processCount"], "procs")
 PY
 
-/usr/bin/syspeek --probe 2 > /tmp/syspeek-probe.txt 2>&1
-cat /tmp/syspeek-probe.txt
-grep -q "probe summary requested=2 received=2" /tmp/syspeek-probe.txt
-grep -q "tickMs=" /tmp/syspeek-probe.txt
+/usr/bin/crowsnest --probe 2 > /tmp/crowsnest-probe.txt 2>&1
+cat /tmp/crowsnest-probe.txt
+grep -q "probe summary requested=2 received=2" /tmp/crowsnest-probe.txt
+grep -q "tickMs=" /tmp/crowsnest-probe.txt
 echo "clean-room probe ok"

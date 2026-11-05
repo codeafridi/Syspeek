@@ -1,6 +1,6 @@
 #pragma once
 
-// `syspeek serve`
+// `crowsnest serve`
 //
 // Headless: no window, no overlay, no notifications. Runs the same sampler the
 // HUD runs and leaves the endpoints up, so a machine without a desktop session

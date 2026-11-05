@@ -41,7 +41,7 @@ QStringList awsPricingArguments(const AwsPriceQuery &query);
 // usable price.
 double parseAwsPricingProducts(const QByteArray &json, QString *error);
 
-// `syspeek --cloud-prices[=<instanceType>]` — opt-in, user-initiated import.
+// `crowsnest --cloud-prices[=<instanceType>]` — opt-in, user-initiated import.
 // Never runs on a tick: it shells out to the AWS CLI the user already
-// installed, so Syspeek never reads or stores credentials.
+// installed, so Crowsnest never reads or stores credentials.
 int cloudPriceRun(int argc, char **argv);

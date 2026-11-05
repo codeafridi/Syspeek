@@ -504,12 +504,12 @@ int main(int argc, char *argv[]) {
     {
         DisplaySnapshot s;
         QString text = prometheusText(s);
-        check(!text.contains(QStringLiteral("syspeek_host_cpu_percent")),
+        check(!text.contains(QStringLiteral("crowsnest_host_cpu_percent")),
               "prometheus: host metrics omitted when host unavailable");
-        check(!text.contains(QStringLiteral("syspeek_app_")),
+        check(!text.contains(QStringLiteral("crowsnest_app_")),
               "prometheus: app metrics omitted when no focus");
         check(
-            text.contains(QStringLiteral("# HELP syspeek_tcp_sockets")),
+            text.contains(QStringLiteral("# HELP crowsnest_tcp_sockets")),
             "prometheus: socket state helper always present");
 
         s.hostAvailable = true;
@@ -527,17 +527,17 @@ int main(int argc, char *argv[]) {
         s.kernelLimits.blockedProcs = 0;
         text = prometheusText(s);
         check(text.contains(QStringLiteral(
-                  "syspeek_host_cpu_percent 34.500")),
+                  "crowsnest_host_cpu_percent 34.500")),
               "prometheus: host cpu gauge value");
-        check(text.contains(QStringLiteral("syspeek_host_load1 1.500")),
+        check(text.contains(QStringLiteral("crowsnest_host_load1 1.500")),
               "prometheus: load gauge value");
         check(text.contains(
-                  QStringLiteral("syspeek_kernel_fd_allocated 1234")),
+                  QStringLiteral("crowsnest_kernel_fd_allocated 1234")),
               "prometheus: kernel fd gauge");
-        check(text.contains(QStringLiteral("syspeek_kernel_pids_running 2")),
+        check(text.contains(QStringLiteral("crowsnest_kernel_pids_running 2")),
               "prometheus: runnable gauge");
         check(text.contains(
-                  QStringLiteral("syspeek_host_mem_total_bytes "
+                  QStringLiteral("crowsnest_host_mem_total_bytes "
                                  "17179869184")),
               "prometheus: memory in bytes");
 
@@ -555,9 +555,9 @@ int main(int argc, char *argv[]) {
                   "app=\"cu\\\"rsor \\\\weird\\n\",pid=\"508637\"")),
               "prometheus: label escaping (quote, backslash, newline)");
         check(text.contains(QStringLiteral(
-                  "syspeek_app_rss_bytes{app=\"cu\\\"rsor")),
+                  "crowsnest_app_rss_bytes{app=\"cu\\\"rsor")),
               "prometheus: app rss with labels");
-        check(text.contains(QStringLiteral("syspeek_app_fds{app=")),
+        check(text.contains(QStringLiteral("crowsnest_app_fds{app=")),
               "prometheus: app fd sum");
 
         InterfaceRow iface;
@@ -568,13 +568,13 @@ int main(int argc, char *argv[]) {
         s.interfaces.append(iface);
         text = prometheusText(s);
         check(text.contains(QStringLiteral(
-                  "syspeek_net_rx_bytes_total{device=\"eth0\"} 1000000000")),
+                  "crowsnest_net_rx_bytes_total{device=\"eth0\"} 1000000000")),
               "prometheus: interface counter total");
         check(text.contains(QStringLiteral(
-                  "syspeek_net_tx_bytes_per_second{device=\"eth0\"}")),
+                  "crowsnest_net_tx_bytes_per_second{device=\"eth0\"}")),
               "prometheus: interface rate gauge");
         check(text.contains(QStringLiteral(
-                  "# TYPE syspeek_net_rx_bytes_total counter")),
+                  "# TYPE crowsnest_net_rx_bytes_total counter")),
               "prometheus: counter type declared");
 
         DiskRow disk;
@@ -586,13 +586,13 @@ int main(int argc, char *argv[]) {
         s.disksAvailable = true;
         text = prometheusText(s);
         check(text.contains(QStringLiteral(
-                  "syspeek_disk_read_bytes_per_second{device=\"sda\"} 102400."
+                  "crowsnest_disk_read_bytes_per_second{device=\"sda\"} 102400."
                   "000")),
               "prometheus: disk rate in bytes");
         check(text.contains(QStringLiteral(
-                  "syspeek_disk_io_util_percent{device=\"sda\"} 52.300"))
+                  "crowsnest_disk_io_util_percent{device=\"sda\"} 52.300"))
                   && text.contains(QStringLiteral(
-                      "syspeek_disk_await_seconds{device=\"sda\"} 0.003")),
+                      "crowsnest_disk_await_seconds{device=\"sda\"} 0.003")),
               "prometheus: disk util + await in seconds");
 
         s.cgroupAvailable = true;
@@ -605,14 +605,14 @@ int main(int argc, char *argv[]) {
         s.cgroupPidsCurrent = 148;
         text = prometheusText(s);
         check(text.contains(
-                  QStringLiteral("syspeek_cgroup_mem_usage_bytes 7232409600")),
+                  QStringLiteral("crowsnest_cgroup_mem_usage_bytes 7232409600")),
               "prometheus: cgroup usage");
-        check(!text.contains(QStringLiteral("syspeek_cgroup_mem_limit_bytes")),
+        check(!text.contains(QStringLiteral("crowsnest_cgroup_mem_limit_bytes")),
               "prometheus: unlimited limit omitted");
         check(text.contains(QStringLiteral(
-                  "syspeek_cgroup_oom_kills_total 3")),
+                  "crowsnest_cgroup_oom_kills_total 3")),
               "prometheus: oom kill counter");
-        check(text.contains(QStringLiteral("syspeek_cgroup_pids 148")),
+        check(text.contains(QStringLiteral("crowsnest_cgroup_pids 148")),
               "prometheus: cgroup pids gauge");
 
         ProcessNetTalker talker;
@@ -624,17 +624,17 @@ int main(int argc, char *argv[]) {
         s.processNetTalkers.append(talker);
         text = prometheusText(s);
         check(text.contains(QStringLiteral(
-                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "crowsnest_process_net_bytes_per_second{process=\"cursor\","
                   "pid=\"508637\",direction=\"rx\"} 2048.000")),
               "prometheus: per-process rx gauge");
         check(text.contains(QStringLiteral(
-                  "syspeek_process_net_bytes_per_second{process=\"cursor\","
+                  "crowsnest_process_net_bytes_per_second{process=\"cursor\","
                   "pid=\"508637\",direction=\"tx\"} 512.000")),
               "prometheus: per-process tx gauge");
         s.processNetTalkers.clear();
         text = prometheusText(s);
         check(!text.contains(
-                  QStringLiteral("syspeek_process_net_bytes_per_second")),
+                  QStringLiteral("crowsnest_process_net_bytes_per_second")),
               "prometheus: talker block omitted when no traffic");
 
         ProcessDiskConsumer consumer;
@@ -645,17 +645,17 @@ int main(int argc, char *argv[]) {
         s.processDiskTop.append(consumer);
         text = prometheusText(s);
         check(text.contains(QStringLiteral(
-                  "syspeek_process_disk_bytes_per_second{process=\"dd\","
+                  "crowsnest_process_disk_bytes_per_second{process=\"dd\","
                   "pid=\"4242\",direction=\"read\"} 1024.000")),
               "prometheus: per-process disk read gauge");
         check(text.contains(QStringLiteral(
-                  "syspeek_process_disk_bytes_per_second{process=\"dd\","
+                  "crowsnest_process_disk_bytes_per_second{process=\"dd\","
                   "pid=\"4242\",direction=\"write\"} 8192.000")),
               "prometheus: per-process disk write gauge");
         s.processDiskTop.clear();
         text = prometheusText(s);
         check(!text.contains(
-                  QStringLiteral("syspeek_process_disk_bytes_per_second")),
+                  QStringLiteral("crowsnest_process_disk_bytes_per_second")),
               "prometheus: disk block omitted when no traffic");
     }
 
@@ -1279,7 +1279,7 @@ int main(int argc, char *argv[]) {
                                  QStringLiteral("4.0"),
                                  QStringLiteral("1048576")};
         DbmSnapshot snapshot;
-        snapshot.database = QStringLiteral("syspeek");
+        snapshot.database = QStringLiteral("crowsnest");
         check(parseDatabaseStat(row, snapshot), "dbm: parse database stat");
         check(snapshot.connections == 7 && snapshot.xactCommit == 1000
                   && snapshot.deadlocks == 1,
@@ -1580,7 +1580,7 @@ int main(int argc, char *argv[]) {
         scrape.hostAvailable = true;
         scrape.hostCpuPercent = 12.0;
         check(!prometheusText(scrape).contains(
-                  QStringLiteral("syspeek_incidents_open")),
+                  QStringLiteral("crowsnest_incidents_open")),
               "prometheus: no incident gauges before the console reports");
         scrape.alerts.pushed = true;
         scrape.alerts.openIncidents = 2;
@@ -1589,16 +1589,16 @@ int main(int argc, char *argv[]) {
         scrape.alerts.unownedOpen = 1;
         const QString exposition = prometheusText(scrape);
         check(exposition.contains(
-                  QStringLiteral("syspeek_incidents_open 2")),
+                  QStringLiteral("crowsnest_incidents_open 2")),
               "prometheus: open incident gauge");
         check(exposition.contains(
-                  QStringLiteral("syspeek_incidents_flapping 1")),
+                  QStringLiteral("crowsnest_incidents_flapping 1")),
               "prometheus: flapping incident gauge");
         check(exposition.contains(
-                  QStringLiteral("syspeek_alerts_flapping 1")),
+                  QStringLiteral("crowsnest_alerts_flapping 1")),
               "prometheus: flapping rule gauge");
         check(exposition.contains(
-                  QStringLiteral("syspeek_incidents_unowned 1")),
+                  QStringLiteral("crowsnest_incidents_unowned 1")),
               "prometheus: unowned incident gauge");
 
         const QString detail =
@@ -2527,18 +2527,18 @@ int main(int argc, char *argv[]) {
 
         DisplaySnapshot scrape;
         check(!prometheusText(scrape).contains(
-                  QStringLiteral("syspeek_cloud_burn_usd_hour")),
+                  QStringLiteral("crowsnest_cloud_burn_usd_hour")),
               "prometheus: no burn gauge without billed spend");
         scrape.cloud.burn = burn;
         const QString text = prometheusText(scrape);
-        check(text.contains(QStringLiteral("syspeek_cloud_burn_usd_hour "))
-                  && text.contains(QStringLiteral("syspeek_cloud_burn_ratio ")),
+        check(text.contains(QStringLiteral("crowsnest_cloud_burn_usd_hour "))
+                  && text.contains(QStringLiteral("crowsnest_cloud_burn_ratio ")),
               "prometheus: the burn gauge and ratio are exported");
-        check(!text.contains(QStringLiteral("syspeek_idle_containers")),
+        check(!text.contains(QStringLiteral("crowsnest_idle_containers")),
               "prometheus: idle containers absent until the console reports");
         scrape.idleContainers = 2;
         check(prometheusText(scrape).contains(
-                  QStringLiteral("syspeek_idle_containers 2")),
+                  QStringLiteral("crowsnest_idle_containers 2")),
               "prometheus: the idle container gauge is exported");
     }
 
@@ -2568,7 +2568,7 @@ int main(int argc, char *argv[]) {
         check(generic.value(QStringLiteral("truncatedAlerts")).toInt() == 0,
               "webhook: generic truncatedAlerts 0");
         check(generic.value(QStringLiteral("receiver")).toString()
-                  == QStringLiteral("syspeek"),
+                  == QStringLiteral("crowsnest"),
               "webhook: generic receiver");
         check(generic.value(QStringLiteral("status")).toString()
                   == QStringLiteral("firing"),
@@ -2618,7 +2618,7 @@ int main(int argc, char *argv[]) {
                     alertmanagerWebhookPayload({firing, other}))
                     .object();
             check(mixed.value(QStringLiteral("groupKey")).toString()
-                      == QStringLiteral("syspeek"),
+                      == QStringLiteral("crowsnest"),
                   "webhook: a mixed batch falls back to the receiver key");
         }
         check(annotations.value(QStringLiteral("summary")).toString()
@@ -2965,9 +2965,9 @@ int main(int argc, char *argv[]) {
 
         const QJsonObject root = QJsonDocument::fromJson(
             exportJson(rows, meta).toUtf8()).object();
-        check(root.contains(QStringLiteral("syspeek")),
+        check(root.contains(QStringLiteral("crowsnest")),
               "json: own namespace, not sysstat");
-        const QJsonObject body = root.value(QStringLiteral("syspeek")).toObject();
+        const QJsonObject body = root.value(QStringLiteral("crowsnest")).toObject();
         check(body.value(QStringLiteral("version")).toString()
                   == QStringLiteral("0.8.9")
                   && body.value(QStringLiteral("platform")).toString()
@@ -3459,12 +3459,12 @@ int main(int argc, char *argv[]) {
         DisplaySnapshot gpuSnap;
         gpuSnap.gpu = reading;
         const QString prom = prometheusText(gpuSnap);
-        check(prom.contains(QStringLiteral("syspeek_gpu_utilization_percent"))
-                  && prom.contains(QStringLiteral("syspeek_gpu_memory_total_bytes"))
-                  && prom.contains(QStringLiteral("syspeek_gpu_temperature_celsius")),
+        check(prom.contains(QStringLiteral("crowsnest_gpu_utilization_percent"))
+                  && prom.contains(QStringLiteral("crowsnest_gpu_memory_total_bytes"))
+                  && prom.contains(QStringLiteral("crowsnest_gpu_temperature_celsius")),
               "gpu: prometheus exposes device gauges when a gpu is present");
         DisplaySnapshot emptyGpu;
-        check(!prometheusText(emptyGpu).contains(QStringLiteral("syspeek_gpu_")),
+        check(!prometheusText(emptyGpu).contains(QStringLiteral("crowsnest_gpu_")),
               "gpu: prometheus omits gpu lines when no reading exists");
     }
 
@@ -3979,7 +3979,7 @@ int main(int argc, char *argv[]) {
             QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n\r\n"));
         check(okResponse.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
                   && okResponse.contains(QByteArrayLiteral(
-                         "syspeek_host_cpu_percent 12.500")),
+                         "crowsnest_host_cpu_percent 12.500")),
               "metrics server: no token configured serves the exposition");
         server.stop();
 
@@ -3996,7 +3996,7 @@ int main(int argc, char *argv[]) {
         check(denied.startsWith(QByteArrayLiteral("HTTP/1.1 401 Unauthorized"))
                   && denied.contains(QByteArrayLiteral("WWW-Authenticate: Bearer")),
               "metrics server: a scrape without the token gets 401 + challenge");
-        check(!denied.contains(QByteArrayLiteral("syspeek_host_cpu_percent")),
+        check(!denied.contains(QByteArrayLiteral("crowsnest_host_cpu_percent")),
               "metrics server: a refused scrape leaks no samples");
 
         const QByteArray wrongToken = roundTrip(
@@ -4013,7 +4013,7 @@ int main(int argc, char *argv[]) {
                               "Authorization: Bearer s3cret-token\r\n\r\n"));
         check(authorized.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
                   && authorized.contains(QByteArrayLiteral(
-                         "syspeek_host_cpu_percent 12.500")),
+                         "crowsnest_host_cpu_percent 12.500")),
               "metrics server: the token unlocks the exposition");
 
         const QByteArray headResponse = roundTrip(
@@ -4023,7 +4023,7 @@ int main(int argc, char *argv[]) {
         check(headResponse.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
                   && headResponse.contains(QByteArrayLiteral("Content-Length:"))
                   && !headResponse.contains(
-                         QByteArrayLiteral("syspeek_host_cpu_percent")),
+                         QByteArrayLiteral("crowsnest_host_cpu_percent")),
               "metrics server: HEAD reports the length without the body");
 
         const QByteArray notFound = roundTrip(
@@ -4128,9 +4128,9 @@ int main(int argc, char *argv[]) {
             port,
             QByteArrayLiteral("GET /metrics HTTP/1.1\r\nHost: x\r\n"
                               "Authorization: Bearer fleet-token\r\n\r\n"));
-        check(scrape.contains(QByteArrayLiteral("syspeek_fleet_peers_total 1"))
+        check(scrape.contains(QByteArrayLiteral("crowsnest_fleet_peers_total 1"))
                   && scrape.contains(
-                      QByteArrayLiteral("syspeek_fleet_peer_online{peer=\"db\"} 1")),
+                      QByteArrayLiteral("crowsnest_fleet_peer_online{peer=\"db\"} 1")),
               "fleet server: a scrape carries the peer gauges too");
         server.stop();
 
@@ -4152,7 +4152,7 @@ int main(int argc, char *argv[]) {
                               "Authorization: Bearer fleet-token\r\n\r\n"));
         check(stillScrapes.startsWith(QByteArrayLiteral("HTTP/1.1 200 OK"))
                   && stillScrapes.contains(
-                      QByteArrayLiteral("syspeek_host_cpu_percent 44.500")),
+                      QByteArrayLiteral("crowsnest_host_cpu_percent 44.500")),
               "fleet server: refusing peers leaves the scrape working");
         closedServer.stop();
 
@@ -4576,17 +4576,17 @@ int main(int argc, char *argv[]) {
         sensorSnap.sensors = collected;
         const QString prom = prometheusText(sensorSnap);
         check(prom.contains(QStringLiteral(
-                  "syspeek_sensor_celsius{chip=\"coretemp\""))
-                  && prom.contains(QStringLiteral("syspeek_sensor_fan_rpm"))
-                  && prom.contains(QStringLiteral("syspeek_sensor_power_watts"))
-                  && prom.contains(QStringLiteral("syspeek_sensor_limit_celsius")),
+                  "crowsnest_sensor_celsius{chip=\"coretemp\""))
+                  && prom.contains(QStringLiteral("crowsnest_sensor_fan_rpm"))
+                  && prom.contains(QStringLiteral("crowsnest_sensor_power_watts"))
+                  && prom.contains(QStringLiteral("crowsnest_sensor_limit_celsius")),
               "sensors: prometheus exposes per-sensor gauges with labels");
-        check(prom.contains(QStringLiteral("syspeek_battery_charge_percent"))
+        check(prom.contains(QStringLiteral("crowsnest_battery_charge_percent"))
                   && prom.contains(QStringLiteral(
-                      "syspeek_battery_energy_watt_hours"))
-                  && prom.contains(QStringLiteral("syspeek_ac_online{"))
+                      "crowsnest_battery_energy_watt_hours"))
+                  && prom.contains(QStringLiteral("crowsnest_ac_online{"))
                   && !prometheusText(DisplaySnapshot{})
-                          .contains(QStringLiteral("syspeek_sensor_")),
+                          .contains(QStringLiteral("crowsnest_sensor_")),
               "sensors: prometheus exposes battery gauges only when present");
 
         AlertEngine engine;
@@ -5763,29 +5763,29 @@ int main(int argc, char *argv[]) {
                "\"%~dp0fake.ps1\" %*\r\n");
         const QByteArray ps1 =
             "$ErrorActionPreference = \'Stop\'\r\n"
-            "$out = $env:SYSPEEK_FAKE_STDOUT\r\n"
-            "if ($env:SYSPEEK_FAKE_ALT_MATCH -and $args.Count -ge 2 -and "
-            "$args[1] -eq $env:SYSPEEK_FAKE_ALT_MATCH) { $out = "
-            "$env:SYSPEEK_FAKE_ALT_STDOUT }\r\n"
-            "Add-Content -Path $env:SYSPEEK_FAKE_ARGV_LOG -Value ($args -join "
+            "$out = $env:CROWSNEST_FAKE_STDOUT\r\n"
+            "if ($env:CROWSNEST_FAKE_ALT_MATCH -and $args.Count -ge 2 -and "
+            "$args[1] -eq $env:CROWSNEST_FAKE_ALT_MATCH) { $out = "
+            "$env:CROWSNEST_FAKE_ALT_STDOUT }\r\n"
+            "Add-Content -Path $env:CROWSNEST_FAKE_ARGV_LOG -Value ($args -join "
             "' ')\r\n"
-            "if ($env:SYSPEEK_FAKE_STDERR) { "
+            "if ($env:CROWSNEST_FAKE_STDERR) { "
             "[Console]::Error.Write([IO.File]::ReadAllText("
-            "$env:SYSPEEK_FAKE_STDERR)) }\r\n"
+            "$env:CROWSNEST_FAKE_STDERR)) }\r\n"
             "if ($out) { [Console]::Out.Write([IO.File]::ReadAllText($out)) "
             "}\r\n"
-            "if ($env:SYSPEEK_FAKE_SLEEP) { Start-Sleep -Seconds "
-            "([int]$env:SYSPEEK_FAKE_SLEEP) }\r\n"
-            "exit [int]$env:SYSPEEK_FAKE_EXIT\r\n";
+            "if ($env:CROWSNEST_FAKE_SLEEP) { Start-Sleep -Seconds "
+            "([int]$env:CROWSNEST_FAKE_SLEEP) }\r\n"
+            "exit [int]$env:CROWSNEST_FAKE_EXIT\r\n";
         const QString suffix = QStringLiteral(".cmd");
 #else
         const QByteArray script =
             "#!/bin/sh\n"
-            "printf '%s\\n' \"$*\" >> \"$SYSPEEK_FAKE_ARGV_LOG\"\n"
-            "if [ -n \"${SYSPEEK_FAKE_SLEEP:-}\" ]; then sleep \"$SYSPEEK_FAKE_SLEEP\"; fi\n"
-            "if [ -n \"${SYSPEEK_FAKE_STDERR:-}\" ]; then cat \"$SYSPEEK_FAKE_STDERR\" >&2; fi\n"
-            "if [ -n \"${SYSPEEK_FAKE_STDOUT:-}\" ]; then cat \"$SYSPEEK_FAKE_STDOUT\"; fi\n"
-            "exit \"${SYSPEEK_FAKE_EXIT:-0}\"\n";
+            "printf '%s\\n' \"$*\" >> \"$CROWSNEST_FAKE_ARGV_LOG\"\n"
+            "if [ -n \"${CROWSNEST_FAKE_SLEEP:-}\" ]; then sleep \"$CROWSNEST_FAKE_SLEEP\"; fi\n"
+            "if [ -n \"${CROWSNEST_FAKE_STDERR:-}\" ]; then cat \"$CROWSNEST_FAKE_STDERR\" >&2; fi\n"
+            "if [ -n \"${CROWSNEST_FAKE_STDOUT:-}\" ]; then cat \"$CROWSNEST_FAKE_STDOUT\"; fi\n"
+            "exit \"${CROWSNEST_FAKE_EXIT:-0}\"\n";
         const QString suffix;
 #endif
         bool wroteAll = true;
@@ -5822,7 +5822,7 @@ int main(int argc, char *argv[]) {
 #endif
         };
         qputenv("PATH", fakePath(binDir, oldPath).toUtf8());
-        qputenv("SYSPEEK_FAKE_ARGV_LOG", argvLog.toUtf8());
+        qputenv("CROWSNEST_FAKE_ARGV_LOG", argvLog.toUtf8());
         {
             const QString resolved =
                 QStandardPaths::findExecutable(QStringLiteral("aws"));
@@ -5834,14 +5834,14 @@ int main(int argc, char *argv[]) {
                                  const QByteArray &stderrData, int exitCode) {
             writeFile(outFile, stdoutData, false);
             writeFile(errFile, stderrData, false);
-            qputenv("SYSPEEK_FAKE_STDOUT",
+            qputenv("CROWSNEST_FAKE_STDOUT",
                     stdoutData.isEmpty() ? QByteArray()
                                          : outFile.toUtf8());
-            qputenv("SYSPEEK_FAKE_STDERR",
+            qputenv("CROWSNEST_FAKE_STDERR",
                     stderrData.isEmpty() ? QByteArray()
                                          : errFile.toUtf8());
-            qputenv("SYSPEEK_FAKE_EXIT", QByteArray::number(exitCode));
-            qunsetenv("SYSPEEK_FAKE_SLEEP");
+            qputenv("CROWSNEST_FAKE_EXIT", QByteArray::number(exitCode));
+            qunsetenv("CROWSNEST_FAKE_SLEEP");
             QFile::remove(argvLog);
         };
         const auto lastArgv = [&argvLog]() {
@@ -5980,7 +5980,7 @@ int main(int argc, char *argv[]) {
 
         // A CLI that hangs: the budget must end it, and the card must say so.
         setFake(awsListing, QByteArray(), 0);
-        qputenv("SYSPEEK_FAKE_SLEEP", "6");
+        qputenv("CROWSNEST_FAKE_SLEEP", "6");
         CloudFleetOptions hangOptions;
         hangOptions.timeoutMs = 2000;
         hangOptions.cliPath = binDir + QStringLiteral("/aws") + suffix;
@@ -5989,7 +5989,7 @@ int main(int argc, char *argv[]) {
         const CloudFleetStatus hung =
             probeCloudFleet(awsId, hangOptions, cliNow);
         const qint64 hungMs = timeoutClock.elapsed();
-        qunsetenv("SYSPEEK_FAKE_SLEEP");
+        qunsetenv("CROWSNEST_FAKE_SLEEP");
         check(!hung.available
                   && hung.note == fleetTimeoutText(QStringLiteral("aws"), 2)
                   && hungMs >= 1800 && hungMs < 6000,
@@ -6045,7 +6045,7 @@ int main(int argc, char *argv[]) {
             runner.stop();
         }
 
-        // `syspeek --cloud-prices` end to end: the fake aws answers a Price
+        // `crowsnest --cloud-prices` end to end: the fake aws answers a Price
         // List payload and the import writes a stamped rate file.
         {
             const QString ratesPath = binDir + QStringLiteral("/rates.txt");
@@ -6071,7 +6071,7 @@ int main(int argc, char *argv[]) {
             const QByteArray regionArg = QByteArrayLiteral("--region=eu-west-1");
             const QByteArray ratesArg =
                 QByteArrayLiteral("--rates=") + ratesPath.toUtf8();
-            char *argv[] = {const_cast<char *>("syspeek"),
+            char *argv[] = {const_cast<char *>("crowsnest"),
                             const_cast<char *>(typeArg.constData()),
                             const_cast<char *>(regionArg.constData()),
                             const_cast<char *>(ratesArg.constData()), nullptr};
@@ -6112,7 +6112,7 @@ int main(int argc, char *argv[]) {
                     QByteArrayLiteral("Unable to locate credentials\n"), 255);
             const QByteArray ratesArg2 =
                 QByteArrayLiteral("--rates=") + untouched.toUtf8();
-            char *argv2[] = {const_cast<char *>("syspeek"),
+            char *argv2[] = {const_cast<char *>("crowsnest"),
                              const_cast<char *>(typeArg.constData()),
                              const_cast<char *>(regionArg.constData()),
                              const_cast<char *>(ratesArg2.constData()),
@@ -6123,9 +6123,9 @@ int main(int argc, char *argv[]) {
         }
 
         qputenv("PATH", oldPath.toUtf8());
-        for (const char *name : {"SYSPEEK_FAKE_ARGV_LOG", "SYSPEEK_FAKE_STDOUT",
-                                 "SYSPEEK_FAKE_STDERR", "SYSPEEK_FAKE_EXIT",
-                                 "SYSPEEK_FAKE_SLEEP"}) {
+        for (const char *name : {"CROWSNEST_FAKE_ARGV_LOG", "CROWSNEST_FAKE_STDOUT",
+                                 "CROWSNEST_FAKE_STDERR", "CROWSNEST_FAKE_EXIT",
+                                 "CROWSNEST_FAKE_SLEEP"}) {
             qunsetenv(name);
         }
     }
@@ -6269,17 +6269,17 @@ int main(int argc, char *argv[]) {
         DisplaySnapshot spendSnap;
         spendSnap.cloud.spend = awsSpend;
         const QString spendText = prometheusText(spendSnap);
-        check(spendText.contains(QStringLiteral("syspeek_cloud_spend_month_usd"))
+        check(spendText.contains(QStringLiteral("crowsnest_cloud_spend_month_usd"))
                   && spendText.contains(
-                      QStringLiteral("syspeek_cloud_spend_forecast_usd"))
+                      QStringLiteral("crowsnest_cloud_spend_forecast_usd"))
                   && spendText.contains(
-                      QStringLiteral("syspeek_cloud_spend_service_usd{provider=\"aws\""))
+                      QStringLiteral("crowsnest_cloud_spend_service_usd{provider=\"aws\""))
                   && spendText.contains(QStringLiteral("service=\"Amazon Simple "
                                                        "Storage Service\"")),
               "spend: prometheus exports month, forecast and per-service cost");
         DisplaySnapshot noSpendSnap;
         check(!prometheusText(noSpendSnap)
-                   .contains(QStringLiteral("syspeek_cloud_spend_")),
+                   .contains(QStringLiteral("crowsnest_cloud_spend_")),
               "spend: a host with no billed data exports no spend series");
     }
 
@@ -6784,7 +6784,7 @@ int main(int argc, char *argv[]) {
         QString newerError;
         check(!parseFleetSnapshotJson(QJsonDocument(newer).toJson(), &refused,
                                       &newerError)
-                  && newerError.contains(QStringLiteral("update Syspeek")),
+                  && newerError.contains(QStringLiteral("update Crowsnest")),
               "fleet: a newer schema is refused with the fix, not half-parsed");
         FleetPeer garbage;
         QString garbageError;
@@ -6901,32 +6901,32 @@ int main(int argc, char *argv[]) {
         check(prometheusFleetText(unpolled).isEmpty(),
               "fleet: no gauges before the first poll");
         const QString text = prometheusFleetText(withSelf);
-        check(text.contains(QStringLiteral("syspeek_fleet_peers_total 2"))
+        check(text.contains(QStringLiteral("crowsnest_fleet_peers_total 2"))
                   && text.contains(
-                      QStringLiteral("syspeek_fleet_peers_online 2"))
+                      QStringLiteral("crowsnest_fleet_peers_online 2"))
                   && text.contains(
-                      QStringLiteral("syspeek_fleet_peer_cpu_percent{peer=\"hot-box\"} 88.000"))
+                      QStringLiteral("crowsnest_fleet_peer_cpu_percent{peer=\"hot-box\"} 88.000"))
                   && text.contains(
-                      QStringLiteral("syspeek_fleet_peer_mem_available_bytes{peer=\"tight-box\"} 204800000"))
+                      QStringLiteral("crowsnest_fleet_peer_mem_available_bytes{peer=\"tight-box\"} 204800000"))
                   && text.contains(
-                      QStringLiteral("syspeek_fleet_peer_online{peer=\"tight-box\"} 1"))
+                      QStringLiteral("crowsnest_fleet_peer_online{peer=\"tight-box\"} 1"))
                   && !text.contains(QStringLiteral("peer=\"here\"")),
               "fleet: the scrape carries per-peer gauges and skips this box");
         // Two peers of the same family must not repeat the HELP/TYPE block:
         // the Prometheus text parser rejects a second HELP for one name, which
         // would break the whole scrape for anyone with more than one peer.
-        check(text.count(QStringLiteral("# HELP syspeek_fleet_peer_cpu_percent"))
+        check(text.count(QStringLiteral("# HELP crowsnest_fleet_peer_cpu_percent"))
                       == 1
                   && text.count(
-                         QStringLiteral("# TYPE syspeek_fleet_peer_cpu_percent"))
+                         QStringLiteral("# TYPE crowsnest_fleet_peer_cpu_percent"))
                       == 1
-                  && text.count(QStringLiteral("# HELP syspeek_fleet_peer_online"))
-                      == 1
-                  && text.count(
-                         QStringLiteral("syspeek_fleet_peer_online{peer=\"hot-box\"} 1"))
+                  && text.count(QStringLiteral("# HELP crowsnest_fleet_peer_online"))
                       == 1
                   && text.count(
-                         QStringLiteral("syspeek_fleet_peer_cpu_percent{peer=\"hot-box\"}"))
+                         QStringLiteral("crowsnest_fleet_peer_online{peer=\"hot-box\"} 1"))
+                      == 1
+                  && text.count(
+                         QStringLiteral("crowsnest_fleet_peer_cpu_percent{peer=\"hot-box\"}"))
                       == 1,
               "fleet: one HELP/TYPE block per family, however many peers");
     }
@@ -6943,10 +6943,10 @@ int main(int argc, char *argv[]) {
                       == QStringLiteral(
                           "https://Relay.Example.com:8443/api/v1/ingest"),
               "remote: an explicit https port is kept on the ingest endpoint");
-        check(remoteIngestUrl(QStringLiteral("http://127.0.0.1:8080/syspeek"),
+        check(remoteIngestUrl(QStringLiteral("http://127.0.0.1:8080/crowsnest"),
                               &error)
                       == QStringLiteral(
-                          "http://127.0.0.1:8080/syspeek/api/v1/ingest"),
+                          "http://127.0.0.1:8080/crowsnest/api/v1/ingest"),
               "remote: a self-hosted http relay keeps its path prefix");
         check(remoteIngestUrl(
                   QStringLiteral("https://relay.example.com/api/v1/ingest"),
@@ -7101,10 +7101,10 @@ int main(int argc, char *argv[]) {
         };
 
         // The shared contract (M102). The relay recomputes this same lock over the
-        // same documents in syspeek-relay/internal/schema; whichever side changes
+        // same documents in crowsnest-relay/internal/schema; whichever side changes
         // a byte alone goes red, and both sides print the same sentence.
         const QString fixtureDir =
-            QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote");
+            QStringLiteral(CROWSNEST_SOURCE_DIR "/tests/fixtures/remote");
         auto contractLock = [](const QString &dir) {
             // QMap iterates in key order and Go sorts bytewise: the two sides feed
             // the hash the same sequence, names are ASCII.
@@ -7142,7 +7142,7 @@ int main(int argc, char *argv[]) {
         };
 
         const QString fixturePath = fixtureDir + QStringLiteral("/ingest.json");
-        if (qEnvironmentVariableIsSet("SYSPEEK_WRITE_FIXTURE")) {
+        if (qEnvironmentVariableIsSet("CROWSNEST_WRITE_FIXTURE")) {
             QDir().mkpath(fixtureDir);
             const QMap<QString, QByteArray> docs = {
                 {QStringLiteral("event.json"), compactObject(eventExcerpt)},
@@ -7197,7 +7197,7 @@ int main(int argc, char *argv[]) {
                         "to %s, lock says %s\n",
                         computedLock.toUtf8().constData(),
                         committedLock.isEmpty()
-                            ? "nothing (run SYSPEEK_WRITE_FIXTURE=1)"
+                            ? "nothing (run CROWSNEST_WRITE_FIXTURE=1)"
                             : committedLock.toUtf8().constData());
         }
         check(lockOk, "remote envelope: the fixture lock matches the committed "
@@ -7302,7 +7302,7 @@ int main(int argc, char *argv[]) {
         check(!parseRemoteEnvelopeJson(newer, &refused, &reason)
                   && reason == QStringLiteral("envelope runs schema 2, this "
                                               "build reads up to 1 - update "
-                                              "Syspeek to read it"),
+                                              "Crowsnest to read it"),
               "remote envelope: a newer schema is refused, not half-parsed");
         reason.clear();
         check(!parseRemoteEnvelopeJson(
@@ -7806,7 +7806,7 @@ int main(int argc, char *argv[]) {
         // system store, never substituted for it.
         {
             const QString caPath =
-                QStringLiteral(SYSPEEK_SOURCE_DIR "/tests/fixtures/remote/test-ca.pem");
+                QStringLiteral(CROWSNEST_SOURCE_DIR "/tests/fixtures/remote/test-ca.pem");
             QString caError;
             const QSslConfiguration withCa =
                 remoteSslConfiguration(caPath, &caError);
@@ -7846,7 +7846,7 @@ int main(int argc, char *argv[]) {
         // the user reads - a promise in the app and a promise in the docs that
         // cannot drift apart.
         {
-            QFile doc(QStringLiteral(SYSPEEK_SOURCE_DIR "/../docs/remote.md"));
+            QFile doc(QStringLiteral(CROWSNEST_SOURCE_DIR "/../docs/remote.md"));
             const bool opened = doc.open(QIODevice::ReadOnly);
             const QString text = opened ? QString::fromUtf8(doc.readAll())
                                         : QString();

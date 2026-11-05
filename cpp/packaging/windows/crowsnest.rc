@@ -1,4 +1,4 @@
-1 ICON "syspeek.ico"
+1 ICON "crowsnest.ico"
 1 VERSIONINFO
  FILEVERSION 0,8,0,0
  PRODUCTVERSION 0,8,0,0
@@ -7,8 +7,8 @@ BEGIN
   BEGIN
     BLOCK "040904E4"
     BEGIN
-      VALUE "ProductName", "Syspeek"
-      VALUE "FileDescription", "Syspeek local system HUD"
+      VALUE "ProductName", "Crowsnest"
+      VALUE "FileDescription", "Crowsnest local system HUD"
     END
   END
 END

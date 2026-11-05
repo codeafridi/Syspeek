@@ -263,13 +263,48 @@ bool remoteConfigUsable(const RemoteOptions &options) {
     return !remoteNormalizeUrl(options.url, nullptr).isEmpty();
 }
 
+namespace {
+
+// The rename moved the cache directory. A machine id that changes makes the
+// relay see a brand-new machine (and the fleet grows a duplicate), so the old
+// identity is copied across before the first use.
+void migrateLegacyCacheFile(const QString &newPath) {
+    if (QFile::exists(newPath)) {
+        return;
+    }
+    QStringList candidates;
+    QString capital = newPath;
+    capital.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
+    capital.replace(QStringLiteral("Crowsnest"), QStringLiteral("Syspeek"));
+    candidates.append(capital);
+    QString lower = newPath;
+    lower.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
+    lower.replace(QStringLiteral("crowsnest"), QStringLiteral("syspeek"));
+    if (!candidates.contains(lower)) {
+        candidates.append(lower);
+    }
+    for (const QString &old : candidates) {
+        if (old == newPath || !QFile::exists(old)) {
+            continue;
+        }
+        QDir().mkpath(QFileInfo(newPath).absolutePath());
+        if (QFile::copy(old, newPath)) {
+            return;
+        }
+    }
+}
+
+} // namespace
+
 QString remoteSpoolPath() {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (base.isEmpty()) {
-        base = QDir::tempPath() + QStringLiteral("/syspeek");
+        base = QDir::tempPath() + QStringLiteral("/crowsnest");
     }
-    return base + QStringLiteral("/remote-spool.bin");
+    const QString path = base + QStringLiteral("/remote-spool.bin");
+    migrateLegacyCacheFile(path);
+    return path;
 }
 
 QString remoteConfigNote(const RemoteOptions &options) {
@@ -607,7 +642,7 @@ bool parseRemoteEnvelopeJson(const QByteArray &json, RemoteEnvelope *out,
     const QJsonValue schemaValue = root.value(QStringLiteral("schema"));
     if (!schemaValue.isDouble()) {
         if (error != nullptr) {
-            *error = QStringLiteral("no schema field - this is not a Syspeek "
+            *error = QStringLiteral("no schema field - this is not a Crowsnest "
                                     "envelope");
         }
         return false;
@@ -624,7 +659,7 @@ bool parseRemoteEnvelopeJson(const QByteArray &json, RemoteEnvelope *out,
     if (schema > kRemoteSchemaVersion) {
         if (error != nullptr) {
             *error = QStringLiteral("envelope runs schema %1, this build reads "
-                                    "up to %2 - update Syspeek to read it")
+                                    "up to %2 - update Crowsnest to read it")
                          .arg(schema)
                          .arg(kRemoteSchemaVersion);
         }
@@ -1148,9 +1183,11 @@ QString remoteMachineIdPath() {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (base.isEmpty()) {
-        base = QDir::tempPath() + QStringLiteral("/syspeek");
+        base = QDir::tempPath() + QStringLiteral("/crowsnest");
     }
-    return base + QStringLiteral("/machine-id");
+    const QString path = base + QStringLiteral("/machine-id");
+    migrateLegacyCacheFile(path);
+    return path;
 }
 
 QString remoteShortHostname() {

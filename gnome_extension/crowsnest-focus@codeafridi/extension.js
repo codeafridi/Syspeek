@@ -2,10 +2,10 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-export default class SyspeekFocusExtension extends Extension {
+export default class CrowsnestFocusExtension extends Extension {
     enable() {
         this._pidFile = Gio.File.new_for_path(
-            GLib.build_filenamev([GLib.get_user_runtime_dir(), 'syspeek-active-pid'])
+            GLib.build_filenamev([GLib.get_user_runtime_dir(), 'crowsnest-active-pid'])
         );
         this._focusChangedId = global.display.connect(
             'notify::focus-window',
@@ -45,7 +45,7 @@ export default class SyspeekFocusExtension extends Extension {
                 this._pidFile.delete(null);
             }
         } catch (error) {
-            logError(error, 'Syspeek Focus Bridge could not update the focused PID');
+            logError(error, 'Crowsnest Focus Bridge could not update the focused PID');
         }
     }
 }

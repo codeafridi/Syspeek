@@ -1,0 +1,7 @@
+# .install file for the PPA/debian build. Paths are relative to the install
+# staging area created by dh_auto_install; cpp/build/crowsnest is the cmake
+# output, the rest are generated from cpp/packaging templates by debian/rules.
+cpp/build/crowsnest usr/bin/
+debian/crowsnest.service usr/lib/systemd/user/
+debian/crowsnest.desktop usr/share/applications/
+cpp/packaging/icons/crowsnest.svg usr/share/icons/hicolor/scalable/apps/

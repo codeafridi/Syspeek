@@ -259,7 +259,7 @@ QString DashboardPanel::unsupportedOsText(const QString &surface) const {
     if (surface == QLatin1String("tcp")) {
         return QStringLiteral(
                    "%1 keeps per-protocol TCP counters behind root - run "
-                   "`sudo syspeek` for retransmits and resets")
+                   "`sudo crowsnest` for retransmits and resets")
             .arg(m_osName);
     }
     if (surface == QLatin1String("talkers")) {
@@ -314,7 +314,7 @@ QString DashboardPanel::unsupportedOsText(const QString &surface) const {
     }
     if (surface == QLatin1String("journal")) {
         return QStringLiteral(
-                   "no journald on %1 - Syspeek reads the OS log store instead, "
+                   "no journald on %1 - Crowsnest reads the OS log store instead, "
                    "so the cards below still fill")
             .arg(m_osName);
     }
@@ -389,7 +389,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     topLayout->setContentsMargins(16, 10, 12, 10);
     topLayout->setSpacing(10);
 
-    auto *chip = new QLabel(QStringLiteral("SYSPEEK"), topbar);
+    auto *chip = new QLabel(QStringLiteral("CROWSNEST"), topbar);
     chip->setObjectName(QStringLiteral("ddChip"));
     chip->setFont(panelTitleFont());
 
@@ -542,7 +542,7 @@ DashboardPanel::DashboardPanel(QWidget *parent)
     auto *footerLayout = new QHBoxLayout(footer);
     footerLayout->setContentsMargins(16, 3, 16, 3);
     m_footer = new QLabel(
-        QStringLiteral("syspeek · local collection only · no telemetry · "
+        QStringLiteral("crowsnest · local collection only · no telemetry · "
                        "◦ All Systems Operational"),
         footer);
     m_footer->setObjectName(QStringLiteral("ddFooterText"));
@@ -931,13 +931,13 @@ QWidget *DashboardPanel::buildOverviewView() {
     // --- Chart panels in the DD three-across grid (img1/img2).
     m_chartCpu = new TimeseriesChart(view);
     m_chartCpu->setUnit(QStringLiteral("Percent"));
-    m_chartCpu->setSeriesName(QStringLiteral("syspeek.cpu.percent"));
+    m_chartCpu->setSeriesName(QStringLiteral("crowsnest.cpu.percent"));
     m_chartMem = new TimeseriesChart(view);
     m_chartMem->setUnit(QStringLiteral("Megabytes"));
-    m_chartMem->setSeriesName(QStringLiteral("syspeek.mem.rss"));
+    m_chartMem->setSeriesName(QStringLiteral("crowsnest.mem.rss"));
     m_chartProc = new TimeseriesChart(view);
     m_chartProc->setUnit(QStringLiteral("Processes"));
-    m_chartProc->setSeriesName(QStringLiteral("syspeek.process.count"));
+    m_chartProc->setSeriesName(QStringLiteral("crowsnest.process.count"));
     m_chartProc->setBarMode(true);
 
     layout->addWidget(makeBanner(QStringLiteral("FOCUSED APP"),
@@ -1148,7 +1148,7 @@ void DashboardPanel::updateOverviewText(const DisplaySnapshot &snapshot) {
                 ? QStringLiteral("%1 Collector warming up").arg(amber)
                 : QStringLiteral("%1 Host data unavailable").arg(amber));
         m_footer->setText(QStringLiteral(
-                              "syspeek %1 · local collection only · "
+                              "crowsnest %1 · local collection only · "
                               "no telemetry · %2")
                               .arg(QCoreApplication::applicationVersion())
                               .arg(tail));
@@ -1318,11 +1318,11 @@ QWidget *DashboardPanel::buildSloView() {
     layout->addWidget(makeCard(QStringLiteral("AVAILABILITY"),
                                m_sloSummary, view), 1);
 
-    // --- SLI/budget history (Syspeek-own rolling counters).
+    // --- SLI/budget history (Crowsnest-own rolling counters).
     m_chartSlo = new TimeseriesChart(view);
     m_chartSlo->setUnit(QStringLiteral("Percent"));
-    m_chartSlo->setSeriesName(QStringLiteral("syspeek.slo.sli"));
-    m_chartSlo->setSeriesNameB(QStringLiteral("syspeek.slo.budget"));
+    m_chartSlo->setSeriesName(QStringLiteral("crowsnest.slo.sli"));
+    m_chartSlo->setSeriesNameB(QStringLiteral("crowsnest.slo.budget"));
 
     layout->addWidget(makeBanner(QStringLiteral("SLI / ERROR BUDGET"),
         ui_theme::banner(), view));
@@ -1407,8 +1407,8 @@ QWidget *DashboardPanel::buildAlertsView() {
     // monitor_id / datadogmonitors / notifications_sent).
     m_chartAlertTrans = new TimeseriesChart(view);
     m_chartAlertTrans->setUnit(QStringLiteral("Transitions"));
-    m_chartAlertTrans->setSeriesName(QStringLiteral("syspeek.alerts.fired"));
-    m_chartAlertTrans->setSeriesNameB(QStringLiteral("syspeek.alerts.resolved"));
+    m_chartAlertTrans->setSeriesName(QStringLiteral("crowsnest.alerts.fired"));
+    m_chartAlertTrans->setSeriesNameB(QStringLiteral("crowsnest.alerts.resolved"));
     m_chartAlertTrans->setBarMode(true);
 
     layout->addWidget(makeBanner(QStringLiteral("TRANSITIONS"),
@@ -1543,10 +1543,10 @@ QWidget *DashboardPanel::buildIncidentsView() {
     layout->addWidget(makeCard(QStringLiteral("GROUPED BY ALERT"),
                                m_incidentsSummary, view), 2);
 
-    // --- Open-incident count per tick (Syspeek-own history counter).
+    // --- Open-incident count per tick (Crowsnest-own history counter).
     m_chartIncOpen = new TimeseriesChart(view);
     m_chartIncOpen->setUnit(QStringLiteral("Incidents"));
-    m_chartIncOpen->setSeriesName(QStringLiteral("syspeek.incidents.open"));
+    m_chartIncOpen->setSeriesName(QStringLiteral("crowsnest.incidents.open"));
 
     layout->addWidget(makeBanner(QStringLiteral("OPEN OVER TIME"),
         ui_theme::banner(), view));
@@ -1623,10 +1623,10 @@ QWidget *DashboardPanel::buildProfilesView() {
         m_profileSummary, view));
 
     // --- Thread-cpu history (thread-level; the agent cannot sample
-    // cross-process threads unprivileged - Syspeek-own series).
+    // cross-process threads unprivileged - Crowsnest-own series).
     m_chartProfile = new TimeseriesChart(view);
     m_chartProfile->setUnit(QStringLiteral("Percent"));
-    m_chartProfile->setSeriesName(QStringLiteral("syspeek.profile.cpu"));
+    m_chartProfile->setSeriesName(QStringLiteral("crowsnest.profile.cpu"));
 
     layout->addWidget(makeBanner(QStringLiteral("CPU OVER TIME"),
         ui_theme::banner(), view));
@@ -1863,11 +1863,11 @@ QWidget *DashboardPanel::buildProcessesView() {
                       .arg(m_osName, missing.join(QStringLiteral(", "))));
     }
 
-    // --- CPU / load history (Syspeek-own fleet counters).
+    // --- CPU / load history (Crowsnest-own fleet counters).
     m_chartProcTotals = new TimeseriesChart(view);
     m_chartProcTotals->setUnit(QStringLiteral("Percent"));
-    m_chartProcTotals->setSeriesName(QStringLiteral("syspeek.procs.cpu"));
-    m_chartProcTotals->setSeriesNameB(QStringLiteral("syspeek.host.load1"));
+    m_chartProcTotals->setSeriesName(QStringLiteral("crowsnest.procs.cpu"));
+    m_chartProcTotals->setSeriesNameB(QStringLiteral("crowsnest.host.load1"));
 
     layout->addWidget(makeBanner(QStringLiteral("CPU / LOAD"),
         ui_theme::banner(), view));
@@ -1954,11 +1954,11 @@ QWidget *DashboardPanel::buildMemoryView() {
     layout->addWidget(
         makeCard(QStringLiteral("MEMORY BREAKDOWN"), m_memDetail, view), 1);
 
-    // --- Used vs available history (Syspeek-own counters).
+    // --- Used vs available history (Crowsnest-own counters).
     m_chartMemPage = new TimeseriesChart(view);
     m_chartMemPage->setUnit(QStringLiteral("GB"));
-    m_chartMemPage->setSeriesName(QStringLiteral("syspeek.mem.used"));
-    m_chartMemPage->setSeriesNameB(QStringLiteral("syspeek.mem.available"));
+    m_chartMemPage->setSeriesName(QStringLiteral("crowsnest.mem.used"));
+    m_chartMemPage->setSeriesNameB(QStringLiteral("crowsnest.mem.available"));
 
     layout->addWidget(makeBanner(QStringLiteral("HOST USED / AVAILABLE"),
         ui_theme::banner(), view));
@@ -2057,7 +2057,7 @@ QWidget *DashboardPanel::buildNetworkView() {
     // --- Focused-app connection latency trend (netlink tcp_info per tick).
     m_chartConnRtt = new TimeseriesChart(view);
     m_chartConnRtt->setUnit(QStringLiteral("ms"));
-    m_chartConnRtt->setSeriesName(QStringLiteral("syspeek.conn.rtt"));
+    m_chartConnRtt->setSeriesName(QStringLiteral("crowsnest.conn.rtt"));
     layout->addWidget(makeBanner(QStringLiteral("LATENCY (focused)"),
         ui_theme::warn(), view));
     layout->addWidget(makeChartCard(QStringLiteral("avg tcp_info rtt"),
@@ -2203,11 +2203,11 @@ QWidget *DashboardPanel::buildNetworkPathView() {
     layout->addWidget(
         makeCard(QStringLiteral("TARGETS"), m_pathTargets, view), 1);
 
-    // --- End-to-end latency history (mtr final-hop avg; Syspeek-own
+    // --- End-to-end latency history (mtr final-hop avg; Crowsnest-own
     // counter - the runner is local mtr, the agent ships no equivalent).
     m_chartPath = new TimeseriesChart(view);
     m_chartPath->setUnit(QStringLiteral("ms"));
-    m_chartPath->setSeriesName(QStringLiteral("syspeek.path.rtt"));
+    m_chartPath->setSeriesName(QStringLiteral("crowsnest.path.rtt"));
 
     layout->addWidget(makeBanner(QStringLiteral("LATENCY OVER TIME"),
         ui_theme::banner(), view));
@@ -2363,10 +2363,10 @@ QWidget *DashboardPanel::buildContainersView() {
     layout->addWidget(makeCard(QStringLiteral("CONTAINER ACTIONS"),
                                containerActionBox, view));
 
-    // --- Running-count history (Syspeek-own counter).
+    // --- Running-count history (Crowsnest-own counter).
     m_chartDocker = new TimeseriesChart(view);
     m_chartDocker->setUnit(QStringLiteral("Count"));
-    m_chartDocker->setSeriesName(QStringLiteral("syspeek.docker.running"));
+    m_chartDocker->setSeriesName(QStringLiteral("crowsnest.docker.running"));
 
     layout->addWidget(makeBanner(QStringLiteral("RUNNING OVER TIME"),
         ui_theme::banner(), view));
@@ -2494,10 +2494,10 @@ QWidget *DashboardPanel::buildKubernetesView() {
         makeCard(QStringLiteral("DEPLOYMENTS"), m_kubeDeploys, view), 1);
     m_kubeDeploys->setColumnWidth(0, 150);
 
-    // --- Rail-count history (Syspeek-own counter).
+    // --- Rail-count history (Crowsnest-own counter).
     m_chartKube = new TimeseriesChart(view);
     m_chartKube->setUnit(QStringLiteral("Count"));
-    m_chartKube->setSeriesName(QStringLiteral("syspeek.kube.pods"));
+    m_chartKube->setSeriesName(QStringLiteral("crowsnest.kube.pods"));
 
     layout->addWidget(makeBanner(QStringLiteral("PODS OVER TIME"),
         ui_theme::banner(), view));
@@ -2861,11 +2861,11 @@ QWidget *DashboardPanel::buildSyntheticView() {
     layout->addWidget(
         makeCard(QStringLiteral("SYNTHETIC"), m_syntheticSummary, view));
 
-    // --- Latency history (probe avg; Syspeek-own series - the agent's
+    // --- Latency history (probe avg; Crowsnest-own series - the agent's
     // synthetic tests are SaaS-scheduled, no shipped metric name).
     m_chartSynthetic = new TimeseriesChart(view);
     m_chartSynthetic->setUnit(QStringLiteral("Milliseconds"));
-    m_chartSynthetic->setSeriesName(QStringLiteral("syspeek.synthetic.duration"));
+    m_chartSynthetic->setSeriesName(QStringLiteral("crowsnest.synthetic.duration"));
 
     layout->addWidget(makeBanner(QStringLiteral("LATENCY"),
         ui_theme::banner(), view));
@@ -3096,10 +3096,10 @@ QWidget *DashboardPanel::buildLogsView() {
         makeCard(QStringLiteral("LOG PIPELINE (parsed fields)"), m_logPipeline,
                  view));
 
-    // --- Per-tick line volume (Syspeek-own counter).
+    // --- Per-tick line volume (Crowsnest-own counter).
     m_chartLog = new TimeseriesChart(view);
     m_chartLog->setUnit(QStringLiteral("Count"));
-    m_chartLog->setSeriesName(QStringLiteral("syspeek.journal.lines"));
+    m_chartLog->setSeriesName(QStringLiteral("crowsnest.journal.lines"));
 
     layout->addWidget(makeBanner(QStringLiteral("LOG VOLUME"),
         ui_theme::banner(), view));
@@ -3217,7 +3217,7 @@ QWidget *DashboardPanel::buildErrorsView() {
 //
 // The other half is ownership of the process's lifetime. A tool window does not
 // count as a window for QApplication::quitOnLastWindowClosed, and this dialog
-// does - so opening it made it the only window, and closing it quit Syspeek.
+// does - so opening it made it the only window, and closing it quit Crowsnest.
 // That is the reported bug: pick a colour, press OK, the HUD disappears and the
 // colour was never applied (the run ended before the accepted colour reached
 // the stylesheet). WA_QuitOnClose keeps the dialog from owning the exit.
@@ -3498,7 +3498,7 @@ QWidget *DashboardPanel::buildSettingsView() {
     // Diagnostics: command rows with copy buttons. Mirrors the shipped
     // Datadog agent's local surface (status/configcheck/flare per its
     // cmd/agent/subcommands and the embedded CLI strings in its binary;
-    // launch-gui "starts the Datadog Agent GUI") mapped onto Syspeek's
+    // launch-gui "starts the Datadog Agent GUI") mapped onto Crowsnest's
     // dump/probe/log/service verbs.
     auto *diagCard = new QFrame(this);
     diagCard->setObjectName(QStringLiteral("ddCard"));
@@ -3512,9 +3512,9 @@ QWidget *DashboardPanel::buildSettingsView() {
     // service verbs and the docs; a settings page is not a manual.
     const QList<QPair<QString, QString>> commands = {
         {QStringLiteral("machine snapshot (JSON)"),
-         QStringLiteral("syspeek --dump")},
+         QStringLiteral("crowsnest --dump")},
         {QStringLiteral("tail the HUD log"),
-         QStringLiteral("syspeek logs")},
+         QStringLiteral("crowsnest logs")},
     };
     for (const auto &pair : commands) {
         auto *row = new QHBoxLayout();
@@ -4050,7 +4050,7 @@ void DashboardPanel::copyDiagnosticsReport() {
         : int(m_monitorThreshold.size());
 
     QStringList lines;
-    lines << QStringLiteral("syspeek %1 (%2)").arg(version, m_osName);
+    lines << QStringLiteral("crowsnest %1 (%2)").arg(version, m_osName);
     lines << QStringLiteral("config     %1  %2")
                  .arg(m_settings.configPath.isEmpty()
                           ? QStringLiteral("--")
@@ -4480,10 +4480,10 @@ QWidget *DashboardPanel::buildHistoryView() {
 
     m_chartHistCpu = new TimeseriesChart(view);
     m_chartHistCpu->setUnit(QStringLiteral("Percent"));
-    m_chartHistCpu->setSeriesName(QStringLiteral("syspeek.history.cpu"));
+    m_chartHistCpu->setSeriesName(QStringLiteral("crowsnest.history.cpu"));
     m_chartHistMem = new TimeseriesChart(view);
     m_chartHistMem->setUnit(QStringLiteral("GB"));
-    m_chartHistMem->setSeriesName(QStringLiteral("syspeek.history.mem"));
+    m_chartHistMem->setSeriesName(QStringLiteral("crowsnest.history.mem"));
     m_chartHistMem->setSeriesColors(QColor(ui_theme::seriesB()),
                                     QColor(ui_theme::seriesA()));
 
@@ -4926,7 +4926,7 @@ QWidget *DashboardPanel::buildCloudView() {
     m_chartCloudFleet->setObjectName(QStringLiteral("ddCloudFleetChart"));
     m_chartCloudFleet->setUnit(QStringLiteral("inst"));
     m_chartCloudFleet->setSeriesName(
-        QStringLiteral("syspeek.cloud.fleet_running"));
+        QStringLiteral("crowsnest.cloud.fleet_running"));
 
     m_cloudFleetSummary = new QLabel(QStringLiteral("--"), view);
     m_cloudFleetSummary->setObjectName(
@@ -4998,7 +4998,7 @@ QWidget *DashboardPanel::buildCloudView() {
     m_chartCloudApp = new TimeseriesChart(view);
     m_chartCloudApp->setObjectName(QStringLiteral("ddCloudChart"));
     m_chartCloudApp->setUnit(QStringLiteral("$/hr"));
-    m_chartCloudApp->setSeriesName(QStringLiteral("syspeek.cloud.app_cost"));
+    m_chartCloudApp->setSeriesName(QStringLiteral("crowsnest.cloud.app_cost"));
 
     m_cloudApp = new QLabel(QStringLiteral("--"), view);
     m_cloudApp->setObjectName(QStringLiteral("ddCloudApp"));
@@ -5039,7 +5039,7 @@ QWidget *DashboardPanel::buildCloudView() {
     m_chartCloudSpend->setObjectName(QStringLiteral("ddCloudSpendChart"));
     m_chartCloudSpend->setUnit(QStringLiteral("$"));
     m_chartCloudSpend->setSeriesName(
-        QStringLiteral("syspeek.cloud.spend_daily"));
+        QStringLiteral("crowsnest.cloud.spend_daily"));
 
     m_cloudSpendSummary = new QLabel(QStringLiteral("--"), view);
     m_cloudSpendSummary->setObjectName(
@@ -5085,7 +5085,7 @@ QWidget *DashboardPanel::buildCloudView() {
                                m_cloudSpendServices, view));
     layout->addWidget(m_cloudSpendNote);
 
-    // --- M84: the outbound footprint. Every network action Syspeek takes on
+    // --- M84: the outbound footprint. Every network action Crowsnest takes on
     // its own, its cadence and the measured cost of the last sweep, plus the
     // two guarantees (no credentials, read-only). Stated on the page, not
     // buried in docs.
@@ -5186,7 +5186,7 @@ QWidget *DashboardPanel::buildFleetView() {
     m_chartFleet = new TimeseriesChart(view);
     m_chartFleet->setObjectName(QStringLiteral("ddFleetChart"));
     m_chartFleet->setUnit(QStringLiteral("Percent"));
-    m_chartFleet->setSeriesName(QStringLiteral("syspeek.fleet.worst_cpu"));
+    m_chartFleet->setSeriesName(QStringLiteral("crowsnest.fleet.worst_cpu"));
 
     m_fleetTable = new QTreeWidget(view);
     m_fleetTable->setObjectName(QStringLiteral("ddFleetTable"));
@@ -5331,12 +5331,12 @@ QWidget *DashboardPanel::buildCostView() {
     layout->addWidget(makeCard(QStringLiteral("per-pod suggestions"),
                                m_costRightSizing, view));
 
-    // --- Estimate history (Syspeek-own: OpenCost's monthlyCost recomputed
+    // --- Estimate history (Crowsnest-own: OpenCost's monthlyCost recomputed
     // per poll from the live request set).
     m_chartCost = new TimeseriesChart(view);
     m_chartCost->setObjectName(QStringLiteral("ddCostChart"));
     m_chartCost->setUnit(QStringLiteral("$/month"));
-    m_chartCost->setSeriesName(QStringLiteral("syspeek.cost.monthly"));
+    m_chartCost->setSeriesName(QStringLiteral("crowsnest.cost.monthly"));
 
     layout->addWidget(makeBanner(QStringLiteral("COST OVER TIME"),
         ui_theme::banner(), view));
@@ -5563,7 +5563,7 @@ QWidget *DashboardPanel::buildGpuView() {
 
     m_chartGpu = new TimeseriesChart(view);
     m_chartGpu->setUnit(QStringLiteral("Percent"));
-    m_chartGpu->setSeriesName(QStringLiteral("syspeek.gpu.util"));
+    m_chartGpu->setSeriesName(QStringLiteral("crowsnest.gpu.util"));
     layout->addWidget(makeBanner(QStringLiteral("UTILIZATION OVER TIME"),
         ui_theme::banner(), view));
     layout->addWidget(makeChartCard(QStringLiteral("busiest gpu"), m_chartGpu,
@@ -5693,10 +5693,10 @@ QWidget *DashboardPanel::buildSensorsView() {
 
     m_chartSensorTemp = new TimeseriesChart(view);
     m_chartSensorTemp->setUnit(QStringLiteral("Celsius"));
-    m_chartSensorTemp->setSeriesName(QStringLiteral("syspeek.sensor.temp"));
+    m_chartSensorTemp->setSeriesName(QStringLiteral("crowsnest.sensor.temp"));
     m_chartSensorPower = new TimeseriesChart(view);
     m_chartSensorPower->setUnit(QStringLiteral("Watts"));
-    m_chartSensorPower->setSeriesName(QStringLiteral("syspeek.sensor.power"));
+    m_chartSensorPower->setSeriesName(QStringLiteral("crowsnest.sensor.power"));
 
     auto *charts = new QHBoxLayout();
     charts->setSpacing(10);
@@ -5792,11 +5792,11 @@ QWidget *DashboardPanel::buildHostView() {
     layout->addWidget(
         makeCard(QStringLiteral("HOST INVENTORY"), m_hostInfoSummary, view), 1);
 
-    // --- Load history (Syspeek-own counter; no honest hostLoad analogue
+    // --- Load history (Crowsnest-own counter; no honest hostLoad analogue
     // exists beyond it on Windows, which stays "--").
     m_chartHostPage = new TimeseriesChart(view);
     m_chartHostPage->setUnit(QStringLiteral("Load"));
-    m_chartHostPage->setSeriesName(QStringLiteral("syspeek.host.load1"));
+    m_chartHostPage->setSeriesName(QStringLiteral("crowsnest.host.load1"));
 
     layout->addWidget(makeBanner(QStringLiteral("LOAD OVER TIME"),
         ui_theme::banner(), view));
@@ -6012,7 +6012,7 @@ QWidget *DashboardPanel::buildTracesView() {
     // forwarded host-side - per-app latency is not an agent metric).
     m_chartTrace = new TimeseriesChart(view);
     m_chartTrace->setUnit(QStringLiteral("Milliseconds"));
-    m_chartTrace->setSeriesName(QStringLiteral("syspeek.trace.latency"));
+    m_chartTrace->setSeriesName(QStringLiteral("crowsnest.trace.latency"));
 
     layout->addWidget(makeBanner(QStringLiteral("LATENCY"),
         ui_theme::banner(), view));
@@ -8502,7 +8502,7 @@ void DashboardPanel::setSyntheticSnapshot(const SyntheticSnapshot &snapshot) {
 
     // Synthetic-page tiles + latency history (M61t); the agent ships
     // no synthetic metric (SaaS-scheduled tests), so the rate series
-    // name is Syspeek-own.
+    // name is Crowsnest-own.
     if (snapshot.available && !snapshot.results.isEmpty()) {
         double totalMs = 0.0;
         int measured = 0;

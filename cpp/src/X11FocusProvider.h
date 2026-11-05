@@ -14,11 +14,11 @@
 //   - _NET_ACTIVE_WINDOW read   (main.c line 1518)
 //   - _NET_WM_PID read          (main.c lines 521/1323)
 //
-// When built without X11 dev headers (SYSPEEK_X11 undefined - e.g.
+// When built without X11 dev headers (CROWSNEST_X11 undefined - e.g.
 // macOS/Windows TUs or a bare Linux box), the inline stub keeps every
 // consumer TU linking: the provider honestly reports no focus and the
 // factory picks the null provider instead.
-#if defined(SYSPEEK_X11)
+#if defined(CROWSNEST_X11)
 
 struct _XDisplay;
 

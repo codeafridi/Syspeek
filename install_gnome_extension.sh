@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UUID="syspeek-focus@codeafridi"
+UUID="crowsnest-focus@codeafridi"
 SOURCE_DIR="$ROOT_DIR/gnome_extension/$UUID"
 
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"

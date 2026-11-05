@@ -231,7 +231,7 @@ struct OverlayConfig {
 };
 
 struct CloudConfig {
-    // [cloud] enabled: the only network read Syspeek makes on its own is the
+    // [cloud] enabled: the only network read Crowsnest makes on its own is the
     // link-local instance metadata service (169.254.169.254 / 169.254.0.23),
     // which is never routed off the host. Turn it off on a box where even that
     // is unwanted.

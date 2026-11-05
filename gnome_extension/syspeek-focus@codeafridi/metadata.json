@@ -1,6 +1,0 @@
-{
-  "uuid": "syspeek-focus@codeafridi",
-  "name": "Syspeek Focus Bridge",
-  "description": "Shares the focused window PID with the local Syspeek application.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"]
-}

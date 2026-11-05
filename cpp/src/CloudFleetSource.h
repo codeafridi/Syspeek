@@ -13,7 +13,7 @@ class QProcess;
 // answers "which instance is this box"; the CLI answers "what else is in the
 // account, and when did this box launch".
 //
-// Syspeek never reads or stores credentials: the CLI runs with the profile the
+// Crowsnest never reads or stores credentials: the CLI runs with the profile the
 // user already configured, and a refusal is reported with the command that
 // fixes it. The command is spawned once per cadence, never per tick, and the
 // sampler polls it instead of waiting.

@@ -5,8 +5,8 @@
 #include <QStringList>
 #include <QtGlobal>
 
-#if defined(SYSPEEK_X11)
-#define SYSPEEK_OVERLAY_X11 1
+#if defined(CROWSNEST_X11)
+#define CROWSNEST_OVERLAY_X11 1
 #endif
 
 namespace linuxoverlay {
@@ -19,7 +19,7 @@ struct X11Probe {
     bool stickySupported = false;
 };
 
-#if defined(SYSPEEK_OVERLAY_X11)
+#if defined(CROWSNEST_OVERLAY_X11)
 
 X11Probe probe();
 

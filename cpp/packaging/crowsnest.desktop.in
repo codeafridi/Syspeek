@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Syspeek
+Name=Crowsnest
 Comment=Compact on-screen focused-process monitor
 Exec=@BINARY@
 Terminal=false

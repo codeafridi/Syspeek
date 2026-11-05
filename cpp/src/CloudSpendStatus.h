@@ -11,7 +11,7 @@
 // provider actually billed the account this month, and what it expects to bill
 // by month end.
 //
-// Syspeek still never holds credentials: the query runs through the CLI the
+// Crowsnest still never holds credentials: the query runs through the CLI the
 // user already logged in, exactly like the inventory (M83).
 //
 // Grounding (shipped artifacts, kept /tmp/opencode/m85/rea):
@@ -104,7 +104,7 @@ struct CloudSpendStatus {
 // `Anomaly{AnomalyId, AnomalyStartDate, AnomalyEndDate, DimensionValue,
 // RootCauses, AnomalyScore, Impact, MonitorArn, Feedback}` and
 // `AnomalyScore{MaxScore, CurrentScore}` - i.e. a score against a learned
-// baseline, which is what the ratio below stands in for (Syspeek computes it
+// baseline, which is what the ratio below stands in for (Crowsnest computes it
 // locally so it needs no anomaly monitor to be configured in the account).
 struct CloudBurnRate {
     bool valid = false;

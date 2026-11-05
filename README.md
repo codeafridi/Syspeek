@@ -1,6 +1,6 @@
 <div align="center">
 
-# Syspeek
+# Crowsnest
 
 ### A local-first HUD that follows the app you're focused on — and a 33-view Datadog-style console for everything your kernel, containers and apps are doing.
 
@@ -11,17 +11,17 @@
 
 [Install](#install) · [Compatibility](#compatibility) · [Use](#use) · [GNOME / KDE setup](#gnome--kde-setup) · [Docker & Kubernetes](#docker--kubernetes) · [Troubleshooting](#troubleshooting)
 
-<sub>Repository: <strong>Syspeek</strong></sub>
+<sub>Repository: <strong>Crowsnest</strong></sub>
 
 <br />
 
-<img src="docs/hud.png" alt="Syspeek HUD showing the focused app's name, PID, CPU and RSS plus Docker and Kubernetes badges" width="430" />
+<img src="docs/hud.png" alt="Crowsnest HUD showing the focused app's name, PID, CPU and RSS plus Docker and Kubernetes badges" width="430" />
 
 </div>
 
 ---
 
-No more digging through `top`. Syspeek follows the window you're using and shows
+No more digging through `top`. Crowsnest follows the window you're using and shows
 that app's CPU and RAM in a small always-on-top panel, plus a full metrics
 console behind it. Everything is collected **locally, unprivileged, with no
 telemetry** — nothing leaves your machine unless you point a scraper at it.
@@ -55,9 +55,9 @@ telemetry** — nothing leaves your machine unless you point a scraper at it.
 The **same one line works on all three platforms**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh
 # No curl? (Base systems of most distros ship wget; Lubuntu minimal does not ship curl.)
-wget -qO- https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh
 ```
 
 The installer handles the rest of its own downloads with a fallback chain:
@@ -67,19 +67,19 @@ instructions. Snap-packaged curl (which cannot write files on some setups) is
 only tried after the native tools.
 
 - **Linux (x86-64, glibc ≥ 2.34)** — downloads a self-contained build (Qt 6
-  bundled — nothing else to install), puts it in `~/.local/opt/syspeek`, adds a
-  `syspeek` command, starts it at login, and installs the desktop focus bridge
+  bundled — nothing else to install), puts it in `~/.local/opt/crowsnest`, adds a
+  `crowsnest` command, starts it at login, and installs the desktop focus bridge
   when one is needed (see [Compatibility](#compatibility)).
-- **macOS** — downloads the latest DMG, copies `Syspeek.app` into
+- **macOS** — downloads the latest DMG, copies `Crowsnest.app` into
   `/Applications` (falls back to `~/Applications` without admin rights),
-  installs LaunchAgent autostart + the `syspeek` command in
+  installs LaunchAgent autostart + the `crowsnest` command in
   `/usr/local/bin`, and reports the Gatekeeper steps for the unsigned build.
-- **Windows** — PowerShell native bootstrap into `%LOCALAPPDATA%\Syspeek`,
-  `syspeek` shim through the WindowsApps PATH directory, HKCU Run
+- **Windows** — PowerShell native bootstrap into `%LOCALAPPDATA%\Crowsnest`,
+  `crowsnest` shim through the WindowsApps PATH directory, HKCU Run
   autostart, then the HUD starts:
 
   ```powershell
-  irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex
+  irm https://raw.githubusercontent.com/codeafridi/Crowsnest/main/cpp/packaging/windows/install.ps1 | iex
   ```
 
   Or from Git Bash with the same `install.sh` as macOS/Linux. Or run
@@ -91,14 +91,14 @@ autostart/status are `--autostart=on|off|status` — run the installer with
 
 | Command | What it does |
 | --- | --- |
-| `syspeek run` | run in the foreground |
-| `syspeek stop` | stop it now |
-| `syspeek disable` | stop it and don't start at login |
-| `syspeek enable` | start it and start at login |
-| `syspeek status` | is it running? |
-| `syspeek update` | upgrade to the latest version |
-| `syspeek uninstall` | remove everything |
-| `syspeek --new-instance` | start the HUD even though one is already running on this display |
+| `crowsnest run` | run in the foreground |
+| `crowsnest stop` | stop it now |
+| `crowsnest disable` | stop it and don't start at login |
+| `crowsnest enable` | start it and start at login |
+| `crowsnest status` | is it running? |
+| `crowsnest update` | upgrade to the latest version |
+| `crowsnest uninstall` | remove everything |
+| `crowsnest --new-instance` | start the HUD even though one is already running on this display |
 
 The HUD is single-instance **per display**: a second launch on the same screen
 is refused (two overlays would stack) and says which display and which pid holds
@@ -123,8 +123,8 @@ Install your distro's Qt 6, then build:
 > family gets Qt 6 from **EPEL** (command above).
 
 ```bash
-git clone https://github.com/codeafridi/Syspeek.git
-cd Syspeek
+git clone https://github.com/codeafridi/Crowsnest.git
+cd Crowsnest
 cmake -S cpp -B cpp/build
 cmake --build cpp/build -j"$(nproc)"
 bash cpp/install.sh              # add --no-systemd, or --uninstall to remove
@@ -135,7 +135,7 @@ The tree compiles on the oldest Qt 6 the distro channel ships (6.2 on Ubuntu
 the `.deb` links the *distribution's* Qt rather than a bundled copy:
 
 ```bash
-bash cpp/packaging/build_deb.sh   # writes build/packaging/syspeek_<ver>_amd64.deb
+bash cpp/packaging/build_deb.sh   # writes build/packaging/crowsnest_<ver>_amd64.deb
 # or prove it end to end, in a clean container of the target release:
 docker run --rm -v "$PWD":/src:ro -v /tmp/deb:/out ubuntu:24.04 \
   bash /src/cpp/packaging/ci/deb_container_build.sh
@@ -156,12 +156,12 @@ The one-liner above uses this; do it by hand if you prefer. Needs Docker only to
 build:
 
 ```bash
-git clone https://github.com/codeafridi/Syspeek.git
-cd Syspeek
-bash cpp/packaging/build_portable.sh          # writes dist/syspeek-portable.tar.gz
-mkdir -p ~/.local/opt/syspeek
-tar xzf dist/syspeek-portable.tar.gz -C ~/.local/opt/syspeek
-~/.local/opt/syspeek/run.sh             # run it
+git clone https://github.com/codeafridi/Crowsnest.git
+cd Crowsnest
+bash cpp/packaging/build_portable.sh          # writes dist/crowsnest-portable.tar.gz
+mkdir -p ~/.local/opt/crowsnest
+tar xzf dist/crowsnest-portable.tar.gz -C ~/.local/opt/crowsnest
+~/.local/opt/crowsnest/run.sh             # run it
 ```
 
 </details>
@@ -175,19 +175,19 @@ use [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate)):
 
 ```bash
 # Needs curl (or wget + manual URL editing). Resolves the current versioned name:
-tag=$(curl -fsSI -o /dev/null -w '%{url_effective}' https://github.com/codeafridi/Syspeek/releases/latest | sed 's#.*/tag/##')
-curl -fLO "https://github.com/codeafridi/Syspeek/releases/download/${tag}/Syspeek-${tag#v}-x86_64.AppImage"
-chmod +x Syspeek-*-x86_64.AppImage
-./Syspeek-*-x86_64.AppImage
+tag=$(curl -fsSI -o /dev/null -w '%{url_effective}' https://github.com/codeafridi/Crowsnest/releases/latest | sed 's#.*/tag/##')
+curl -fLO "https://github.com/codeafridi/Crowsnest/releases/download/${tag}/Crowsnest-${tag#v}-x86_64.AppImage"
+chmod +x Crowsnest-*-x86_64.AppImage
+./Crowsnest-*-x86_64.AppImage
 ```
 
 Asset names carry the version, so there is no stable `releases/latest/download`
 URL for the AppImage — grab it from the
-[release page](https://github.com/codeafridi/Syspeek/releases/latest) if you
+[release page](https://github.com/codeafridi/Crowsnest/releases/latest) if you
 don't want the short script above. The one-liner installer is the better route:
-same bundle, plus the `syspeek` command and start-at-login.
+same bundle, plus the `crowsnest` command and start-at-login.
 
-The AppImage has no `syspeek` command and no start-at-login; it just runs. Use
+The AppImage has no `crowsnest` command and no start-at-login; it just runs. Use
 the one-liner above if you want those.
 
 </details>
@@ -197,18 +197,18 @@ the one-liner above if you want those.
 
 Native package, verified install/remove on Ubuntu 26.04. Grab the `.deb` plus
 `SHA256SUMS` from the
-[latest release](https://github.com/codeafridi/Syspeek/releases/latest),
+[latest release](https://github.com/codeafridi/Crowsnest/releases/latest),
 verify, then install (`apt` resolves the Qt dependencies automatically):
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-sudo apt install ./syspeek_0.6.0_amd64.deb
+sudo apt install ./crowsnest_0.6.0_amd64.deb
 ```
 
-This installs `/usr/bin/syspeek`, a user unit
-(`/usr/lib/systemd/user/syspeek.service`), a launcher, and docs.
-Enable start-at-login with `systemctl --user enable --now syspeek.service`.
-Remove with `sudo apt remove syspeek`.
+This installs `/usr/bin/crowsnest`, a user unit
+(`/usr/lib/systemd/user/crowsnest.service`), a launcher, and docs.
+Enable start-at-login with `systemctl --user enable --now crowsnest.service`.
+Remove with `sudo apt remove crowsnest`.
 
 </details>
 
@@ -323,7 +323,7 @@ bash cpp/install_kde_focus.sh
 On **Sway / niri / Hyprland / X11**, install the matching tool (`swaymsg` /
 `niri` / `hyprctl` / `xdotool`) and you're done. Other Wayland compositors run
 fine but show `no-focus`. If the app column reads `--`, run
-`SYSPEEK_PROBE=1 syspeek` to see which focus provider was detected.
+`CROWSNEST_PROBE=1 crowsnest` to see which focus provider was detected.
 
 ## Docker & Kubernetes
 
@@ -371,11 +371,11 @@ two report the battery (which is a normal, permission-free API) and print the
 reason on the thermal side instead of showing an empty card. Battery charge,
 energy and AC state never need root anywhere.
 
-Prometheus exports the same numbers as `syspeek_sensor_celsius{chip,sensor,kind}`,
-`syspeek_sensor_limit_celsius`, `syspeek_sensor_fan_rpm`,
-`syspeek_sensor_power_watts`, `syspeek_battery_charge_percent{battery}`,
-`syspeek_battery_energy_watt_hours{battery,state="now|full"}`,
-`syspeek_battery_power_watts` and `syspeek_ac_online{adapter,online}`.
+Prometheus exports the same numbers as `crowsnest_sensor_celsius{chip,sensor,kind}`,
+`crowsnest_sensor_limit_celsius`, `crowsnest_sensor_fan_rpm`,
+`crowsnest_sensor_power_watts`, `crowsnest_battery_charge_percent{battery}`,
+`crowsnest_battery_energy_watt_hours{battery,state="now|full"}`,
+`crowsnest_battery_power_watts` and `crowsnest_ac_online{adapter,online}`.
 
 ## Cloud instance & cost
 
@@ -399,8 +399,8 @@ me?" without touching a control plane:
   8 vCPU box spends the whole rate), and the page states the formula.
   `TOP PROCESSES IN THE FOCUSED APP` ranks the focused app's own process tree,
   not the whole machine.
-- **Prices are never invented or bundled.** Syspeek reads a rate file
-  (`~/.config/syspeek/cloud-rates.txt`, override with `[cloud] rates=`):
+- **Prices are never invented or bundled.** Crowsnest reads a rate file
+  (`~/.config/crowsnest/cloud-rates.txt`, override with `[cloud] rates=`):
 
   ```ini
   # imported 2026-10-28
@@ -414,14 +414,14 @@ me?" without touching a control plane:
   Import the current on-demand list price for the instance you are on with:
 
   ```sh
-  syspeek --cloud-prices                    # reads the instance type from IMDS
-  syspeek --cloud-prices=c7g.2xlarge --region=eu-west-1
+  crowsnest --cloud-prices                    # reads the instance type from IMDS
+  crowsnest --cloud-prices=c7g.2xlarge --region=eu-west-1
   ```
 
   That shells out to the `aws` CLI you already use
   (`aws pricing get-products --service-code AmazonEC2`, filtered to the shared /
   used-capacity / Linux / no-software SKU) and writes the rate file with a fresh
-  import stamp. It is opt-in, never runs on a tick, and Syspeek never reads or
+  import stamp. It is opt-in, never runs on a tick, and Crowsnest never reads or
   stores credentials — the CLI uses whatever profile you already configured.
 - **Billed spend** is what the provider actually charged this month, read from
   its cost API — a different number from the estimate above, and labelled as
@@ -456,7 +456,7 @@ me?" without touching a control plane:
 
 - **Instance age and the account inventory** come from the provider's own CLI,
   because only the account knows when this instance launched. The IMDS
-  document names the provider, then Syspeek asks that provider's CLI, reusing
+  document names the provider, then Crowsnest asks that provider's CLI, reusing
   your existing login:
 
   ```sh
@@ -486,23 +486,23 @@ me?" without touching a control plane:
   enabled              = true   ; the link-local IMDS read
   inventory            = true   ; the account listing through the provider CLI
   inventory_timeout_ms = 25000  ; per listing; clamped 2000..120000
-  rates                =        ; empty = ~/.config/syspeek/cloud-rates.txt
+  rates                =        ; empty = ~/.config/crowsnest/cloud-rates.txt
   timeout_ms           = 450    ; the whole four-provider sweep; IMDS answers in ms
   ```
 
   No CLI on `PATH`, no login, or an expired session prints the exact refusal
   and the fix (`aws configure`, `az login`, `gcloud auth login`,
-  `oci setup config`) — Syspeek never reads, caches or stores credentials
+  `oci setup config`) — Crowsnest never reads, caches or stores credentials
   itself.
 
 The metadata request goes to a link-local address (`169.254.169.254` /
 `169.254.0.23`), which is never routed off the host, and is the single network
-read Syspeek performs without you asking. `enabled = false` turns even that off
+read Crowsnest performs without you asking. `enabled = false` turns even that off
 and the page says so instead of showing empty cards. Off a cloud instance —
 or on a host where IMDS is firewalled or IMDSv2 tokens are refused — every card
 prints the gate text rather than a blank.
 
-Read-only in the cloud by design: Syspeek identifies the instance, prices it and
+Read-only in the cloud by design: Crowsnest identifies the instance, prices it and
 lists the account, it never starts, stops or terminates anything.
 
 The Cloud page states its own footprint in a **CLOUD FOOTPRINT** card — every
@@ -523,7 +523,7 @@ Every machine runs the same binary. On a box with no desktop session (a server,
 a container, a CI runner) start the endpoints without the HUD:
 
 ```sh
-syspeek serve
+crowsnest serve
 ```
 
 `serve` prints the two URLs it is serving and one summary line per completed
@@ -568,7 +568,7 @@ rates, socket counts, GPU utilisation, hottest sensor, battery, uptime, alert
 counts and the focused app's name/CPU/RSS — **not** your process list, command
 lines, environment, open files or log lines. It also carries a `schema`
 integer: a reader refuses a peer whose schema is newer than its own and tells
-you to update Syspeek there, instead of half-understanding it.
+you to update Crowsnest there, instead of half-understanding it.
 
 The table lists this machine first (`* workstation`), because the one box you
 cannot see from elsewhere is the one you are looking at. It is not counted as a
@@ -577,8 +577,8 @@ only — and it is never polled. A peer that has not answered for three poll
 intervals is marked `stale` rather than silently reporting a number that has
 stopped moving.
 
-`/metrics` gains the fleet gauges too: `syspeek_fleet_peers_total`,
-`syspeek_fleet_peers_online`, and per peer `syspeek_fleet_peer_online`,
+`/metrics` gains the fleet gauges too: `crowsnest_fleet_peers_total`,
+`crowsnest_fleet_peers_online`, and per peer `crowsnest_fleet_peer_online`,
 `_cpu_percent`, `_mem_available_bytes`, `_load1`, `_uptime_seconds`,
 `_age_seconds`. They are emitted only after the first poll, so a scrape against
 a freshly started HUD never reads `0 peers`.
@@ -589,9 +589,9 @@ and the whole feature is two switches away from off.
 ## Advanced (optional)
 
 Thresholds and polling intervals are configurable in
-`~/.config/syspeek/config.ini`; sensible defaults are used if it's absent.
+`~/.config/crowsnest/config.ini`; sensible defaults are used if it's absent.
 
-**What Syspeek costs** — a HUD that watches a machine should be able to say
+**What Crowsnest costs** — a HUD that watches a machine should be able to say
 what it costs that machine. Settings → GENERAL carries three live rows:
 
 ```
@@ -602,11 +602,11 @@ sections    processes 41 ms  host 12 ms  sockets 4.1 ms
 
 `tick` is the time the sampler spends producing one snapshot; `sections` names
 the slowest collectors in that tick. It is also a regression gate rather than
-decoration: `syspeek --probe` prints `tickMs=` and `selfCpu=`/`selfRssKb=` per
+decoration: `crowsnest --probe` prints `tickMs=` and `selfCpu=`/`selfRssKb=` per
 tick plus a `probe cost` summary, and CI fails a probe whose worst tick exceeds
 1.5 s — which is how a blocking call on a sampler tick would be caught.
 
-**Prometheus endpoint** — Syspeek exposes its live snapshot at
+**Prometheus endpoint** — Crowsnest exposes its live snapshot at
 `http://127.0.0.1:9107/metrics` (localhost only, on by default) in the
 Prometheus text exposition format — point your scraper or Grafana agent config
 at it (nothing leaves your machine unless you do). Disable with
@@ -631,7 +631,7 @@ and whether auth is on. Prometheus scrape config:
 
 ```yaml
 scrape_configs:
-  - job_name: syspeek
+  - job_name: crowsnest
     authorization:
       credentials: <token>
     static_configs:
@@ -645,7 +645,7 @@ POST fired/resolved alert events out of the HUD (nothing is sent until you set
 ```ini
 [webhook]
 enabled = true
-url = https://alerts.example.com/syspeek
+url = https://alerts.example.com/crowsnest
 format = generic        ; generic | slack
 timeout_ms = 5000
 ```
@@ -714,7 +714,7 @@ restyle, on purpose:
 
 - **accent** — one colour, applied to chrome that does not mean anything: the
   rail selection bar, chips, primary section banners, focus rings, and the
-  `SYSPEEK` wordmark on the strip. Four presets ship (Classic, Slate, Moss,
+  `CROWSNEST` wordmark on the strip. Four presets ship (Classic, Slate, Moss,
   Ember) and **PICK** opens a colour dialog for anything else, `#rrggbb` only.
   The surface palette and the `ok` / `warn` / `crit` trio are *not* editable —
   that is how a data console stays readable.
@@ -737,13 +737,13 @@ accent = #4a86c4
 **Metric history export** — the HUD keeps the last 1800 samples
 (~30 min at the default 1 s cadence) in memory and can write them out:
 Settings → DIAGNOSTICS → **EXPORT CSV** / **EXPORT JSON** (files land in
-`~/.cache/dev.syspeek/syspeek/syspeek-history-<time>.<ext>`, the path is shown
+`~/.cache/dev.crowsnest/crowsnest/crowsnest-history-<time>.<ext>`, the path is shown
 in the GENERAL card). For headless capture use the recorder:
 
 ```sh
-syspeek --record=60                 # 60 samples (1 s cadence) to stdout, CSV
-syspeek --record=5m --format=csv --out=history.csv
-syspeek --record=120 --format=json --out=history.json
+crowsnest --record=60                 # 60 samples (1 s cadence) to stdout, CSV
+crowsnest --record=5m --format=csv --out=history.csv
+crowsnest --record=120 --format=json --out=history.json
 ```
 
 `--record=<n>` counts samples, `--record=<n>s|m|h` counts wall time.
@@ -763,14 +763,14 @@ box;1;2026-10-26 12:59:07 UTC;cursor;36904;179.52;3391572;16.95;0.00;6014808;...
 
 The JSON export nests the same way `sadf -j` does (`samples[].timestamp.date/
 time/tz`, then `app`, `host`, `disk`, `network`, `tcp` objects) but stays inside
-a `{"syspeek": {...}}` envelope with `version`, `platform`, `hostname`,
+a `{"crowsnest": {...}}` envelope with `version`, `platform`, `hostname`,
 `intervalMs`; values a collector could not produce are `null`.
 
 Handy environment variables:
 
-- `SYSPEEK_PROBE=1 ./syspeek` — print the detected focus provider and
+- `CROWSNEST_PROBE=1 ./crowsnest` — print the detected focus provider and
   focused PID, then exit.
-- `SYSPEEK_LOG=/tmp/overlay.log` — log status to a file.
+- `CROWSNEST_LOG=/tmp/overlay.log` — log status to a file.
 
 ## Troubleshooting
 
@@ -779,7 +779,7 @@ Handy environment variables:
 1. Run the probe to see which provider was chosen:
 
    ```bash
-   SYSPEEK_PROBE=1 ./cpp/build/syspeek
+   CROWSNEST_PROBE=1 ./cpp/build/crowsnest
    ```
 
 2. Set up the bridge for your desktop (see
@@ -788,7 +788,7 @@ Handy environment variables:
 **It builds but won't start.** Check the platform plugin:
 
 ```bash
-QT_DEBUG_PLUGINS=1 ./cpp/build/syspeek 2>&1 | tail
+QT_DEBUG_PLUGINS=1 ./cpp/build/crowsnest 2>&1 | tail
 ```
 
 ## License

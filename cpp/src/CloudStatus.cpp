@@ -334,7 +334,7 @@ double cloudRateFor(const CloudRateTable &table, CloudProvider provider,
 
 QString cloudRatesTemplateText() {
     return QStringLiteral(
-        "# Syspeek cloud rate table.\n"
+        "# Crowsnest cloud rate table.\n"
         "# <provider>/<instanceType> = <usd per hour>, e.g.\n"
         "#   aws/c7g.2xlarge = 0.2920\n"
         "#   azure/Standard_D2s_v3 = 0.0960\n"
@@ -342,7 +342,7 @@ QString cloudRatesTemplateText() {
         "#   oci/VM.Standard.E4.Flex = 0.0450\n"
         "#\n"
         "# Prices are never bundled or invented: fill this in from your own\n"
-        "# bill, or run `syspeek --cloud-prices` to import the current\n"
+        "# bill, or run `crowsnest --cloud-prices` to import the current\n"
         "# on-demand list price for this instance.\n");
 }
 
@@ -655,7 +655,7 @@ QString cloudSettingsLine(bool enabled, const QString &ratesPath,
     QString line = QStringLiteral("imds 169.254.169.254 (aws/azure/gcp), "
                                  "169.254.0.23 (oci) - read only");
     if (table.rates.isEmpty()) {
-        line += QStringLiteral("\nnone yet at %1 - run `syspeek "
+        line += QStringLiteral("\nnone yet at %1 - run `crowsnest "
                                "--cloud-prices` or add a rate").arg(path);
         return line;
     }
@@ -722,7 +722,7 @@ QString cloudFootprintText(const CloudFootprint &footprint) {
             "spend      off ([cloud] spend=false) - no cost query is issued"));
     }
     lines.append(QStringLiteral(
-        "prices     on demand only: `syspeek --cloud-prices` asks the AWS "
+        "prices     on demand only: `crowsnest --cloud-prices` asks the AWS "
         "Price List API with your aws(1) credentials, never from a tick"));
     lines.append(QStringLiteral("rates      %1").arg(
         footprint.ratesPath.isEmpty() ? QStringLiteral("no rate file")

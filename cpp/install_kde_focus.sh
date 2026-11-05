@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UUID="syspeek-focus"
+UUID="crowsnest-focus"
 SOURCE_DIR="$ROOT_DIR/kwin_script/$UUID"
 
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"

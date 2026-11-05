@@ -941,7 +941,7 @@ QString dumpReportJson(int maxProcs) {
         QJsonObject history;
         const QString probePath =
             QDir::tempPath()
-            + QStringLiteral("/syspeek-history-probe-%1.ring").arg(dumpPid());
+            + QStringLiteral("/crowsnest-history-probe-%1.ring").arg(dumpPid());
         HistoryLog log;
         constexpr int kCap = 8;
         const qint64 base = QDateTime::currentMSecsSinceEpoch();
@@ -1234,7 +1234,7 @@ QString dumpReportJson(int maxProcs) {
             QStringLiteral("refuseNewerOk"),
             !parseFleetSnapshotJson(QJsonDocument(newer).toJson(), &refused,
                                     &newerError)
-                && newerError.contains(QStringLiteral("update Syspeek")));
+                && newerError.contains(QStringLiteral("update Crowsnest")));
 
         const QString normalized = fleetNormalizePeerUrl(
             QStringLiteral("http://build-01:9107/api/v1/snapshot"));
@@ -1415,7 +1415,7 @@ QString dumpReportJson(int maxProcs) {
         // drop count and the oldest-first order are all exercised.
         const QString spoolProbePath =
             QDir::tempPath()
-            + QStringLiteral("/syspeek-remote-probe-%1.spool").arg(dumpPid());
+            + QStringLiteral("/crowsnest-remote-probe-%1.spool").arg(dumpPid());
         const qint64 probeBudget =
             kRemoteSpoolHeaderBytes + 8 * kRemoteSpoolRecordBytes;
         bool spoolOpened = false;
@@ -1521,7 +1521,7 @@ QString dumpReportJson(int maxProcs) {
 
         const QString idDirPath =
             QDir::tempPath()
-            + QStringLiteral("/syspeek-id-probe-%1").arg(dumpPid());
+            + QStringLiteral("/crowsnest-id-probe-%1").arg(dumpPid());
         QDir idDir(idDirPath);
         idDir.removeRecursively();
         idDir.mkpath(QStringLiteral("."));

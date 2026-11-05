@@ -29,17 +29,17 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build -j3
           QT_QPA_PLATFORM=offscreen ctest --test-dir cpp/build --output-on-failure
-          ./cpp/build/syspeek.app/Contents/MacOS/syspeek --dump \
+          ./cpp/build/crowsnest.app/Contents/MacOS/crowsnest --dump \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0 and d["host"]["cores"]>0; fs=d.get("filesystems",{}).get("entries",[]); assert fs and all(e["freeG"]<=e["totalG"]+0.01 for e in fs if "freeG" in e), fs[:3]; print("mac dump ok:", d["processCount"], "procs", len(fs), "fs")'
-          SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
+          CROWSNEST_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
 
       - name: Upload macos artifacts
         uses: actions/upload-artifact@v7
         with:
           name: packages-macos
           path: |
-            cpp/build/packaging/Syspeek-*-macos.dmg
-            cpp/build/packaging/Syspeek-*-macos.dmg.sha256
+            cpp/build/packaging/Crowsnest-*-macos.dmg
+            cpp/build/packaging/Crowsnest-*-macos.dmg.sha256
           if-no-files-found: error
 
   build:
@@ -75,11 +75,11 @@ jobs:
       - name: Checksums + AUR refresh data
         run: |
           version="${GITHUB_REF_NAME#v}"
-          sed -i "s/^pkgver=.*/pkgver=$version/" cpp/packaging/arch/PKGBUILD cpp/packaging/arch/syspeek-bin/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$version/" cpp/packaging/arch/PKGBUILD cpp/packaging/arch/crowsnest-bin/PKGBUILD
           cd cpp/build/packaging && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
-          # Source tarball hash for the AUR `syspeek` package (publish-aur.sh
+          # Source tarball hash for the AUR `crowsnest` package (publish-aur.sh
           # runs updpkgsums anyway; this is a cross-check).
-          curl -sL "https://github.com/codeafridi/Syspeek/archive/refs/tags/v$version.tar.gz" -o /tmp/src.tar.gz
+          curl -sL "https://github.com/codeafridi/Crowsnest/archive/refs/tags/v$version.tar.gz" -o /tmp/src.tar.gz
           echo "source tarball:" && sha256sum /tmp/src.tar.gz | tee /tmp/src.sha
           cp /tmp/src.sha "$GITHUB_WORKSPACE/cpp/build/packaging/SOURCE_SHA256.txt" 2>/dev/null || true
 
@@ -116,7 +116,7 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build --config Release
           ctest --test-dir cpp/build -C Release --output-on-failure
-          $json = $(cmd /c '"%CD%\cpp\build\Release\syspeek.exe" --dump') | ConvertFrom-Json -AsHashtable
+          $json = $(cmd /c '"%CD%\cpp\build\Release\crowsnest.exe" --dump') | ConvertFrom-Json -AsHashtable
           $fs = $json.filesystems.entries
           if ($fs.Count -lt 1) { throw 'dump: no filesystem entries' }
           Write-Host ("windows fs ok: {0} entries" -f $fs.Count)
@@ -153,16 +153,16 @@ jobs:
         with:
           name: packages-windows
           path: |
-            cpp/build/packaging/Syspeek-*-windows.msi
-            cpp/build/packaging/Syspeek-*-windows.msi.sha256
-            cpp/build/packaging/Syspeek-*-windows-portable.zip
-            cpp/build/packaging/Syspeek-*-windows-portable.zip.sha256
+            cpp/build/packaging/Crowsnest-*-windows.msi
+            cpp/build/packaging/Crowsnest-*-windows.msi.sha256
+            cpp/build/packaging/Crowsnest-*-windows-portable.zip
+            cpp/build/packaging/Crowsnest-*-windows-portable.zip.sha256
           if-no-files-found: error
 
       - name: Upload manifests artifact
         uses: actions/upload-artifact@v7
         with:
-          name: syspeek-winget-manifests
+          name: crowsnest-winget-manifests
           path: cpp/packaging/windows/manifests/
           if-no-files-found: error
 
@@ -198,4 +198,4 @@ jobs:
       # NOTE: the portable tarball + AppImage (with zsync) are built by the
       # maintainer via bash cpp/packaging/build_portable.sh && bash
       # cpp/packaging/build_appimage.sh and attached to the same release, so
-      # `syspeek update` and AppImage delta updates keep working.
+      # `crowsnest update` and AppImage delta updates keep working.

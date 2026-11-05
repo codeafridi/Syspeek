@@ -1,15 +1,17 @@
-Source: syspeek
+Source: crowsnest
 Section: utils
 Priority: optional
-Maintainer: Syspeek <noreply@example.com>
+Maintainer: Crowsnest <noreply@example.com>
 Build-Depends: debhelper-compat (= 13), cmake, g++,
                qt6-base-dev, libgl-dev
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 
-Package: syspeek
+Package: crowsnest
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, libc6, libqt6widgets6, libqt6dbus6
+Conflicts: syspeek
+Replaces: syspeek
 Recommends: xdotool, docker.io | docker-ce, kubectl
 Description: Compact always-on-top HUD for focused-process and infra status
  Shows the focused application's PID, CPU, and RSS, plus optional Docker

@@ -189,7 +189,7 @@ struct DisplaySnapshot {
     double focusIoWritePerSec = 0.0;
     QList<QString> focusOpenFiles;
     QList<QString> dependencies;
-    // M84: Syspeek's own footprint and the cost of the tick that produced
+    // M84: Crowsnest's own footprint and the cost of the tick that produced
     // this snapshot (both self-measured, both shown in Settings).
     SelfCost self;
     TickCost tick;

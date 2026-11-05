@@ -5,7 +5,7 @@ running on:
 
 1. *Which instance is this, and how old is it?*
 2. *What does this app cost me?*
-3. *What does Syspeek itself send out to answer 1 and 2?*
+3. *What does Crowsnest itself send out to answer 1 and 2?*
 
 The third one is on the page too, in the **CLOUD FOOTPRINT** card, because a
 monitoring tool that phones home quietly is exactly what people install a local
@@ -13,7 +13,7 @@ monitor to avoid.
 
 ## Identity (link-local metadata)
 
-Syspeek reads the provider's own instance metadata document. The read goes to a
+Crowsnest reads the provider's own instance metadata document. The read goes to a
 link-local address, which is never routed off the host, and only when
 `[cloud] enabled` is true (the default).
 
@@ -41,13 +41,13 @@ Cadence: every **5 minutes** once an instance has been identified, every
 refused sweep per quarter hour.
 
 Cloud identity is nothing without a price, and a price has to come from
-somewhere. Syspeek does not invent or bundle one — a stale list price shown as
+somewhere. Crowsnest does not invent or bundle one — a stale list price shown as
 current is worse than no number at all.
 
 ### Instance age and the account inventory
 
 Only the provider knows when this instance launched and what else is in the
-account, so Syspeek asks the provider's own CLI and reuses **your** login:
+account, so Crowsnest asks the provider's own CLI and reuses **your** login:
 
 ```sh
 aws    ec2 describe-instances --region <imds region> --output json \
@@ -97,7 +97,7 @@ Three properties are deliberate:
 
 ## Cost
 
-- **Rate file.** `~/.config/syspeek/cloud-rates.txt` (override with
+- **Rate file.** `~/.config/crowsnest/cloud-rates.txt` (override with
   `[cloud] rates=`):
 
   ```ini
@@ -110,12 +110,12 @@ Three properties are deliberate:
   `# imported` stamp is load-bearing: past 30 days the page and the Settings
   row append `(N days old)`.
 
-- **Importing real prices.** `syspeek --cloud-prices[=<type>] [--region=]
+- **Importing real prices.** `crowsnest --cloud-prices[=<type>] [--region=]
   [--rates=]` shells out to the `aws` CLI you already use
   (`aws pricing get-products --service-code AmazonEC2`, filtered to the shared
   / used-capacity / Linux / no-preinstalled-software on-demand SKU) and
   rewrites the rate file with a fresh stamp. It is opt-in, runs **on demand
-  only** — never from a tick — and Syspeek never reads or stores credentials:
+  only** — never from a tick — and Crowsnest never reads or stores credentials:
   the CLI uses the profile you already configured. With no account, it prints
   the CLI's own refusal (`NoCredentials (exit 253)`) instead of guessing a
   price.
@@ -141,9 +141,9 @@ metadata   169.254.169.254 (aws/azure/gcp) + 169.254.0.23 (oci), link-local only
 cadence    every 5 min while an instance is identified, every 15 min otherwise
 budget     450 ms for the whole sweep, last 62 ms / 4 request(s)
 inventory  aws every 10 min, 25000 ms budget - the CLI's own login, no credential is read
-prices     on demand only: `syspeek --cloud-prices` asks the AWS Price List API
+prices     on demand only: `crowsnest --cloud-prices` asks the AWS Price List API
            with your aws(1) credentials, never from a tick
-rates      /home/you/.config/syspeek/cloud-rates.txt
+rates      /home/you/.config/crowsnest/cloud-rates.txt
 writes     none - no credential is read or stored, no instance is ever
            started, stopped or terminated
 ```
@@ -168,7 +168,7 @@ licence check, no update ping.
 - A stopped or deallocated instance never claims a `$/MO`.
 - Azure's listing carries no creation time, so Azure rows show `--` age instead
   of a fabricated one.
-- Cloud systems are **read-only**: Syspeek identifies, prices and lists. It
+- Cloud systems are **read-only**: Crowsnest identifies, prices and lists. It
   never starts, stops, terminates or resizes anything.
 
 ## Verification
@@ -186,4 +186,4 @@ CI runs both paths on every push:
 
 A real EC2/GCE/OCI/Azure box with a logged-in CLI is the remaining manual
 check: compare `IDENTITY` with `aws ec2 describe-instances`, run
-`syspeek --cloud-prices`, and confirm the accrued figure tracks uptime.
+`crowsnest --cloud-prices`, and confirm the accrued figure tracks uptime.

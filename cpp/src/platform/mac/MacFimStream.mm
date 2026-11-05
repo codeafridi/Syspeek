@@ -74,7 +74,7 @@ bool MacFimStream::start(const QStringList &roots, QObject *context,
     auto *impl = new MacFimStreamImpl;
     impl->handler = std::move(handler);
     impl->context = context;
-    impl->queue = dispatch_queue_create("dev.syspeek.fim", nullptr);
+    impl->queue = dispatch_queue_create("dev.crowsnest.fim", nullptr);
 
     CFMutableArrayRef watchRoots = CFArrayCreateMutable(
         kCFAllocatorDefault, roots.size(), &kCFTypeArrayCallBacks);

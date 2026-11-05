@@ -1,6 +1,6 @@
 #pragma once
 
-// `syspeek --record=<n>[s] [--format=csv|json] [--out=<path|->]`
+// `crowsnest --record=<n>[s] [--format=csv|json] [--out=<path|->]`
 //
 // Headless metric recorder: runs the real sampler under a plain
 // QCoreApplication, writes the sampled history to a file (or stdout), and

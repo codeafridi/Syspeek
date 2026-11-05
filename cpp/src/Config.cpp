@@ -4,6 +4,8 @@
 #include "WallpaperArt.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -896,10 +898,56 @@ void saveThemeAccent(const QString &path, const QString &accent) {
     settings.sync();
 }
 
+namespace {
+
+// The rename must not lose a user's settings. The new variable wins; the old
+// one is still read so an existing shell profile keeps working.
+QString envOrLegacy(const char *name, const char *legacy) {
+    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString value = env.value(QLatin1String(name));
+    if (!value.isEmpty()) {
+        return value;
+    }
+    return env.value(QLatin1String(legacy));
+}
+
+// Old paths are the new path with the brand swapped back. Both spellings are
+// tried because the Linux path was lowercase and the app-bundle paths were
+// capitalised.
+QStringList legacyPathsFor(const QString &newPath) {
+    QStringList out;
+    QString capital = newPath;
+    capital.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
+    capital.replace(QStringLiteral("Crowsnest"), QStringLiteral("Syspeek"));
+    out.append(capital);
+    QString lower = newPath;
+    lower.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
+    lower.replace(QStringLiteral("crowsnest"), QStringLiteral("syspeek"));
+    if (!out.contains(lower)) {
+        out.append(lower);
+    }
+    return out;
+}
+
+void migrateLegacyFile(const QString &newPath) {
+    if (QFile::exists(newPath)) {
+        return;
+    }
+    for (const QString &old : legacyPathsFor(newPath)) {
+        if (old == newPath || !QFile::exists(old)) {
+            continue;
+        }
+        QDir().mkpath(QFileInfo(newPath).absolutePath());
+        if (QFile::copy(old, newPath)) {
+            return;
+        }
+    }
+}
+
+} // namespace
+
 QString defaultConfigPath() {
-    const QString override =
-        QProcessEnvironment::systemEnvironment().value(
-            QStringLiteral("SYSPEEK_CONFIG"));
+    const QString override = envOrLegacy("CROWSNEST_CONFIG", "SYSPEEK_CONFIG");
     if (!override.isEmpty()) {
         return override;
     }
@@ -910,18 +958,19 @@ QString defaultConfigPath() {
             QStringLiteral("XDG_CONFIG_HOME"),
             QProcessEnvironment::systemEnvironment().value(
                 QStringLiteral("HOME")) + QStringLiteral("/.config"));
-    return configHome + QStringLiteral("/syspeek/config.ini");
+    const QString path = configHome + QStringLiteral("/crowsnest/config.ini");
 #else
-    const QString base =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return base + QStringLiteral("/config.ini");
+    const QString path = QStandardPaths::writableLocation(
+                             QStandardPaths::AppDataLocation)
+        + QStringLiteral("/config.ini");
 #endif
+    migrateLegacyFile(path);
+    return path;
 }
 
 QString defaultCloudRatePath() {
-    const QString override =
-        QProcessEnvironment::systemEnvironment().value(
-            QStringLiteral("SYSPEEK_CLOUD_RATES"));
+    const QString override = envOrLegacy("CROWSNEST_CLOUD_RATES",
+                                         "SYSPEEK_CLOUD_RATES");
     if (!override.isEmpty()) {
         return override;
     }
@@ -932,10 +981,12 @@ QString defaultCloudRatePath() {
             QStringLiteral("XDG_CONFIG_HOME"),
             QProcessEnvironment::systemEnvironment().value(
                 QStringLiteral("HOME")) + QStringLiteral("/.config"));
-    return configHome + QStringLiteral("/syspeek/cloud-rates.txt");
+    const QString path = configHome + QStringLiteral("/crowsnest/cloud-rates.txt");
 #else
-    const QString base =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return base + QStringLiteral("/cloud-rates.txt");
+    const QString path = QStandardPaths::writableLocation(
+                             QStandardPaths::AppDataLocation)
+        + QStringLiteral("/cloud-rates.txt");
 #endif
+    migrateLegacyFile(path);
+    return path;
 }

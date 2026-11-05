@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Syspeek. A focused process HUD for Linux, macOS and Windows</title>
-    <meta name="description" content="Syspeek is a small overlay HUD that follows the app you are using, then opens into a 31-view console for the host, disks, GPU, sensors, containers, Kubernetes, databases, traces and cloud cost. Linux, macOS and Windows. C++ and Qt 6, local only, fully open source." />
+    <title>Crowsnest. A focused process HUD for Linux, macOS and Windows</title>
+    <meta name="description" content="Crowsnest is a small overlay HUD that follows the app you are using, then opens into a 31-view console for the host, disks, GPU, sensors, containers, Kubernetes, databases, traces and cloud cost. Linux, macOS and Windows. C++ and Qt 6, local only, fully open source." />
     <meta name="theme-color" content="#f4f5f8" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311151b'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23d9a441'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="styles.css?v=5" />
@@ -19,9 +19,9 @@
   <body>
     <header class="nav">
       <div class="wrap nav-inner">
-        <a class="logo" href="#top" aria-label="Syspeek home">
+        <a class="logo" href="#top" aria-label="Crowsnest home">
           <span class="logo-mark" aria-hidden="true"></span>
-          <span class="logo-name">syspeek</span>
+          <span class="logo-name">crowsnest</span>
         </a>
         <nav class="nav-mid">
           <a href="#features">Features</a>
@@ -29,12 +29,12 @@
           <a href="#install">Install</a>
         </nav>
         <div class="nav-right">
-          <a class="ver" href="https://github.com/codeafridi/Syspeek/releases/tag/v0.11.0" rel="noopener" title="Release notes for 0.11.0">v0.11.0</a>
+          <a class="ver" href="https://github.com/codeafridi/Crowsnest/releases/tag/v0.11.0" rel="noopener" title="Release notes for 0.11.0">v0.11.0</a>
           <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
             <svg class="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.7 17.7l1.41 1.41M2 12h2M20 12h2M6.34 17.7l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
             <svg class="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
           </button>
-          <a class="gh" href="https://github.com/codeafridi/Syspeek" rel="noopener">
+          <a class="gh" href="https://github.com/codeafridi/Crowsnest" rel="noopener">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.79-.26.79-.58v-2.23c-3.34.72-4.03-1.42-4.03-1.42-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.3-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.19.7.8.58A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
             <span>GitHub</span>
           </a>
@@ -48,25 +48,25 @@
           <p class="eyebrow">Linux, macOS, Windows. C++20 with Qt 6. Version 0.11.0.</p>
           <h1>The HUD that follows the app you are using.</h1>
           <p class="lede">
-            Pick any window and Syspeek puts that app's CPU, memory, threads, file descriptors, disk and network throughput in a small panel that floats over your desktop. Click once and the same binary opens a full console for the whole machine: host, disks, GPU, sensors, containers, Kubernetes, databases, traces and what the cloud is billing you.
+            Pick any window and Crowsnest puts that app's CPU, memory, threads, file descriptors, disk and network throughput in a small panel that floats over your desktop. Click once and the same binary opens a full console for the whole machine: host, disks, GPU, sensors, containers, Kubernetes, databases, traces and what the cloud is billing you.
           </p>
           <div class="actions">
             <a class="btn primary" href="#install">Install now</a>
-            <a class="btn" href="https://github.com/codeafridi/Syspeek" rel="noopener">View on GitHub</a>
+            <a class="btn" href="https://github.com/codeafridi/Crowsnest" rel="noopener">View on GitHub</a>
           </div>
 
           <div class="shot-frame wide">
             <div class="shot-bar">
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="shot-title">syspeek console &mdash; Overview</span>
+              <span class="shot-title">crowsnest console &mdash; Overview</span>
             </div>
             <a href="shots/overview.webp" target="_blank" rel="noopener">
-              <img src="shots/overview.webp" width="1200" height="852" alt="Syspeek Overview console: focused app CPU, RSS and process count tiles, CPU, memory and process count charts, host CPU, memory available and load charts, network, disk and utilisation charts, and the watchdog and forecast cards." />
+              <img src="shots/overview.webp" width="1200" height="852" alt="Crowsnest Overview console: focused app CPU, RSS and process count tiles, CPU, memory and process count charts, host CPU, memory available and load charts, network, disk and utilisation charts, and the watchdog and forecast cards." />
             </a>
           </div>
           <div class="hud">
             <figure class="hud-figure">
-              <img src="hud.png" width="430" height="207" alt="The compact Syspeek overlay: focused app cursor, its PID, CPU and RSS, and one line each for Docker containers and Kubernetes pods." />
+              <img src="hud.png" width="430" height="197" alt="The compact Crowsnest overlay: focused app cursor, its PID, CPU and RSS, and one line each for Docker containers and Kubernetes pods." />
               <figcaption>
                 <b>And this is the overlay.</b>
                 430 pixels wide, always on top, refreshed every second. Focus follows the window you are actually using.
@@ -114,7 +114,7 @@
       <section class="section" id="screens">
         <div class="wrap">
           <p class="section-kicker">Screenshots</p>
-          <h2>Everything below is Syspeek on one laptop.</h2>
+          <h2>Everything below is Crowsnest on one laptop.</h2>
           <p class="section-lede">
             A 12-core HP laptop running Linux, with three Docker containers, a local PostgreSQL, a single-node Kubernetes cluster, and local OTLP and DogStatsD clients feeding the console. Click any panel for the full frame.
           </p>
@@ -201,7 +201,7 @@
           <div class="notes">
             <h3 id="screenshot-notes">Notes on these captures</h3>
             <p>
-              These are live captures of Syspeek 0.11.0 on one machine &mdash; not mock-ups and not a designer's render. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD, and the cluster panels are a real single-node Kubernetes cluster with metrics-server. There is no cloud account behind this laptop, so the <b>Cloud</b> panel is a live capture against a <em>local AWS emulator</em>: the identity comes from <code>[cloud] identity=</code> (no instance metadata service exists there, and the card says so), and the instances, the rates and the Terraform diff are the emulator's real API responses decoded by the shipping code. The <b>Billed spend</b> close-up is the one panel rendered from the application's screenshot fixtures &mdash; a three-hour-old emulator account has one day of cost, which makes for an empty chart &mdash; so treat its numbers as a layout reference and the release notes for what is proven where.
+              These are live captures of Crowsnest 0.11.0 on one machine &mdash; not mock-ups and not a designer's render. The OTLP traces, DogStatsD metrics and synthetic checks are real receiver traffic from small local test clients pointed at the HUD, and the cluster panels are a real single-node Kubernetes cluster with metrics-server. There is no cloud account behind this laptop, so the <b>Cloud</b> panel is a live capture against a <em>local AWS emulator</em>: the identity comes from <code>[cloud] identity=</code> (no instance metadata service exists there, and the card says so), and the instances, the rates and the Terraform diff are the emulator's real API responses decoded by the shipping code. The <b>Billed spend</b> close-up is the one panel rendered from the application's screenshot fixtures &mdash; a three-hour-old emulator account has one day of cost, which makes for an empty chart &mdash; so treat its numbers as a layout reference and the release notes for what is proven where.
             </p>
           </div>
         </div>
@@ -224,10 +224,10 @@
                 <span class="terminal-title">bash</span>
               </div>
               <div class="terminal-body">
-                <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+                <code id="cmd-linux"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh</code>
               </div>
             </div>
-            <p>Installs for your user only, puts syspeek on PATH and starts it at login. Runs on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and other 64 bit distros with glibc 2.34 or newer. No curl? The installer falls back to wget, busybox, or your package manager.</p>
+            <p>Installs for your user only, puts crowsnest on PATH and starts it at login. Runs on Ubuntu, Debian, Fedora, Arch, openSUSE, Alpine and other 64 bit distros with glibc 2.34 or newer. No curl? The installer falls back to wget, busybox, or your package manager.</p>
             <p class="alts">Prefer a package file? Download the .deb or the AppImage from Releases. The AppImage updates itself over zsync.</p>
           </div>
 
@@ -238,7 +238,7 @@
                 <span class="terminal-title">terminal</span>
               </div>
               <div class="terminal-body">
-                <code id="cmd-mac"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Syspeek/main/install.sh | sh</code>
+                <code id="cmd-mac"><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeafridi/Crowsnest/main/install.sh | sh</code>
               </div>
             </div>
             <p>Downloads the latest DMG, copies the app into Applications and turns on login autostart. Needs macOS 12 Monterey or newer. No permissions asked, and the installer clears Gatekeeper for you.</p>
@@ -252,25 +252,25 @@
                 <span class="terminal-title">powershell</span>
               </div>
               <div class="terminal-body">
-                <code id="cmd-win"><span class="prompt">PS&gt;</span> irm https://raw.githubusercontent.com/codeafridi/Syspeek/main/cpp/packaging/windows/install.ps1 | iex</code>
+                <code id="cmd-win"><span class="prompt">PS&gt;</span> irm https://raw.githubusercontent.com/codeafridi/Crowsnest/main/cpp/packaging/windows/install.ps1 | iex</code>
               </div>
             </div>
-            <p>Open PowerShell, paste the line, done. Installs into your user folder, puts syspeek on PATH and starts it at login. Needs Windows 10 or newer. No Git Bash required.</p>
+            <p>Open PowerShell, paste the line, done. Installs into your user folder, puts crowsnest on PATH and starts it at login. Needs Windows 10 or newer. No Git Bash required.</p>
             <p class="alts">Prefer a setup wizard? Download the MSI from Releases. SmartScreen may ask once, choose Run anyway.</p>
           </div>
 
-          <p class="muted small">After install: <code>syspeek</code> to run it, <code>syspeek status</code> to check it, <code>syspeek stop</code> to quit it, <code>syspeek update</code> to upgrade.</p>
+          <p class="muted small">After install: <code>crowsnest</code> to run it, <code>crowsnest status</code> to check it, <code>crowsnest stop</code> to quit it, <code>crowsnest update</code> to upgrade.</p>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="wrap footer-inner">
-        <span>Syspeek 0.11.0. MIT license.</span>
+        <span>Crowsnest 0.11.0. MIT license.</span>
         <span class="footer-links">
-          <a href="https://github.com/codeafridi/Syspeek" rel="noopener">GitHub</a>
-          <a href="https://github.com/codeafridi/Syspeek/releases" rel="noopener">Releases</a>
-          <a href="https://github.com/codeafridi/Syspeek/blob/main/LICENSE" rel="noopener">License</a>
+          <a href="https://github.com/codeafridi/Crowsnest" rel="noopener">GitHub</a>
+          <a href="https://github.com/codeafridi/Crowsnest/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/codeafridi/Crowsnest/blob/main/LICENSE" rel="noopener">License</a>
         </span>
       </div>
     </footer>

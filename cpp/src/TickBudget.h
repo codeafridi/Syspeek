@@ -10,7 +10,7 @@ struct TickSection {
     double ms = 0.0;
 };
 
-// Cost of the sampler tick itself plus Syspeek's own footprint. Both are
+// Cost of the sampler tick itself plus Crowsnest's own footprint. Both are
 // self-measured: a HUD that claims to be light has to print the number.
 struct TickCost {
     bool available = false;

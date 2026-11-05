@@ -3,14 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_SRC="$ROOT_DIR/build/syspeek"
+BIN_SRC="$ROOT_DIR/build/crowsnest"
 BINDIR="${XDG_BINDIR:-$HOME/.local/bin}"
-BIN_DST="$BINDIR/syspeek"
+BIN_DST="$BINDIR/crowsnest"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 UNIT_DIR="$CONFIG_HOME/systemd/user"
-UNIT_FILE="$UNIT_DIR/syspeek.service"
+UNIT_FILE="$UNIT_DIR/crowsnest.service"
 AUTOSTART_DIR="$CONFIG_HOME/autostart"
-AUTOSTART_FILE="$AUTOSTART_DIR/syspeek.desktop"
+AUTOSTART_FILE="$AUTOSTART_DIR/crowsnest.desktop"
 
 use_systemd=1
 mode="install"
@@ -39,13 +39,13 @@ have_systemd() {
 
 do_uninstall() {
   if [ "$use_systemd" -eq 1 ] && command -v systemctl >/dev/null 2>&1; then
-    systemctl --user disable --now syspeek.service 2>/dev/null || true
+    systemctl --user disable --now crowsnest.service 2>/dev/null || true
   fi
   rm -f "$UNIT_FILE" "$AUTOSTART_FILE" "$BIN_DST"
   if [ "$use_systemd" -eq 1 ] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload 2>/dev/null || true
   fi
-  echo "Syspeek uninstalled (binary, service, autostart)."
+  echo "Crowsnest uninstalled (binary, service, autostart)."
 }
 
 if [ "$mode" = "uninstall" ]; then
@@ -65,18 +65,18 @@ install -m 0755 "$BIN_SRC" "$BIN_DST"
 if have_systemd; then
   mkdir -p "$UNIT_DIR"
   sed "s|@BINARY@|$BIN_DST|g" \
-    "$ROOT_DIR/packaging/syspeek.service.in" > "$UNIT_FILE"
+    "$ROOT_DIR/packaging/crowsnest.service.in" > "$UNIT_FILE"
   systemctl --user daemon-reload
   systemctl --user import-environment DISPLAY WAYLAND_DISPLAY \
     XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_RUNTIME_DIR 2>/dev/null || true
-  systemctl --user enable --now syspeek.service
+  systemctl --user enable --now crowsnest.service
   echo "Installed systemd user service: $UNIT_FILE"
-  echo "Started syspeek.service."
-  echo "Status: systemctl --user status syspeek.service"
+  echo "Started crowsnest.service."
+  echo "Status: systemctl --user status crowsnest.service"
 else
   mkdir -p "$AUTOSTART_DIR"
   sed "s|@BINARY@|$BIN_DST|g" \
-    "$ROOT_DIR/packaging/syspeek.desktop.in" > "$AUTOSTART_FILE"
+    "$ROOT_DIR/packaging/crowsnest.desktop.in" > "$AUTOSTART_FILE"
   echo "systemd user service not used; installed XDG autostart entry:"
   echo "  $AUTOSTART_FILE"
 fi

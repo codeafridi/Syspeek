@@ -538,12 +538,12 @@ int main(int argc, char *argv[]) {
     }
 
 #ifdef Q_OS_LINUX
-    check(defaultConfigPath().endsWith(QStringLiteral("syspeek/config.ini"))
-              || qEnvironmentVariableIsSet("SYSPEEK_CONFIG"),
+    check(defaultConfigPath().endsWith(QStringLiteral("crowsnest/config.ini"))
+              || qEnvironmentVariableIsSet("CROWSNEST_CONFIG"),
           "default config path shape");
 #else
     check(defaultConfigPath().endsWith(QStringLiteral("config.ini"))
-              || qEnvironmentVariableIsSet("SYSPEEK_CONFIG"),
+              || qEnvironmentVariableIsSet("CROWSNEST_CONFIG"),
           "default config path shape");
 #endif
     {
@@ -954,8 +954,8 @@ int main(int argc, char *argv[]) {
         check(remoteNormalizeUrl(QStringLiteral("http://127.0.0.1:8080"), &error)
                   == QStringLiteral("http://127.0.0.1:8080"),
               "remote url: an explicit http:// is kept for a self-hosted relay");
-        check(remoteNormalizeUrl(QStringLiteral("https://host/syspeek/"), &error)
-                  == QStringLiteral("https://host/syspeek"),
+        check(remoteNormalizeUrl(QStringLiteral("https://host/crowsnest/"), &error)
+                  == QStringLiteral("https://host/crowsnest"),
               "remote url: a path prefix survives");
         check(remoteNormalizeUrl(
                   QStringLiteral("https://user:pw@relay.example.test"), &error)

@@ -450,7 +450,7 @@ bool parseFleetSnapshotJson(const QByteArray &json, FleetPeer *out,
     if (!schemaValue.isDouble()) {
         if (error != nullptr) {
             *error = QStringLiteral(
-                "no schema field - this is not a Syspeek snapshot");
+                "no schema field - this is not a Crowsnest snapshot");
         }
         return false;
     }
@@ -467,7 +467,7 @@ bool parseFleetSnapshotJson(const QByteArray &json, FleetPeer *out,
         if (error != nullptr) {
             *error = QStringLiteral(
                 "peer runs schema %1, this build reads up to %2 - update "
-                "Syspeek here to see it")
+                "Crowsnest here to see it")
                          .arg(schema)
                          .arg(kFleetSchemaVersion);
         }
@@ -717,7 +717,7 @@ QString fleetPeerDetailText(const FleetPeer &peer, qint64 nowMs, int pollMs) {
     QStringList parts;
     parts << (peer.hostname.isEmpty() ? peer.address : peer.hostname);
     if (!peer.version.isEmpty()) {
-        parts << QStringLiteral("syspeek %1").arg(peer.version);
+        parts << QStringLiteral("crowsnest %1").arg(peer.version);
     }
     if (!peer.platform.isEmpty()) {
         parts << peer.platform;
@@ -881,7 +881,7 @@ FleetSelfInfo fleetSelfInfo(const QString &name) {
         info.hostname = QStringLiteral("unknown-host");
     }
     info.name = name.trimmed().isEmpty() ? info.hostname : name.trimmed();
-    info.version = QString::fromLatin1(SYSPEEK_APP_VERSION);
+    info.version = QString::fromLatin1(CROWSNEST_APP_VERSION);
     info.platform = QSysInfo::kernelType() + QLatin1Char('/')
         + QSysInfo::currentCpuArchitecture();
     return info;

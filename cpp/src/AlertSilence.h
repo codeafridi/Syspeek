@@ -28,7 +28,7 @@
 //     "As well as direct equality, regex matching is also supported. The '=~'
 //     syntax (similar to Prometheus) is used to represent a regex match."
 //
-// Syspeek keeps the three-state model (pending before startsAt, active inside
+// Crowsnest keeps the three-state model (pending before startsAt, active inside
 // the window, expired after endsAt) and absolute millisecond bounds so a
 // silence survives a HUD restart instead of silently restarting its clock.
 struct SilenceRule {

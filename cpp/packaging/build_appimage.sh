@@ -25,9 +25,9 @@ version="${version#v}"
 arch="$(uname -m)"
 [ "$arch" = "x86_64" ] || { echo "error: AppImage target is x86_64, you are on $arch" >&2; exit 1; }
 
-bundle="$out_dir/syspeek-portable.tar.gz"
-appdir="$out_dir/Syspeek.AppDir"
-appimage="$out_dir/Syspeek-${version}-${arch}.AppImage"
+bundle="$out_dir/crowsnest-portable.tar.gz"
+appdir="$out_dir/Crowsnest.AppDir"
+appimage="$out_dir/Crowsnest-${version}-${arch}.AppImage"
 tool_dir="$out_dir/.tools"
 appimagetool="$tool_dir/appimagetool-x86_64.AppImage"
 appimagetool_url="${APPIMAGETOOL_URL:-https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage}"
@@ -52,36 +52,36 @@ mkdir -p "$appdir/usr" "$appdir/usr/share/applications" \
 
 tar xzf "$bundle" -C "$appdir/usr"
 
-# Bundle layout is flat (syspeek, lib/, plugins/, run.sh, bridge/, README.md).
+# Bundle layout is flat (crowsnest, lib/, plugins/, run.sh, bridge/, README.md).
 # Move the binary under usr/bin; lib/ and plugins/ already sit at usr/.
 mkdir -p "$appdir/usr/bin"
-mv "$appdir/usr/syspeek" "$appdir/usr/bin/syspeek"
-chmod +x "$appdir/usr/bin/syspeek"
+mv "$appdir/usr/crowsnest" "$appdir/usr/bin/crowsnest"
+chmod +x "$appdir/usr/bin/crowsnest"
 rm -f "$appdir/usr/run.sh"
 
-cp "$here/icons/syspeek.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/syspeek.svg"
-cp "$here/icons/syspeek.svg" "$appdir/syspeek.svg"
+cp "$here/icons/crowsnest.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/crowsnest.svg"
+cp "$here/icons/crowsnest.svg" "$appdir/crowsnest.svg"
 
-cat > "$appdir/syspeek.desktop" <<EOF
+cat > "$appdir/crowsnest.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Syspeek
+Name=Crowsnest
 Comment=Compact on-screen focused-process monitor
-Exec=syspeek
-Icon=syspeek
+Exec=crowsnest
+Icon=crowsnest
 Terminal=false
 Categories=Utility;System;Monitor;
 X-AppImage-Version=${version}
 X-AppImage-BuildId=$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo dev)
 EOF
-cp "$appdir/syspeek.desktop" "$appdir/usr/share/applications/syspeek.desktop"
+cp "$appdir/crowsnest.desktop" "$appdir/usr/share/applications/crowsnest.desktop"
 
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 export LD_LIBRARY_PATH="$HERE/usr/lib:${LD_LIBRARY_PATH:-}"
 export QT_PLUGIN_PATH="$HERE/usr/plugins"
-exec "$HERE/usr/bin/syspeek" "$@"
+exec "$HERE/usr/bin/crowsnest" "$@"
 EOF
 chmod +x "$appdir/AppRun"
 
@@ -101,14 +101,14 @@ if [ ! -x "$appimagetool" ]; then
 fi
 
 # 4. Emit the AppImage (with zsync update channel so AppImageUpdate and
-#    `syspeek update`-style in-place updates work).
+#    `crowsnest update`-style in-place updates work).
 #    UPDATE_INFORMATION format:
 #    gh-releases-zsync|<owner>|<repo>|latest|<pattern>
 #    NOTE: appimagetool needs -u passed explicitly (env alone is not picked
 #    up); when zsyncmake is on PATH it also writes the .zsync file, so we
 #    expose the copy bundled inside appimagetool if the host has none.
 log "building AppImage"
-export UPDATE_INFORMATION="${UPDATE_INFORMATION:-gh-releases-zsync|codeafridi|Syspeek|latest|Syspeek-*x86_64.AppImage.zsync}"
+export UPDATE_INFORMATION="${UPDATE_INFORMATION:-gh-releases-zsync|codeafridi|Crowsnest|latest|Crowsnest-*x86_64.AppImage.zsync}"
 if ! command -v zsyncmake >/dev/null 2>&1; then
   # appimagetool ships zsyncmake inside itself, but `--appimage-extract`
   # ignores an output directory and unpacks into ./squashfs-root, so the

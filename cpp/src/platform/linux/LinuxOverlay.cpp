@@ -1,6 +1,6 @@
 #include "LinuxOverlay.h"
 
-#if defined(Q_OS_LINUX) && defined(SYSPEEK_OVERLAY_X11)
+#if defined(Q_OS_LINUX) && defined(CROWSNEST_OVERLAY_X11)
 
 // Qt first: X11/Xlib.h defines Status/Bool/None, which QtCore rejects when it
 // is pulled in afterwards (qdatastream.h:19 static guard).

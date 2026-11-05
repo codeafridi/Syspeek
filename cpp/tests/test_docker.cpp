@@ -342,7 +342,7 @@ int main() {
             DockerEngineClient verbClient(liveSocket, 30000);
             QString verbError;
             const bool missingRefused = !verbClient.post(
-                QStringLiteral("/containers/syspeek-no-such-id/restart"),
+                QStringLiteral("/containers/crowsnest-no-such-id/restart"),
                 nullptr, &verbError, 30000);
             check(missingRefused,
                   "live engine: a lifecycle verb on a missing id is refused");
@@ -350,7 +350,7 @@ int main() {
             QProcess create;
             create.start(QStringLiteral("docker"),
                          {QStringLiteral("create"), QStringLiteral("--name"),
-                          QStringLiteral("syspeek-m78-test"),
+                          QStringLiteral("crowsnest-m78-test"),
                           QStringLiteral("debian:12"),
                           QStringLiteral("sleep"), QStringLiteral("120")});
             const bool created = create.waitForFinished(15000)

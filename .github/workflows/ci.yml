@@ -77,14 +77,14 @@ jobs:
       - name: Dump smoke
         if: runner.os != 'Windows'
         run: |
-          SYSPEEK_BIN=./cpp/build/syspeek
-          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
-            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          CROWSNEST_BIN=./cpp/build/crowsnest
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/crowsnest.app/Contents/MacOS/crowsnest ]; then
+            CROWSNEST_BIN=./cpp/build/crowsnest.app/Contents/MacOS/crowsnest
           fi
-          echo "syspeek binary: $SYSPEEK_BIN"
-          "$SYSPEEK_BIN" --dump > "${RUNNER_TEMP}/syspeek-dump.json"
+          echo "crowsnest binary: $CROWSNEST_BIN"
+          "$CROWSNEST_BIN" --dump > "${RUNNER_TEMP}/crowsnest-dump.json"
           ps ax | wc -l > "${RUNNER_TEMP}/ps-count.txt"
-          python3 - "${RUNNER_TEMP}/syspeek-dump.json" \
+          python3 - "${RUNNER_TEMP}/crowsnest-dump.json" \
             "${RUNNER_TEMP}/ps-count.txt" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
@@ -381,18 +381,18 @@ jobs:
       - name: Probe smoke
         if: runner.os != 'Windows'
         run: |
-          SYSPEEK_BIN=./cpp/build/syspeek
-          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
-            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          CROWSNEST_BIN=./cpp/build/crowsnest
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/crowsnest.app/Contents/MacOS/crowsnest ]; then
+            CROWSNEST_BIN=./cpp/build/crowsnest.app/Contents/MacOS/crowsnest
           fi
-          "$SYSPEEK_BIN" --probe 3 > "${RUNNER_TEMP}/syspeek-probe.txt" 2>&1 \
-            || { cat "${RUNNER_TEMP}/syspeek-probe.txt"; exit 1; }
-          cat "${RUNNER_TEMP}/syspeek-probe.txt"
+          "$CROWSNEST_BIN" --probe 3 > "${RUNNER_TEMP}/crowsnest-probe.txt" 2>&1 \
+            || { cat "${RUNNER_TEMP}/crowsnest-probe.txt"; exit 1; }
+          cat "${RUNNER_TEMP}/crowsnest-probe.txt"
           grep -q "probe summary requested=3 received=3" \
-            "${RUNNER_TEMP}/syspeek-probe.txt"
-          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
-          ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
-          python3 - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+            "${RUNNER_TEMP}/crowsnest-probe.txt"
+          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/crowsnest-probe.txt"
+          ! grep -q "(overrun)" "${RUNNER_TEMP}/crowsnest-probe.txt"
+          python3 - "${RUNNER_TEMP}/crowsnest-probe.txt" <<'PY'
           import re, sys
           lines = open(sys.argv[1]).read().splitlines()
           ticks = [l for l in lines if l.startswith("probe tick=")]
@@ -414,15 +414,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          ./cpp/build/Release/syspeek.exe --probe 3 \
-            > "${RUNNER_TEMP}/syspeek-probe.txt" 2>&1 \
-            || { cat "${RUNNER_TEMP}/syspeek-probe.txt"; exit 1; }
-          cat "${RUNNER_TEMP}/syspeek-probe.txt"
+          ./cpp/build/Release/crowsnest.exe --probe 3 \
+            > "${RUNNER_TEMP}/crowsnest-probe.txt" 2>&1 \
+            || { cat "${RUNNER_TEMP}/crowsnest-probe.txt"; exit 1; }
+          cat "${RUNNER_TEMP}/crowsnest-probe.txt"
           grep -q "probe summary requested=3 received=3" \
-            "${RUNNER_TEMP}/syspeek-probe.txt"
-          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/syspeek-probe.txt"
-          ! grep -q "(overrun)" "${RUNNER_TEMP}/syspeek-probe.txt"
-          python - "${RUNNER_TEMP}/syspeek-probe.txt" <<'PY'
+            "${RUNNER_TEMP}/crowsnest-probe.txt"
+          grep -q "host=1 hostCpu" "${RUNNER_TEMP}/crowsnest-probe.txt"
+          ! grep -q "(overrun)" "${RUNNER_TEMP}/crowsnest-probe.txt"
+          python - "${RUNNER_TEMP}/crowsnest-probe.txt" <<'PY'
           import re, sys
           lines = open(sys.argv[1]).read().splitlines()
           ticks = [l for l in lines if l.startswith("probe tick=")]
@@ -441,19 +441,19 @@ jobs:
       - name: Record smoke
         if: runner.os != 'Windows'
         run: |
-          SYSPEEK_BIN=./cpp/build/syspeek
-          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/syspeek.app/Contents/MacOS/syspeek ]; then
-            SYSPEEK_BIN=./cpp/build/syspeek.app/Contents/MacOS/syspeek
+          CROWSNEST_BIN=./cpp/build/crowsnest
+          if [ "$(uname -s)" = "Darwin" ] && [ -x ./cpp/build/crowsnest.app/Contents/MacOS/crowsnest ]; then
+            CROWSNEST_BIN=./cpp/build/crowsnest.app/Contents/MacOS/crowsnest
           fi
-          "$SYSPEEK_BIN" --record=3 --format=csv --out="${RUNNER_TEMP}/syspeek-history.csv"
-          head -3 "${RUNNER_TEMP}/syspeek-history.csv"
+          "$CROWSNEST_BIN" --record=3 --format=csv --out="${RUNNER_TEMP}/crowsnest-history.csv"
+          head -3 "${RUNNER_TEMP}/crowsnest-history.csv"
           grep -q "^# hostname;interval;timestamp;APP;app_pid;" \
-            "${RUNNER_TEMP}/syspeek-history.csv"
-          [ "$(wc -l < "${RUNNER_TEMP}/syspeek-history.csv")" -eq 4 ]
-          "$SYSPEEK_BIN" --record=2 --format=json --out="${RUNNER_TEMP}/syspeek-history.json"
-          python3 - "${RUNNER_TEMP}/syspeek-history.json" <<'PY'
+            "${RUNNER_TEMP}/crowsnest-history.csv"
+          [ "$(wc -l < "${RUNNER_TEMP}/crowsnest-history.csv")" -eq 4 ]
+          "$CROWSNEST_BIN" --record=2 --format=json --out="${RUNNER_TEMP}/crowsnest-history.json"
+          python3 - "${RUNNER_TEMP}/crowsnest-history.json" <<'PY'
           import json, sys
-          d = json.load(open(sys.argv[1]))["syspeek"]
+          d = json.load(open(sys.argv[1]))["crowsnest"]
           for key in ("version", "platform", "hostname", "intervalMs", "samples"):
               assert key in d, key
           assert len(d["samples"]) == 2, d["samples"]
@@ -473,17 +473,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          ./cpp/build/Release/syspeek.exe --record=3 --format=csv \
-            --out="${RUNNER_TEMP}/syspeek-history.csv"
-          head -3 "${RUNNER_TEMP}/syspeek-history.csv"
+          ./cpp/build/Release/crowsnest.exe --record=3 --format=csv \
+            --out="${RUNNER_TEMP}/crowsnest-history.csv"
+          head -3 "${RUNNER_TEMP}/crowsnest-history.csv"
           grep -q "^# hostname;interval;timestamp;APP;app_pid;" \
-            "${RUNNER_TEMP}/syspeek-history.csv"
-          [ "$(wc -l < "${RUNNER_TEMP}/syspeek-history.csv")" -eq 4 ]
-          ./cpp/build/Release/syspeek.exe --record=2 --format=json \
-            --out="${RUNNER_TEMP}/syspeek-history.json"
-          python - "${RUNNER_TEMP}/syspeek-history.json" <<'PY'
+            "${RUNNER_TEMP}/crowsnest-history.csv"
+          [ "$(wc -l < "${RUNNER_TEMP}/crowsnest-history.csv")" -eq 4 ]
+          ./cpp/build/Release/crowsnest.exe --record=2 --format=json \
+            --out="${RUNNER_TEMP}/crowsnest-history.json"
+          python - "${RUNNER_TEMP}/crowsnest-history.json" <<'PY'
           import json, sys
-          d = json.load(open(sys.argv[1]))["syspeek"]
+          d = json.load(open(sys.argv[1]))["crowsnest"]
           assert d["platform"] == "windows", d["platform"]
           assert len(d["samples"]) == 2, d["samples"]
           print("export json ok: %d samples" % len(d["samples"]))
@@ -493,12 +493,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          SYSPEEK_BIN=./cpp/build/Release/syspeek.exe
-          echo "syspeek binary: $SYSPEEK_BIN"
-          "$SYSPEEK_BIN" --dump > "${RUNNER_TEMP}/syspeek-dump.json"
+          CROWSNEST_BIN=./cpp/build/Release/crowsnest.exe
+          echo "crowsnest binary: $CROWSNEST_BIN"
+          "$CROWSNEST_BIN" --dump > "${RUNNER_TEMP}/crowsnest-dump.json"
           ps_count=$(powershell.exe -NoProfile -Command "(Get-Process).Count" | tr -d '\r')
           echo "Get-Process count: $ps_count"
-          python - "${RUNNER_TEMP}/syspeek-dump.json" "$ps_count" <<'PY'
+          python - "${RUNNER_TEMP}/crowsnest-dump.json" "$ps_count" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
           h = d["host"]
@@ -729,7 +729,7 @@ jobs:
       - name: Package DMG (mac)
         if: runner.os == 'macOS'
         run: |
-          SYSPEEK_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
+          CROWSNEST_BUILD_DIR=cpp/build bash cpp/packaging/build_macos.sh
           ls -la cpp/build/packaging/
 
 
@@ -744,7 +744,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $zip = Get-ChildItem cpp/build/packaging/Syspeek-*-windows-portable.zip |
+          $zip = Get-ChildItem cpp/build/packaging/Crowsnest-*-windows-portable.zip |
             Select-Object -First 1
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
@@ -765,14 +765,14 @@ jobs:
         shell: pwsh
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File cpp/packaging/windows/write_manifests.ps1 -Version 0.0.0
-          $inst = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.installer.yaml -Raw
+          $inst = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Crowsnest.installer.yaml -Raw
           if ($inst -notmatch 'InstallerSha256:\s*[0-9a-f]{64}') { throw 'manifest: hash missing' }
           if ($inst -match '\$MSISHA|\$ZIPSHA|__MSISHA__|__ZIPSHA__') { throw 'manifest: unexpanded token' }
-          $ver = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.yaml -Raw
+          $ver = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Crowsnest.yaml -Raw
           if ($ver -notmatch '(?m)^DefaultLocale:\s*en-US\s*$') { throw 'manifest: version manifest missing DefaultLocale' }
-          $loc = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Syspeek.locale.en-US.yaml -Raw
+          $loc = Get-Content cpp/packaging/windows/manifests/0.0.0/Codeafridi.Crowsnest.locale.en-US.yaml -Raw
           if ($loc -notmatch '(?m)^PackageLocale:\s*en-US\s*$') { throw 'manifest: locale manifest missing PackageLocale' }
-          Get-Content cpp/packaging/windows/manifests/scoop/syspeek-scoop.json | ConvertFrom-Json | Out-Null
+          Get-Content cpp/packaging/windows/manifests/scoop/crowsnest-scoop.json | ConvertFrom-Json | Out-Null
           Write-Host 'manifest smoke ok'
 
       - name: Installer smoke (linux)
@@ -790,35 +790,35 @@ jobs:
           # published release that actually carries the asset.
           tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=6" \
             --jq '.[] | select(.draft == false)
-                  | select([.assets[].name] | index("syspeek-portable.tar.gz"))
+                  | select([.assets[].name] | index("crowsnest-portable.tar.gz"))
                   | .tag_name' | head -1)"
           if [ -n "${tag}" ]; then
-            export SYSPEEK_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/syspeek-portable.tar.gz"
+            export CROWSNEST_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/crowsnest-portable.tar.gz"
             echo "smoke bundle from: ${tag}"
           fi
           sh install.sh --no-bridge --no-autostart
-          test -x "$HOME/.local/opt/syspeek/syspeek"
-          test -x "$HOME/.local/bin/syspeek"
-          "$HOME/.local/opt/syspeek/run.sh" --dump |
+          test -x "$HOME/.local/opt/crowsnest/crowsnest"
+          test -x "$HOME/.local/bin/crowsnest"
+          "$HOME/.local/opt/crowsnest/run.sh" --dump |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux install dump ok:", d["processCount"], "procs")'
-          "$HOME/.local/bin/syspeek" status
-          "$HOME/.local/bin/syspeek" --dump 2>/dev/null |
+          "$HOME/.local/bin/crowsnest" status
+          "$HOME/.local/bin/crowsnest" --dump 2>/dev/null |
             python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["processCount"]>0; print("linux wrapper passthrough ok")'
           sh install.sh --uninstall
-          test ! -d "$HOME/.local/opt/syspeek"
+          test ! -d "$HOME/.local/opt/crowsnest"
           echo "linux installer ok"
 
       - name: Screenshot evidence (linux)
         if: matrix.os == 'ubuntu-24.04'
         run: |
-          cmake --build cpp/build --target syspeek_screenshot -j 3
+          cmake --build cpp/build --target crowsnest_screenshot -j 3
           mkdir -p "${RUNNER_TEMP}/screens"
 
           render() {
             local index="$1"
             local out="${RUNNER_TEMP}/screens/panel-$(printf '%02d' "$index").png"
             echo "render page ${index}"
-            QT_QPA_PLATFORM=offscreen ./cpp/build/syspeek_screenshot \
+            QT_QPA_PLATFORM=offscreen ./cpp/build/crowsnest_screenshot \
               "$out" panel "$index" || {
               local rc=$?
               echo "::error::screenshot render failed: page ${index} rc=${rc}"
@@ -829,7 +829,7 @@ jobs:
               if command -v gdb >/dev/null 2>&1; then
                 gdb -batch -ex "set confirm off" -ex run \
                   -ex "thread apply all bt 20" --args \
-                  ./cpp/build/syspeek_screenshot "$out" panel "$index" \
+                  ./cpp/build/crowsnest_screenshot "$out" panel "$index" \
                   2>&1 | tail -80 || true
               fi
               exit 2
@@ -854,7 +854,7 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v7
         with:
-          name: syspeek-screenshots
+          name: crowsnest-screenshots
           path: ${{ runner.temp }}/screens/panel-*.png
           if-no-files-found: error
 
@@ -863,11 +863,11 @@ jobs:
         run: |
           sh -n install.sh
           sh install.sh --no-autostart
-          test -d /Applications/Syspeek.app
-          test -x /Applications/Syspeek.app/Contents/MacOS/syspeek
-          test -x /Applications/Syspeek.app/Contents/Resources/syspeek
-          test -x /usr/local/bin/syspeek
-          /Applications/Syspeek.app/Contents/MacOS/syspeek --dump > /tmp/mac-smoke-dump.json 2>/dev/null
+          test -d /Applications/Crowsnest.app
+          test -x /Applications/Crowsnest.app/Contents/MacOS/crowsnest
+          test -x /Applications/Crowsnest.app/Contents/Resources/crowsnest
+          test -x /usr/local/bin/crowsnest
+          /Applications/Crowsnest.app/Contents/MacOS/crowsnest --dump > /tmp/mac-smoke-dump.json 2>/dev/null
           python3 - /tmp/mac-smoke-dump.json <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
@@ -879,10 +879,10 @@ jobs:
           extra = f", {len(fs)} fs" if fs else " (shipped pre-M54: no fs block)"
           print("mac install dump ok:", d["processCount"], "procs" + extra)
           PY
-          /usr/local/bin/syspeek status
+          /usr/local/bin/crowsnest status
           sh install.sh --uninstall
-          test ! -d /Applications/Syspeek.app
-          test ! -f /usr/local/bin/syspeek
+          test ! -d /Applications/Crowsnest.app
+          test ! -f /usr/local/bin/crowsnest
           echo "mac installer ok"
 
       - name: Installer smoke (windows)
@@ -890,39 +890,39 @@ jobs:
         shell: bash
         run: |
           sh -n install.sh
-          ZIPW=$(ls "$PWD"/cpp/build/packaging/Syspeek-*-windows-portable.zip | head -1)
+          ZIPW=$(ls "$PWD"/cpp/build/packaging/Crowsnest-*-windows-portable.zip | head -1)
           test -f "$ZIPW"
           WINZIP=$(cygpath -m "$ZIPW")
-          SYSPEEK_WIN_URL="file:///$WINZIP" sh install.sh --no-autostart
-          test -f "$LOCALAPPDATA/Syspeek/syspeek.exe"
-          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
-          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
-          command -v syspeek
-          syspeek --autostart=status
-          cmd //c where syspeek
+          CROWSNEST_WIN_URL="file:///$WINZIP" sh install.sh --no-autostart
+          test -f "$LOCALAPPDATA/Crowsnest/crowsnest.exe"
+          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/crowsnest.cmd"
+          test -f "$LOCALAPPDATA/Microsoft/WindowsApps/crowsnest"
+          command -v crowsnest
+          crowsnest --autostart=status
+          cmd //c where crowsnest
           grep -E 'WindowsApps' <<<"$PATH"
-          "$LOCALAPPDATA/Syspeek/syspeek.exe" --autostart=status
-          "$LOCALAPPDATA/Syspeek/syspeek.exe" stop
-          "$LOCALAPPDATA/Syspeek/syspeek.exe" --dump > dump.json
+          "$LOCALAPPDATA/Crowsnest/crowsnest.exe" --autostart=status
+          "$LOCALAPPDATA/Crowsnest/crowsnest.exe" stop
+          "$LOCALAPPDATA/Crowsnest/crowsnest.exe" --dump > dump.json
           python3 -c 'import json; d=json.load(open("dump.json")); assert d["processCount"]>0; assert d.get("software",{}).get("programs",0)>0; print("win install dump ok:", d["processCount"], "procs", d.get("software"))'
           sh install.sh --uninstall
-          test ! -d "$LOCALAPPDATA/Syspeek"
-          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek.cmd"
-          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/syspeek"
+          test ! -d "$LOCALAPPDATA/Crowsnest"
+          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/crowsnest.cmd"
+          test ! -f "$LOCALAPPDATA/Microsoft/WindowsApps/crowsnest"
           echo "windows installer ok"
 
       - name: Installer smoke (windows pwsh)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $zip = (Get-Item "$PWD/cpp/build/packaging/Syspeek-*-windows-portable.zip" | Select-Object -First 1)
-          $env:SYSPEEK_WIN_URL = $zip.FullName
-          Write-Host "using local zip: $env:SYSPEEK_WIN_URL"
+          $zip = (Get-Item "$PWD/cpp/build/packaging/Crowsnest-*-windows-portable.zip" | Select-Object -First 1)
+          $env:CROWSNEST_WIN_URL = $zip.FullName
+          Write-Host "using local zip: $env:CROWSNEST_WIN_URL"
           ./cpp/packaging/windows/install.ps1 -NoAutostart
-          if (-not (Test-Path "$env:LOCALAPPDATA\Syspeek\syspeek.exe")) { throw 'install: exe missing' }
-          $shim = Get-Command syspeek -ErrorAction Stop | Select-Object -ExpandProperty Source
+          if (-not (Test-Path "$env:LOCALAPPDATA\Crowsnest\crowsnest.exe")) { throw 'install: exe missing' }
+          $shim = Get-Command crowsnest -ErrorAction Stop | Select-Object -ExpandProperty Source
           Write-Host "shim: $shim"
-          $exe = "$env:LOCALAPPDATA\Syspeek\syspeek.exe"
+          $exe = "$env:LOCALAPPDATA\Crowsnest\crowsnest.exe"
           cmd /c "`"$exe`" stop"
           # A bare shim must detach its GUI child. This catches cmd.exe's
           # direct-GUI-exe behavior, which otherwise holds the terminal until
@@ -931,13 +931,13 @@ jobs:
           & $shim
           $bareStart.Stop()
           if ($LASTEXITCODE -ne 0 -or $bareStart.Elapsed.TotalSeconds -gt 5) {
-            throw "bare syspeek did not return promptly (rc=$LASTEXITCODE, $($bareStart.Elapsed.TotalSeconds)s)"
+            throw "bare crowsnest did not return promptly (rc=$LASTEXITCODE, $($bareStart.Elapsed.TotalSeconds)s)"
           }
           Start-Sleep -Seconds 2
           cmd /c "`"$exe`" status > bare-status.out 2>&1"
           $bareStatus = Get-Content bare-status.out -Raw
           if ($bareStatus -notmatch 'other instances: [1-9]\d*') {
-            throw "bare syspeek did not launch the HUD ($bareStatus)"
+            throw "bare crowsnest did not launch the HUD ($bareStatus)"
           }
           cmd /c "`"$exe`" stop"
           cmd /c "`"$exe`" start > start.out 2>&1"
@@ -961,28 +961,28 @@ jobs:
           if (($dump.processCount -as [int]) -lt 1) { throw 'dump: processCount missing' }
           Write-Host "pwsh installer dump ok: $($dump.processCount) procs"
           ./cpp/packaging/windows/install.ps1 -Uninstall
-          if (Test-Path "$env:LOCALAPPDATA\Syspeek") { throw 'uninstall: dir still present' }
+          if (Test-Path "$env:LOCALAPPDATA\Crowsnest") { throw 'uninstall: dir still present' }
           Write-Host 'pwsh installer ok'
 
       - name: Upload msi artifact (windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: syspeek-windows-msi
+          name: crowsnest-windows-msi
           path: |
-            cpp/build/packaging/Syspeek-*-windows.msi
-            cpp/build/packaging/Syspeek-*-windows.msi.sha256
-            cpp/build/packaging/Syspeek-*-windows-portable.zip
-            cpp/build/packaging/Syspeek-*-windows-portable.zip.sha256
+            cpp/build/packaging/Crowsnest-*-windows.msi
+            cpp/build/packaging/Crowsnest-*-windows.msi.sha256
+            cpp/build/packaging/Crowsnest-*-windows-portable.zip
+            cpp/build/packaging/Crowsnest-*-windows-portable.zip.sha256
           if-no-files-found: error
       - name: Upload dmg artifact (mac)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: syspeek-macos-dmg
+          name: crowsnest-macos-dmg
           path: |
-            cpp/build/packaging/Syspeek-*-macos.dmg
-            cpp/build/packaging/Syspeek-*-macos.dmg.sha256
+            cpp/build/packaging/Crowsnest-*-macos.dmg
+            cpp/build/packaging/Crowsnest-*-macos.dmg.sha256
           if-no-files-found: error
 
   # The Debian package links the DISTRIBUTION's Qt, not the aqt Qt the matrix

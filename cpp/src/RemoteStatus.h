@@ -55,7 +55,7 @@ QString remoteSettingsLine(const RemoteOptions &options);
 struct RemoteMachine {
     QString id;       // M100's stable machine id; empty until it is derived
     QString name;     // [remote] name= overrides the id on the relay
-    QString version;  // Syspeek version
+    QString version;  // Crowsnest version
     QString platform;
     qint64 sentAtMs = 0;
 };
@@ -229,7 +229,7 @@ QString remoteRowText(const RemoteReportState &state);
 // a replaced network card is the same machine, a reinstall is a new one.
 // ---------------------------------------------------------------------------
 
-// <cache>/syspeek/machine-id
+// <cache>/crowsnest/machine-id
 QString remoteMachineIdPath();
 QString remoteShortHostname();
 QString remotePrimaryMac(); // "" when no interface reports one

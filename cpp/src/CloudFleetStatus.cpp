@@ -685,7 +685,7 @@ QString cloudFleetCredentialHint(CloudProvider provider) {
 
 QString fleetCredentialsText(CloudProvider provider) {
     return QStringLiteral(
-               "fleet: %1 has no credentials here - run `%2` (Syspeek never "
+               "fleet: %1 has no credentials here - run `%2` (Crowsnest never "
                "reads or stores them)")
         .arg(cloudProviderName(provider), cloudFleetCredentialHint(provider));
 }

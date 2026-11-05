@@ -1,11 +1,12 @@
-cask "syspeek" do
+cask "crowsnest" do
   version "0.6.0"
   sha256 :no_check
 
-  url "https://github.com/codeafridi/Syspeek/releases/download/v#{version}/Syspeek-#{version}-macos.dmg"
-  name "Syspeek"
+  url "https://github.com/codeafridi/Crowsnest/releases/download/v#{version}/Crowsnest-#{version}-macos.dmg"
+  name "Crowsnest"
   desc "Cross-platform overlay system monitor and reliability HUD for local machines"
-  homepage "https://github.com/codeafridi/Syspeek"
+  homepage "https://github.com/codeafridi/Crowsnest"
+  conflicts_with cask: "syspeek"
 
   livecheck do
     url :homepage
@@ -14,9 +15,9 @@ cask "syspeek" do
 
   depends_on macos: ">= :monterey"
 
-  app "Syspeek.app"
+  app "Crowsnest.app"
 
   # The build is currently unsigned. After the first launch macOS may
   # block it; either right-click -> Open once, or run:
-  #   xattr -d com.apple.quarantine /Applications/Syspeek.app
+  #   xattr -d com.apple.quarantine /Applications/Crowsnest.app
 end

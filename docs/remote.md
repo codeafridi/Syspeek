@@ -25,7 +25,7 @@ built from a real snapshot for them.
 ## The contract
 
 The wire format is one file set, owned by two repositories at once. The relay
-(`syspeek-relay`) keeps it in `schema/`; this repository keeps an identical copy
+(`crowsnest-relay`) keeps it in `schema/`; this repository keeps an identical copy
 in `cpp/tests/fixtures/remote/`:
 
 ```
@@ -36,7 +36,7 @@ event.json         ingest.json's first event on its own
 lock               sha256 over the four files
 ```
 
-`ingest.json` is not authored here — `SYSPEEK_WRITE_FIXTURE=1` regenerates it
+`ingest.json` is not authored here — `CROWSNEST_WRITE_FIXTURE=1` regenerates it
 from the real builder, so the fixture cannot describe a payload the code does not
 produce. Both builds recompute the lock; whichever side changes a byte alone goes
 red with `schema drift: update both repos`. The full rules (additive-only, when
@@ -64,11 +64,11 @@ that CA in `ca_file`, which is **added to** the system store rather than
 replacing it — and a `ca_file` that holds no certificate fails with the file's
 name, not with a quiet fallback to the system store.
 
-`syspeek --dump` reports the effective values without sending anything.
+`crowsnest --dump` reports the effective values without sending anything.
 
 ## The offline spool
 
-A report is written to `<cache>/syspeek/remote-spool.bin` **before** the attempt
+A report is written to `<cache>/crowsnest/remote-spool.bin` **before** the attempt
 and released only when the relay has answered. Closing the laptop or losing the
 relay therefore costs nothing, and the buffer has a stated ceiling:
 
@@ -85,7 +85,7 @@ the same numbers.
 
 ## Machine identity
 
-The first run with `[remote] enabled=true` writes `<cache>/syspeek/machine-id`:
+The first run with `[remote] enabled=true` writes `<cache>/crowsnest/machine-id`:
 a UUID, written through a temp file and an atomic rename, readable and writable
 by your user only (POSIX mode `0600`; on Windows the file inherits the user
 profile's ACL, because Windows has no mode bits). That id is the machine, and it survives restarts, renames and
@@ -107,6 +107,6 @@ A reinstall that deletes the cache directory produces a new id: the relay sees a
 new machine, which is the honest reading of "the old install is gone".
 
 Two machines reporting the same id are never merged by the client. The relay
-flags the duplicate and shows both rows as they reported; Syspeek does not
+flags the duplicate and shows both rows as they reported; Crowsnest does not
 renumber a machine on its own, because silently merging two hosts hides that one
 of them is not what it claims to be.

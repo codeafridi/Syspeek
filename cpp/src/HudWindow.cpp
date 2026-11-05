@@ -65,7 +65,7 @@ QString statusColor(const QString &status) {
 
 HudWindow::HudWindow(QWidget *parent)
     : QWidget(parent) {
-    setWindowTitle(QStringLiteral("Syspeek"));
+    setWindowTitle(QStringLiteral("Crowsnest"));
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool
                    | Qt::WindowDoesNotAcceptFocus);
     setAttribute(Qt::WA_StyledBackground, true);
@@ -95,7 +95,7 @@ HudWindow::HudWindow(QWidget *parent)
     auto *header = new QHBoxLayout();
     header->setSpacing(6);
 
-    auto *title = new QLabel(QStringLiteral("SYSPEEK"), this);
+    auto *title = new QLabel(QStringLiteral("CROWSNEST"), this);
     title->setObjectName(QStringLiteral("title"));
     title->setFont(captionFont());
 
@@ -702,7 +702,7 @@ void HudWindow::exportHistory(const QString &format) {
     ExportMeta meta;
     meta.hostname = QSysInfo::machineHostName();
     meta.platform = platformName();
-    meta.version = QString::fromLatin1(SYSPEEK_APP_VERSION);
+    meta.version = QString::fromLatin1(CROWSNEST_APP_VERSION);
     meta.intervalMs = m_exportIntervalMs;
 
     const QString body = exportRows(m_exportRows, meta, fmt);
@@ -714,7 +714,7 @@ void HudWindow::exportHistory(const QString &format) {
     }
     QDir().mkpath(dir);
     const QString path =
-        dir + QStringLiteral("/syspeek-history-%1.%2")
+        dir + QStringLiteral("/crowsnest-history-%1.%2")
                   .arg(QDateTime::currentDateTimeUtc().toString(
                            QStringLiteral("yyyyMMdd-HHmmss")),
                        fmt);

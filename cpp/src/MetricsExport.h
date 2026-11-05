@@ -19,7 +19,7 @@
 // JSON structure mirrors the sadf -j envelope nested the same way
 // ({"sysstat": {"hosts": [{"nodename", "statistics": [{"timestamp":
 // {"date","time","tz"}, "<domain>": ...}]}]}}) but stays inside our own
-// namespace ({"syspeek": ...}) - never impersonating sysstat - and reuses
+// namespace ({"crowsnest": ...}) - never impersonating sysstat - and reuses
 // the --dump vocabulary (host.cpuPercent, host.memAvailableKb, load1).
 
 struct ExportRow {

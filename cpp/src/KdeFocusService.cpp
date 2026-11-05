@@ -19,12 +19,12 @@ bool KdeFocusService::registerService() {
         return false;
     }
 
-    if (!bus.registerService(QStringLiteral("org.syspeek.Focus"))) {
+    if (!bus.registerService(QStringLiteral("org.crowsnest.Focus"))) {
         return false;
     }
 
     return bus.registerObject(QStringLiteral("/Focus"),
-                              QStringLiteral("org.syspeek.Focus"),
+                              QStringLiteral("org.crowsnest.Focus"),
                               this, QDBusConnection::ExportAllSlots);
 #else
     return false;

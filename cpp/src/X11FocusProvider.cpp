@@ -1,6 +1,6 @@
 #include "X11FocusProvider.h"
 
-#if defined(Q_OS_LINUX) && defined(SYSPEEK_X11)
+#if defined(Q_OS_LINUX) && defined(CROWSNEST_X11)
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>

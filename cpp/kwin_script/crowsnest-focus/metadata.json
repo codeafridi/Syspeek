@@ -1,0 +1,11 @@
+{
+  "KPlugin": {
+    "Id": "crowsnest-focus",
+    "Name": "Crowsnest Focus Bridge",
+    "Description": "Shares the focused window PID with the local Crowsnest application over D-Bus.",
+    "Version": "1.0",
+    "License": "MIT"
+  },
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js"
+}
