@@ -67,8 +67,7 @@ function Remove-LegacyBrand {
     # User config lives in AppData and is migrated by the app on first start.
     Get-Process -Name syspeek -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
-    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' \
-        -Name 'Syspeek' -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Syspeek' -ErrorAction SilentlyContinue
     foreach ($legacy in @('syspeek.cmd', 'syspeek')) {
         $path = Join-Path $ShimDir $legacy
         if (Test-Path $path) { Remove-Item -Force $path -ErrorAction SilentlyContinue }

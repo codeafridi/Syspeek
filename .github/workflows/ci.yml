@@ -781,21 +781,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sh -n install.sh
-          # Release-race discipline (0.8.5 triage): resolving through the
-          # moving `latest` alias is unsound — the tag run publishes the
-          # release mid-smoke and the alias flips between probe and
-          # download (observed live in run 40052429151: probe 200 against
-          # v0.8.4, download 404 against the freshly-published v0.8.5
-          # before its portable upload). Resolve ONCE from the newest
-          # published release that actually carries the asset.
-          tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=6" \
-            --jq '.[] | select(.draft == false)
-                  | select([.assets[].name] | index("crowsnest-portable.tar.gz"))
-                  | .tag_name' | head -1)"
-          if [ -n "${tag}" ]; then
-            export CROWSNEST_BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/crowsnest-portable.tar.gz"
-            echo "smoke bundle from: ${tag}"
-          fi
+          # Smoke the installer against THIS job's binary, not a published
+          # release: the rename means no Crowsnest release exists yet, and an
+          # old bundle would install the old brand under the new paths. The
+          # bundle is the same shape build_portable.sh makes (binary + run.sh).
+          bundle="$(mktemp -d)"
+          cp cpp/build/crowsnest "$bundle/"
+          cat > "$bundle/run.sh" <<'RUN'
+          #!/bin/sh
+          HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+          exec "$HERE/crowsnest" "$@"
+          RUN
+          chmod +x "$bundle/run.sh"
+          tar -C "$bundle" -czf "${RUNNER_TEMP}/crowsnest-portable.tar.gz" .
+          export CROWSNEST_BUNDLE_URL="file://${RUNNER_TEMP}/crowsnest-portable.tar.gz"
           sh install.sh --no-bridge --no-autostart
           test -x "$HOME/.local/opt/crowsnest/crowsnest"
           test -x "$HOME/.local/bin/crowsnest"
@@ -862,6 +861,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           sh -n install.sh
+          # The rename means no Crowsnest DMG is published yet; install the
+          # DMG this job just built so the smoke tests the current code.
+          dmg="$(ls "$PWD"/cpp/build/packaging/Crowsnest-*-macos.dmg | head -1)"
+          export CROWSNEST_DMG_URL="file://${dmg}"
           sh install.sh --no-autostart
           test -d /Applications/Crowsnest.app
           test -x /Applications/Crowsnest.app/Contents/MacOS/crowsnest
