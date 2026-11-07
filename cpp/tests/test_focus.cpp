@@ -6,7 +6,6 @@
 
 #include <QCoreApplication>
 #include <QFile>
-#include <QTemporaryDir>
 #include <QTemporaryFile>
 
 #include <signal.h>
@@ -99,37 +98,6 @@ int main(int argc, char *argv[]) {
 
     GnomePidFileProvider emptyPathProvider{QString()};
     check(emptyPathProvider.focusedPid() == -1, "empty path -> -1");
-
-    // The bridge is installed separately, so an upgraded app can still be
-    // talking to the previous release's extension. Its pid file keeps the old
-    // name; reading it means the rename does not turn focus into no-focus.
-    QTemporaryDir legacyDir;
-    check(legacyDir.isValid(), "temp dir for the legacy pid file");
-    if (legacyDir.isValid()) {
-        QFile legacy(legacyDir.filePath(QStringLiteral("syspeek-active-pid")));
-        if (legacy.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            legacy.write(QByteArray::number(self));
-            legacy.write("\n");
-            legacy.close();
-        }
-        GnomePidFileProvider legacyProvider(
-            legacyDir.filePath(QStringLiteral("crowsnest-active-pid")));
-        check(legacyProvider.focusedPid() == self,
-              "legacy focus-bridge pid file is read when the new one is absent");
-        QFile fresh(legacyDir.filePath(QStringLiteral("crowsnest-active-pid")));
-        if (legacy.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            legacy.write(QByteArray::number(deadPid));
-            legacy.write("\n");
-            legacy.close();
-        }
-        if (fresh.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            fresh.write(QByteArray::number(self));
-            fresh.write("\n");
-            fresh.close();
-        }
-        check(legacyProvider.focusedPid() == self,
-              "the new pid file is read when it holds a live pid");
-    }
 
     const int live = spawnSleeper();
     check(live > 0 && linuxproc::exists(live), "spawned a live external process");

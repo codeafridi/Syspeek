@@ -263,48 +263,13 @@ bool remoteConfigUsable(const RemoteOptions &options) {
     return !remoteNormalizeUrl(options.url, nullptr).isEmpty();
 }
 
-namespace {
-
-// The rename moved the cache directory. A machine id that changes makes the
-// relay see a brand-new machine (and the fleet grows a duplicate), so the old
-// identity is copied across before the first use.
-void migrateLegacyCacheFile(const QString &newPath) {
-    if (QFile::exists(newPath)) {
-        return;
-    }
-    QStringList candidates;
-    QString capital = newPath;
-    capital.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
-    capital.replace(QStringLiteral("Crowsnest"), QStringLiteral("Syspeek"));
-    candidates.append(capital);
-    QString lower = newPath;
-    lower.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
-    lower.replace(QStringLiteral("crowsnest"), QStringLiteral("syspeek"));
-    if (!candidates.contains(lower)) {
-        candidates.append(lower);
-    }
-    for (const QString &old : candidates) {
-        if (old == newPath || !QFile::exists(old)) {
-            continue;
-        }
-        QDir().mkpath(QFileInfo(newPath).absolutePath());
-        if (QFile::copy(old, newPath)) {
-            return;
-        }
-    }
-}
-
-} // namespace
-
 QString remoteSpoolPath() {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (base.isEmpty()) {
         base = QDir::tempPath() + QStringLiteral("/crowsnest");
     }
-    const QString path = base + QStringLiteral("/remote-spool.bin");
-    migrateLegacyCacheFile(path);
-    return path;
+    return base + QStringLiteral("/remote-spool.bin");
 }
 
 QString remoteConfigNote(const RemoteOptions &options) {
@@ -1185,9 +1150,7 @@ QString remoteMachineIdPath() {
     if (base.isEmpty()) {
         base = QDir::tempPath() + QStringLiteral("/crowsnest");
     }
-    const QString path = base + QStringLiteral("/machine-id");
-    migrateLegacyCacheFile(path);
-    return path;
+    return base + QStringLiteral("/machine-id");
 }
 
 QString remoteShortHostname() {

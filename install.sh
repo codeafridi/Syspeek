@@ -60,14 +60,6 @@ MAC_PLIST="${HOME_DIR}/Library/LaunchAgents/${MAC_LABEL}.plist"
 MAC_APP_DEFAULT="/Applications/Crowsnest.app"
 MAC_CLI="/usr/local/bin/crowsnest"
 
-# The previous brand. Removed on install and uninstall so an upgrade cannot
-# leave two autostarts or a stale focus extension writing the old pid file.
-LEGACY_GNOME_UUID="syspeek-focus@codeafridi"
-LEGACY_KDE_ID="syspeek-focus"
-LEGACY_MAC_LABEL="dev.syspeek.hud"
-LEGACY_MAC_PLIST="${HOME_DIR}/Library/LaunchAgents/${LEGACY_MAC_LABEL}.plist"
-LEGACY_MAC_CLI="/usr/local/bin/syspeek"
-
 autostart=1
 bridge=1
 mode=install
@@ -634,43 +626,7 @@ remove_focus_bridge() {
   rm -rf "$HOME_DIR/.local/share/kwin/scripts/$KDE_ID"
 }
 
-remove_legacy_brand() {
-  # Linux: old systemd unit and XDG autostart would keep launching the old
-  # binary (and the old focus bridge would keep writing the old pid file).
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user disable --now syspeek.service >/dev/null 2>&1 || true
-  fi
-  rm -f "$CONFIG_HOME/systemd/user/syspeek.service" \
-        "$CONFIG_HOME/autostart/syspeek.desktop" \
-        "$BIN_DIR/syspeek" 2>/dev/null || true
-  if [ -d "$HOME_DIR/.local/share/gnome-shell/extensions/$LEGACY_GNOME_UUID" ]; then
-    disable_gnome_extension "$LEGACY_GNOME_UUID"
-    rm -rf "$HOME_DIR/.local/share/gnome-shell/extensions/$LEGACY_GNOME_UUID"
-  fi
-  rm -rf "$HOME_DIR/.local/share/kwin/scripts/$LEGACY_KDE_ID"
-
-  # macOS: old LaunchAgent and CLI shim.
-  launchctl bootout "gui/$(id -u)/${LEGACY_MAC_LABEL}" >/dev/null 2>&1 || true
-  rm -f "$LEGACY_MAC_PLIST" 2>/dev/null || true
-  if [ -w "$(dirname "$LEGACY_MAC_CLI")" ]; then
-    rm -f "$LEGACY_MAC_CLI" 2>/dev/null || true
-  fi
-
-  # Windows (Git Bash): old HKCU Run value and shims, and a running old HUD.
-  case "$(uname -s 2>/dev/null || echo unknown)" in
-    MINGW*|MSYS*|CYGWIN*)
-      taskkill //F //IM syspeek.exe >/dev/null 2>&1 || true
-      reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" \
-        /v Syspeek /f >/dev/null 2>&1 || true
-      if [ -n "${shimDirUnix:-}" ]; then
-        rm -f "$shimDirUnix/syspeek.cmd" "$shimDirUnix/syspeek" 2>/dev/null || true
-      fi
-      ;;
-  esac
-}
-
 do_uninstall() {
-  remove_legacy_brand
   if command -v systemctl >/dev/null 2>&1; then
     systemctl --user disable --now crowsnest.service 2>/dev/null || true
   fi
@@ -684,7 +640,6 @@ do_uninstall() {
 }
 
 linux_install() {
-  remove_legacy_brand
   command -v tar >/dev/null 2>&1 || die "tar is required"
 
   arch="$(uname -m 2>/dev/null || echo unknown)"

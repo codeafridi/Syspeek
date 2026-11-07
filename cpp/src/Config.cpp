@@ -4,7 +4,6 @@
 #include "WallpaperArt.h"
 
 #include <QDateTime>
-#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcessEnvironment>
@@ -900,54 +899,16 @@ void saveThemeAccent(const QString &path, const QString &accent) {
 
 namespace {
 
-// The rename must not lose a user's settings. The new variable wins; the old
-// one is still read so an existing shell profile keeps working.
-QString envOrLegacy(const char *name, const char *legacy) {
-    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    const QString value = env.value(QLatin1String(name));
-    if (!value.isEmpty()) {
-        return value;
-    }
-    return env.value(QLatin1String(legacy));
-}
-
-// Old paths are the new path with the brand swapped back. Both spellings are
-// tried because the Linux path was lowercase and the app-bundle paths were
-// capitalised.
-QStringList legacyPathsFor(const QString &newPath) {
-    QStringList out;
-    QString capital = newPath;
-    capital.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
-    capital.replace(QStringLiteral("Crowsnest"), QStringLiteral("Syspeek"));
-    out.append(capital);
-    QString lower = newPath;
-    lower.replace(QStringLiteral("dev.crowsnest"), QStringLiteral("dev.syspeek"));
-    lower.replace(QStringLiteral("crowsnest"), QStringLiteral("syspeek"));
-    if (!out.contains(lower)) {
-        out.append(lower);
-    }
-    return out;
-}
-
-void migrateLegacyFile(const QString &newPath) {
-    if (QFile::exists(newPath)) {
-        return;
-    }
-    for (const QString &old : legacyPathsFor(newPath)) {
-        if (old == newPath || !QFile::exists(old)) {
-            continue;
-        }
-        QDir().mkpath(QFileInfo(newPath).absolutePath());
-        if (QFile::copy(old, newPath)) {
-            return;
-        }
-    }
+// One place reads the environment override, so both paths cannot quietly
+// disagree about which variable wins.
+QString envOverride(const char *name) {
+    return QProcessEnvironment::systemEnvironment().value(QLatin1String(name));
 }
 
 } // namespace
 
 QString defaultConfigPath() {
-    const QString override = envOrLegacy("CROWSNEST_CONFIG", "SYSPEEK_CONFIG");
+    const QString override = envOverride("CROWSNEST_CONFIG");
     if (!override.isEmpty()) {
         return override;
     }
@@ -964,13 +925,11 @@ QString defaultConfigPath() {
                              QStandardPaths::AppDataLocation)
         + QStringLiteral("/config.ini");
 #endif
-    migrateLegacyFile(path);
     return path;
 }
 
 QString defaultCloudRatePath() {
-    const QString override = envOrLegacy("CROWSNEST_CLOUD_RATES",
-                                         "SYSPEEK_CLOUD_RATES");
+    const QString override = envOverride("CROWSNEST_CLOUD_RATES");
     if (!override.isEmpty()) {
         return override;
     }
@@ -987,6 +946,5 @@ QString defaultCloudRatePath() {
                              QStandardPaths::AppDataLocation)
         + QStringLiteral("/cloud-rates.txt");
 #endif
-    migrateLegacyFile(path);
     return path;
 }

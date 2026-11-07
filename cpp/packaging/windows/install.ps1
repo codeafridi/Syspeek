@@ -62,20 +62,6 @@ $AppDir = Join-Path $env:LOCALAPPDATA 'Crowsnest'
 $ShimDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
 $Exe = Join-Path $AppDir 'crowsnest.exe'
 
-function Remove-LegacyBrand {
-    # The previous brand: stop it, drop its login autostart, remove its shims.
-    # User config lives in AppData and is migrated by the app on first start.
-    Get-Process -Name syspeek -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Syspeek' -ErrorAction SilentlyContinue
-    foreach ($legacy in @('syspeek.cmd', 'syspeek')) {
-        $path = Join-Path $ShimDir $legacy
-        if (Test-Path $path) { Remove-Item -Force $path -ErrorAction SilentlyContinue }
-    }
-}
-
-Remove-LegacyBrand
-
 if ($Uninstall) {
     if (Test-Path $Exe) {
         & $Exe --autostart=off 2>$null | Out-Null
@@ -87,7 +73,6 @@ if ($Uninstall) {
     $shimPosix = Join-Path $ShimDir 'crowsnest'
     if (Test-Path $shim) { Remove-Item -Force $shim }
     if (Test-Path $shimPosix) { Remove-Item -Force $shimPosix }
-    Remove-LegacyBrand
     Info 'Crowsnest uninstalled (Windows).'
     return
 }

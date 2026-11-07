@@ -340,17 +340,6 @@ if(APPLE)
             "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Info.plist.in")
 endif()
 
-if(UNIX AND NOT APPLE)
-    # The executable was named after the old brand, and a checkout keeps the
-    # habit that goes with it. A symlink in the build tree keeps
-    # `./cpp/build/syspeek` launching this same renamed binary.
-    add_custom_command(TARGET crowsnest POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-            $<TARGET_FILE_NAME:crowsnest>
-            $<TARGET_FILE_DIR:crowsnest>/syspeek
-        VERBATIM)
-endif()
-
 enable_testing()
 
 add_executable(crowsnest_tests tests/test_hud_buttons.cpp)
