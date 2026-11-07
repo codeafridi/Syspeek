@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo-256.png" width="128" height="128" alt="Crowsnest" />
+
 # Crowsnest
 
 ### A local-first HUD that follows the app you're focused on — and a 33-view Datadog-style console for everything your kernel, containers and apps are doing.
