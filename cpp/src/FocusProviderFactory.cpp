@@ -1,6 +1,7 @@
 #include "FocusProviderFactory.h"
 
 #include "CachingFocusProvider.h"
+#include "ChainFocusProvider.h"
 #include "GnomePidFileProvider.h"
 #include "HyprctlFocusProvider.h"
 #include "KdeFocusProvider.h"
@@ -49,6 +50,11 @@ FocusProviderKind selectProviderKind(const SessionInfo &info) {
         }
         if (info.hasNiriSocket) {
             return FocusProviderKind::Niri;
+        }
+        // Wayland compositors not named above still run XWayland when a
+        // DISPLAY exists; the native provider then tracks X11 windows.
+        if (info.hasDisplay) {
+            return FocusProviderKind::X11;
         }
         return FocusProviderKind::Null;
     }
@@ -108,8 +114,27 @@ std::unique_ptr<FocusedWindowProvider> createFocusProvider(const Config &config)
 
     switch (selectProviderKind(info)) {
     case FocusProviderKind::Gnome:
+#if defined(CROWSNEST_X11)
+        if (info.hasDisplay) {
+            // Wayland on GNOME: the shell bridge is primary, and an
+            // XWayland window still answers through the same DISPLAY
+            // while the bridge is missing or not loaded until relogin.
+            return std::make_unique<ChainFocusProvider>(
+                std::make_unique<GnomePidFileProvider>(),
+                std::make_unique<X11FocusProvider>());
+        }
+#endif
         return std::make_unique<GnomePidFileProvider>();
     case FocusProviderKind::Kde:
+#if defined(CROWSNEST_X11)
+        if (info.hasDisplay) {
+            // Same shadow for Plasma: its in-process bridge state can
+            // sit empty (service not installed) while XWayland is live.
+            return std::make_unique<ChainFocusProvider>(
+                std::make_unique<KdeFocusProvider>(),
+                std::make_unique<X11FocusProvider>());
+        }
+#endif
         return std::make_unique<KdeFocusProvider>();
     case FocusProviderKind::Hyprland:
         return std::make_unique<CachingFocusProvider>(

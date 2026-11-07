@@ -18,4 +18,5 @@ public:
 private:
     SystemBackend &m_backend;
     QString m_path;
+    int readPidFile(const QString &path) const;
 };

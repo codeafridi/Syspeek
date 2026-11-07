@@ -21,9 +21,11 @@ FocusSample FocusSampler::sample() const {
         return result;
     }
 
-    result.providerName = m_provider->name();
-
     const int pid = m_provider->focusedPid();
+
+    // Name AFTER the pid read: a chain provider names the one that
+    // produced this sample, not last tick's winner.
+    result.providerName = m_provider->name();
 #if defined(Q_OS_WIN)
     const int self = static_cast<int>(::_getpid());
 #else

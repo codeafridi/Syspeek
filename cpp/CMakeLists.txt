@@ -77,6 +77,8 @@ add_library(crowsnest_core STATIC
     src/HealthEvaluator.h
     src/NullFocusProvider.cpp
     src/NullFocusProvider.h
+    src/ChainFocusProvider.cpp
+    src/ChainFocusProvider.h
     src/X11FocusProvider.cpp
     src/X11FocusProvider.h
     src/HyprctlFocusProvider.cpp

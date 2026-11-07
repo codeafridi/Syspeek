@@ -6,6 +6,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 
 #include <signal.h>
@@ -98,6 +99,23 @@ int main(int argc, char *argv[]) {
 
     GnomePidFileProvider emptyPathProvider{QString()};
     check(emptyPathProvider.focusedPid() == -1, "empty path -> -1");
+
+    QTemporaryDir legacyDir;
+    if (legacyDir.isValid()) {
+        QFile legacyFile(
+            legacyDir.filePath(QStringLiteral("syspeek-active-pid")));
+        if (legacyFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            legacyFile.write(QByteArray::number(self));
+            legacyFile.write("\n");
+            legacyFile.flush();
+            GnomePidFileProvider legacyProvider(
+                legacyDir.filePath(QStringLiteral("crowsnest-active-pid")));
+            check(legacyProvider.focusedPid() == self,
+                  "legacy bridge filename still answers");
+        } else {
+            check(false, "legacy pid file wrote");
+        }
+    }
 
     const int live = spawnSleeper();
     check(live > 0 && linuxproc::exists(live), "spawned a live external process");

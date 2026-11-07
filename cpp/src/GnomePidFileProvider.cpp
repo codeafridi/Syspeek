@@ -1,6 +1,5 @@
 #include "GnomePidFileProvider.h"
 
-
 #include <QFile>
 #include <QProcessEnvironment>
 
@@ -13,12 +12,8 @@ QString GnomePidFileProvider::name() const {
     return QStringLiteral("gnome-pidfile");
 }
 
-int GnomePidFileProvider::focusedPid() const {
-    if (m_path.isEmpty()) {
-        return -1;
-    }
-
-    QFile file(m_path);
+int GnomePidFileProvider::readPidFile(const QString &path) const {
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return -1;
     }
@@ -34,6 +29,27 @@ int GnomePidFileProvider::focusedPid() const {
     }
 
     return pid;
+}
+
+int GnomePidFileProvider::focusedPid() const {
+    if (m_path.isEmpty()) {
+        return -1;
+    }
+
+    const int pid = readPidFile(m_path);
+    if (pid > 0) {
+        return pid;
+    }
+
+    // Legacy bridge filename from the pre-rename branding: sessions that
+    // installed the old extension still write under the old name until
+    // the new one loads.
+    const int slash = m_path.lastIndexOf(QLatin1Char('/'));
+    if (slash < 0) {
+        return -1;
+    }
+    return readPidFile(m_path.left(slash + 1)
+                       + QStringLiteral("syspeek-active-pid"));
 }
 
 QString GnomePidFileProvider::defaultPath() {

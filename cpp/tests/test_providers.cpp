@@ -1,5 +1,6 @@
 #include "FocusProviderFactory.h"
 #include "CachingFocusProvider.h"
+#include "ChainFocusProvider.h"
 #include "FocusedWindowProvider.h"
 #include "HyprctlFocusProvider.h"
 #include "KdeFocusProvider.h"
@@ -23,6 +24,23 @@ public:
     int focusedPid() const override { return pid; }
 
     int pid = -1;
+};
+
+class NamedProvider : public FocusedWindowProvider {
+public:
+    NamedProvider(const char *name, int pid)
+        : m_name(QString::fromUtf8(name))
+        , m_pid(pid) {
+    }
+
+    QString name() const override { return m_name; }
+    int focusedPid() const override { return m_pid; }
+
+    void setPid(int pid) { m_pid = pid; }
+
+private:
+    QString m_name;
+    int m_pid = -1;
 };
 
 } // namespace
@@ -80,6 +98,9 @@ int main(int argc, char *argv[]) {
     check(selectProviderKind(makeInfo("wayland", "", false))
               == FocusProviderKind::Null,
           "wayland+unknown -> Null");
+    check(selectProviderKind(makeInfo("wayland", "", true))
+              == FocusProviderKind::X11,
+          "wayland+unknown+display -> X11 (XWayland)");
     check(selectProviderKind(makeInfo("x11", "ubuntu:GNOME", true))
               == FocusProviderKind::X11,
           "x11 -> X11");
@@ -87,6 +108,41 @@ int main(int argc, char *argv[]) {
           "empty session + display -> X11");
     check(selectProviderKind(makeInfo("", "", false)) == FocusProviderKind::Null,
           "empty session + no display -> Null");
+
+    // ChainFocusProvider: first live provider answers and names itself;
+    // the name sticks to the last one that produced a pid.
+    {
+        ChainFocusProvider chain(std::make_unique<NamedProvider>("one", 1234),
+                                 std::make_unique<NamedProvider>("two", 5678));
+        check(chain.focusedPid() == 1234
+                  && chain.name() == QStringLiteral("one"),
+              "chain primary answers and names itself");
+    }
+    {
+        ChainFocusProvider chain(std::make_unique<NamedProvider>("one", -1),
+                                 std::make_unique<NamedProvider>("two", 5678));
+        check(chain.focusedPid() == 5678
+                  && chain.name() == QStringLiteral("two"),
+              "chain falls back and names the fallback");
+    }
+    {
+        ChainFocusProvider chain(std::make_unique<NamedProvider>("one", -1),
+                                 std::make_unique<NamedProvider>("two", -1));
+        check(chain.focusedPid() == -1
+                  && chain.name() == QStringLiteral("one"),
+              "chain with no answer keeps the primary's name");
+    }
+    {
+        auto primary = std::make_unique<NamedProvider>("one", -1);
+        auto fallback = std::make_unique<NamedProvider>("two", 5678);
+        NamedProvider *fallbackRaw = fallback.get();
+        ChainFocusProvider chain(std::move(primary), std::move(fallback));
+        check(chain.focusedPid() == 5678, "chain fallback answered");
+        fallbackRaw->setPid(-1);
+        check(chain.focusedPid() == -1
+                  && chain.name() == QStringLiteral("two"),
+              "chain keeps naming the last provider that answered");
+    }
 
     check(focusProviderKindName(FocusProviderKind::Gnome)
               == QStringLiteral("gnome-pidfile"),
