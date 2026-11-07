@@ -245,7 +245,6 @@ latest_version_tag() { # echoes v0.8.0 (releases/latest redirects to /releases/t
 # ---------------------------------------------------------------- macOS ----
 
 mac_install() {
-  remove_legacy_brand
   command -v hdiutil >/dev/null 2>&1 || die "hdiutil is required (macOS only)"
   if [ -n "${CROWSNEST_DMG_URL:-}" ]; then
     dmg_url="$CROWSNEST_DMG_URL"
@@ -411,7 +410,6 @@ win_install() {
 
   shimDirUnix="$(dirname "$appdir")/Microsoft/WindowsApps"
   shimDirWin="$(cygpath -w "$shimDirUnix")"
-  remove_legacy_brand
   mkdir -p "$shimDirUnix" 2>/dev/null || true
   printf '@echo off\r\nif "%%~1"=="" (\r\n  start "" /b "%%LOCALAPPDATA%%\\Crowsnest\\crowsnest.exe"\r\n  exit /b 0\r\n)\r\n"%%LOCALAPPDATA%%\\Crowsnest\\crowsnest.exe" %%*\r\n' \
     > "$shimDirUnix/crowsnest.cmd" 2>/dev/null || true
