@@ -1,45 +1,10 @@
-<!-- Crowsnest mark. Crow silhouette: "Crow standing" by Peileppe / Openclipart,
-     CC0 1.0 (publicdomainvectors.org id 8545). Nest and badge drawn for this project. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Crowsnest">
-  <title>Crowsnest</title>
-  <rect width="512" height="512" rx="104" fill="#0a0e14"/>
-  <path d="M86 356 C86 442 158 480 256 480 C354 480 426 442 426 356 C348 408 164 408 86 356 Z" fill="#1e3247"/>
-    <clipPath id="bowl"><path d="M86 356 C86 442 158 480 256 480 C354 480 426 442 426 356 C348 408 164 408 86 356 Z"/></clipPath>
-    <g clip-path="url(#bowl)">
-    <path d="M148 390 Q259 383 357 388" fill="none" stroke="#6f90b8" stroke-width="10" stroke-linecap="round"/>
-    <path d="M106 360 Q250 353 389 364" fill="none" stroke="#6f90b8" stroke-width="10" stroke-linecap="round"/>
-    <path d="M221 422 Q220 409 279 418" fill="none" stroke="#8fb0d2" stroke-width="12" stroke-linecap="round"/>
-    <path d="M180 400 Q271 387 336 395" fill="none" stroke="#8fb0d2" stroke-width="12" stroke-linecap="round"/>
-    <path d="M127 366 Q256 353 395 367" fill="none" stroke="#4d6d90" stroke-width="14" stroke-linecap="round"/>
-    <path d="M208 417 Q272 401 295 414" fill="none" stroke="#4d6d90" stroke-width="14" stroke-linecap="round"/>
-    <path d="M271 447 Q225 429 241 446" fill="none" stroke="#4d6d90" stroke-width="10" stroke-linecap="round"/>
-    <path d="M271 453 Q261 446 255 457" fill="none" stroke="#4d6d90" stroke-width="12" stroke-linecap="round"/>
-    <path d="M233 428 Q283 417 285 434" fill="none" stroke="#6f90b8" stroke-width="9" stroke-linecap="round"/>
-    <path d="M119 362 Q282 344 405 360" fill="none" stroke="#6f90b8" stroke-width="12" stroke-linecap="round"/>
-    <path d="M104 358 Q221 351 395 362" fill="none" stroke="#8fb0d2" stroke-width="10" stroke-linecap="round"/>
-    <path d="M190 397 Q248 389 337 395" fill="none" stroke="#8fb0d2" stroke-width="14" stroke-linecap="round"/>
-    <path d="M253 446 Q287 436 248 451" fill="none" stroke="#8fb0d2" stroke-width="9" stroke-linecap="round"/>
-    <path d="M124 374 Q263 363 369 371" fill="none" stroke="#6f90b8" stroke-width="10" stroke-linecap="round"/>
-    <path d="M174 400 Q271 382 336 400" fill="none" stroke="#6f90b8" stroke-width="14" stroke-linecap="round"/>
-    <path d="M277 450 Q247 434 258 448" fill="none" stroke="#6f90b8" stroke-width="14" stroke-linecap="round"/>
-    </g>
-    <path d="M108 352 L64 328" fill="none" stroke="#8fb0d2" stroke-width="10" stroke-linecap="round"/>
-    <path d="M110 366 L62 358" fill="none" stroke="#6f90b8" stroke-width="9" stroke-linecap="round"/>
-    <path d="M404 352 L448 328" fill="none" stroke="#8fb0d2" stroke-width="10" stroke-linecap="round"/>
-    <path d="M402 366 L450 358" fill="none" stroke="#6f90b8" stroke-width="9" stroke-linecap="round"/>
-    <path d="M136 414 L100 428" fill="none" stroke="#6f90b8" stroke-width="9" stroke-linecap="round"/>
-    <path d="M376 414 L412 428" fill="none" stroke="#6f90b8" stroke-width="9" stroke-linecap="round"/>
-    <path d="M158 448 L130 468" fill="none" stroke="#4d6d90" stroke-width="8" stroke-linecap="round"/>
-    <path d="M354 448 L382 468" fill="none" stroke="#4d6d90" stroke-width="8" stroke-linecap="round"/>
-    <path d="M86 356 C164 408 348 408 426 356" fill="none" stroke="#6f90b8" stroke-width="14" stroke-linecap="round"/>
-  <g transform="translate(512,0) scale(-1,1)">
-    <g transform="translate(114.5 28) scale(1.08)">
-      <path d="m254.95 326.72c-1.16-0.47-3.05-2.46-4.22-4.44-2.53-4.28-6.7-4.9-9.78-1.44-5 5.62-15.96 7.36-26.14 4.15-6.81-2.15-8.46-4.03-20.58-23.4-7.33-11.72-11.14-16.74-15.96-21.02-4-3.57-7.51-7.88-9.58-11.75-3.5-6.57-5.13-7.41-7.59-3.9-1.84 2.63-2 6.7-0.41 10.2 0.89 1.94 0.86 2.87-0.12 4.05-1.04 1.25-4.13 1.52-17.4 1.51-8.87-0.01-16.79-0.44-17.61-0.95-1.24-0.79-1.03-1.41 1.31-3.85 2.34-2.45 3.83-3 9.44-3.53 6.6-0.61 6.7-0.67 13.44-7.36 7.36-7.3 8.71-11.25 5-14.61-2.59-2.35-28.87-13.68-31.71-13.68-1.68 0-3.31 1.27-5.42 4.25-4.37 6.14-6.36 8.3-8.93 9.67-3.56 1.91-10.143 12.8-10.143 16.8 0 4.69 1.593 7.28 4.503 7.28 2.38 0 5.33 3.5 4.03 4.79-0.83 0.84-36.613 1.39-38.533 0.6-1.845-0.76 4.165-3.2 8.168-3.32 4.37-0.12 5.81-1.11 7.975-5.45 1.132-2.27 4.675-6.82 7.873-10.12 6.447-6.66 9.987-12.32 9.987-15.98 0-3.91-6.846-16.52-12.744-23.48-3.007-3.54-9.237-12.18-13.846-19.18s-8.848-13.01-9.419-13.37c-1.854-1.14-6.613-11.77-9.4-20.99-1.497-4.95-4.042-12.6-5.658-17-3.39-9.24-6.219-18.66-7.963-26.5-0.673-3.03-1.621-6.82-2.107-8.43-2.674-8.84-1.965-22.171 1.592-29.964 2.017-4.417 4.299-14.977 4.918-22.749 0.454-5.719 0.257-6.883-1.424-8.405-1.074-0.971-1.952-2.302-1.952-2.958 0-0.655-0.694-2.582-1.543-4.283-2.494-5-8.481-7.578-23.458-10.102-7.381-1.244-14.955-2.903-16.832-3.688-2.9277-1.223-3.2286-1.647-2.1195-2.983 3.0178-3.636 15.462-9.114 24.952-10.985 7.837-1.544 12.516-3.803 16.617-8.024 2.33-2.3969 5.507-4.6484 7.06-5.0032 1.553-0.3549 6.649-1.9148 11.324-3.4666 11.035-3.6627 16.594-4.4119 22.071-2.9742 6.712 1.7621 20.692 11.449 26.182 18.149 2.62 3.188 9.01 9.431 14.2 13.872 9.19 7.865 14.53 14.045 17.98 20.812 1.24 2.424 3.37 4.114 7.88 6.249 3.4 1.61 6.86 2.932 7.69 2.937 2.68 0.019 11.61 5.761 16.38 10.533 9.45 9.453 20 27.433 26.07 44.423 1.46 4.11 3.01 7.93 3.45 8.5 1.05 1.39 2.86 8.87 3.62 15.04 0.34 2.75 1.46 7.47 2.49 10.5 1.02 3.02 3.06 10.9 4.53 17.5s3.74 15.51 5.06 19.81c1.32 4.29 2.4 8.8 2.4 10.02 0 3.5 6.73 25.98 9.79 32.67 1.13 2.47 3.7 9.4 5.71 15.38 2.11 6.3 5.65 14.1 8.39 18.5 2.61 4.19 5.68 9.64 6.81 12.12 3.41 7.4 7.3 16.22 7.3 16.55 0 0.17-1.02 0.45-2.25 0.63-1.99 0.28-2.22 0.8-1.94 4.57 0.18 2.34 1.88 7.62 3.78 11.73 4.19 9.08 5.08 13 3.41 15.01-1.38 1.66-3.41 1.82-6.6 0.53z" fill="#eef3fb"/>
-    </g>
-  </g>
-  <circle cx="295" cy="93" r="9" fill="#e2a63d"/>
-  <circle cx="295" cy="93" r="4" fill="#0a0e14"/>
-  <path d="M86 356 C164 418 348 418 426 356" fill="none" stroke="#6f90b8" stroke-width="14" stroke-linecap="round"/>
-    <path d="M110 398 C186 448 326 448 402 398" fill="none" stroke="#8fb0d2" stroke-width="11" stroke-linecap="round"/>
-    <path d="M148 436 C206 472 306 472 364 436" fill="none" stroke="#4d6d90" stroke-width="10" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#131314"/>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="none" stroke="#2a2a2e" stroke-width="4"/>
+  <rect x="52" y="78" width="152" height="88" rx="14" fill="#1c1c1e" stroke="#3a3a40" stroke-width="4"/>
+  <rect x="70" y="96" width="60" height="10" rx="5" fill="#7c8086"/>
+  <rect x="70" y="116" width="116" height="10" rx="5" fill="#d9a441"/>
+  <rect x="70" y="136" width="84" height="10" rx="5" fill="#79ffb0"/>
+  <rect x="110" y="166" width="36" height="12" fill="#3a3a40"/>
+  <rect x="88" y="178" width="80" height="10" rx="5" fill="#2a2a2e"/>
 </svg>
